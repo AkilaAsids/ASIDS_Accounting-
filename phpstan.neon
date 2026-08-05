@@ -1,0 +1,27 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 8
+
+    paths:
+        - app
+        - src
+        - database
+        - routes
+        - tests
+
+    excludePaths:
+        - database/migrations/*_create_extensions_and_roles.php
+
+    checkMissingIterableValueType: true
+    checkGenericClassInNonGenericObjectType: true
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: true
+
+    ignoreErrors:
+        # Eloquent's static builder proxies are modelled loosely by Larastan for
+        # traits that add global scopes at runtime.
+        -
+            identifier: staticMethod.notFound
+            path: src/*/Domain/Models/*.php

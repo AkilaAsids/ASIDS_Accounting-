@@ -1,0 +1,220 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'release/**']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PHP_VERSION: '8.4'
+  NODE_VERSION: '22'
+
+jobs:
+  # ── Static analysis of the PHP codebase ─────────────────────────────────────
+  static-analysis:
+    name: PHP static analysis
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: bcmath, intl, pdo_pgsql, pgsql, redis, zip, gd
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer/files
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Check formatting (Pint)
+        run: vendor/bin/pint --test
+
+      - name: Static analysis (PHPStan level 8)
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=2G
+
+  # ── PHP test suite against a real PostgreSQL and Redis ──────────────────────
+  php-tests:
+    name: Pest (PHP ${{ matrix.php }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4']
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: asids_erp_testing
+          POSTGRES_USER: asids_owner
+          POSTGRES_PASSWORD: secret
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U asids_owner"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+      redis:
+        image: redis:7.4
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: bcmath, intl, pdo_pgsql, pgsql, redis, zip, gd, pcntl
+          coverage: pcov
+          ini-values: pcov.directory=., memory_limit=1G
+          tools: composer:v2
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer/files
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Provision the RLS-enforced application role
+        # Mirrors docker/postgres/init/01-bootstrap.sh so that the tenant
+        # isolation tests exercise real row level security in CI.
+        env:
+          PGPASSWORD: secret
+        run: |
+          psql -h 127.0.0.1 -U asids_owner -d asids_erp_testing -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS citext;
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
+            CREATE EXTENSION IF NOT EXISTS unaccent;
+            CREATE EXTENSION IF NOT EXISTS btree_gin;
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'asids_app') THEN
+                CREATE ROLE asids_app LOGIN PASSWORD 'secret';
+              END IF;
+            END $$;
+            ALTER ROLE asids_app NOSUPERUSER NOBYPASSRLS;
+            GRANT USAGE, CREATE ON SCHEMA public TO asids_app;
+            ALTER DEFAULT PRIVILEGES FOR ROLE asids_owner IN SCHEMA public
+              GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO asids_app;
+          SQL
+
+      - name: Run migrations
+        env:
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: asids_erp_testing
+          DB_USERNAME: asids_owner
+          DB_PASSWORD: secret
+          DB_ADMIN_USERNAME: asids_owner
+          DB_ADMIN_PASSWORD: secret
+        run: php artisan migrate --force --no-interaction
+
+      - name: Run Pest with coverage gate
+        env:
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: asids_erp_testing
+          DB_USERNAME: asids_owner
+          DB_PASSWORD: secret
+          DB_ADMIN_USERNAME: asids_owner
+          DB_ADMIN_PASSWORD: secret
+          REDIS_HOST: 127.0.0.1
+          TENANCY_ENFORCE_RLS: 'true'
+        run: vendor/bin/pest --coverage --min=85 --ci
+
+  # ── Front-end type checking, linting, unit tests and production build ───────
+  frontend:
+    name: Front-end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:coverage
+
+      - name: Production build
+        run: npm run build
+
+  # ── Dependency and secret hygiene ───────────────────────────────────────────
+  security:
+    name: Security audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Composer advisory audit
+        run: composer audit --no-interaction --abandoned=report
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: npm advisory audit
+        run: npm audit --audit-level=high
+
+      - name: Verify no environment file was committed
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo '::error::.env must never be committed.'
+            exit 1
+          fi
+
+  # ── Single required status check ─────────────────────────────────────────────
+  ci:
+    name: CI
+    runs-on: ubuntu-24.04
+    needs: [static-analysis, php-tests, frontend, security]
+    if: always()
+    steps:
+      - name: Fail if any upstream job failed
+        run: |
+          if [ '${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}' = 'true' ]; then
+            exit 1
+          fi
