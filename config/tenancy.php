@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Asids\Core\Authorization\Infrastructure\Bootstrappers\PermissionTeamBootstrapper;
 use Asids\Core\Tenancy\Domain\Models\Domain;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Asids\Core\Tenancy\Infrastructure\Bootstrappers\CacheTagBootstrapper;
@@ -53,7 +54,10 @@ return [
     */
     'bootstrappers' => [
         RowLevelSecurityBootstrapper::class,
+        // Must precede PermissionTeamBootstrapper: the permission cache key has to be
+        // tenant-prefixed before the registrar is asked for this tenant's roles.
         CacheTagBootstrapper::class,
+        PermissionTeamBootstrapper::class,
         FilesystemBootstrapper::class,
         QueueBootstrapper::class,
     ],

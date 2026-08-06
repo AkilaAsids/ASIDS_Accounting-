@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06
+**Last updated:** 2026-08-06 (Authorization workstream complete)
 **State:** In progress. The tree does **not** yet install, boot or pass tests — see
 "Not yet written" below. Nothing in this repository has been executed.
 
@@ -98,9 +98,22 @@ restriction), seven domain exceptions, `CreateUserData`, `PasswordPolicyService`
 recovery-code consumption), `DeviceService`, `AuthenticationService` (two-step sign-in
 with cache-backed challenge, timing equalisation, account lockout).
 
+### Authorization module — complete
+`Permission` and `Role` models, `HasTenantRoles` (memoised `isTenantOwner()`,
+`highestRoleLevel()`, `canGrantRole()`), `PermissionDefinition` +
+`PermissionCatalogue` (44 capabilities across 6 modules), `RoleTemplate` (5 system
+roles), `PermissionSynchroniser`, `RoleProvisioner` (provision + release-time
+refresh), `RoleService` (level ordering, owner protection, last-owner protection,
+platform-capability refusal, ownership transfer), `PermissionTeamBootstrapper`
+(the spatie teams wiring), 5 domain exceptions, 2 domain events, `RolePolicy`,
+`PermissionPolicy`, `EnsurePasswordIsNotExpired`, `RoleController`,
+`PermissionController`, 3 form requests, 2 resources,
+`asids:sync-permissions` command, `AuthorizationServiceProvider`.
+
 ### Documentation
 ADR 0001 (tenancy strategy), ADR 0002 (tenant/company/branch hierarchy),
-ADR 0004 (minimal config surface), ADR 0005 (provisioning ownership), this file.
+ADR 0003 (permissions in code, roles in data), ADR 0004 (minimal config surface),
+ADR 0005 (provisioning ownership), README, this file.
 
 ---
 
@@ -119,15 +132,6 @@ will succeed but the application will not boot until they exist.
 - Form requests and resources for each of the above
 - `EnsureTwoFactorIsConfirmed` middleware — referenced by `bootstrap/app.php`
 - `UserPolicy`; domain events + listeners; `IdentityServiceProvider`
-
-### Authorization — not started
-- `Role`, `Permission` models; `HasTenantRoles` trait (provides `isTenantOwner()`,
-  referenced by `User` and `AuthServiceProvider`)
-- `PermissionCatalogue` (the code-defined capability list), `RoleProvisioner`
-  (referenced by `TenantProvisioningService`), `RoleService`
-- `RoleController`, `PermissionController`, requests, resources, `RolePolicy`
-- `EnsurePasswordIsNotExpired` middleware — referenced by `bootstrap/app.php`
-- `AuthorizationServiceProvider`
 
 ### Organization — models/services not started
 Migrations are complete. Still needed: `Company`, `Branch`, `CompanyMembership` models;
@@ -192,7 +196,7 @@ docker compose up -d postgres redis && php artisan migrate --seed
 
 ## Suggested order for the next session
 
-1. `Authorization` module (unblocks `User::isTenantOwner()` and the owner gate).
+1. ~~`Authorization` module~~ — done.
 2. `Organization` models + `CompanyService` (unblocks provisioning).
 3. `UserService` + Identity HTTP layer (completes the sign-in path end to end).
 4. `Audit` + `Settings` (both are leaf modules; nothing depends on them).
