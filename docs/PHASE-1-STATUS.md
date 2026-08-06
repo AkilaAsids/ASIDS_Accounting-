@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (Authorization workstream complete)
+**Last updated:** 2026-08-06 (Authorization + Organization workstreams complete)
 **State:** In progress. The tree does **not** yet install, boot or pass tests — see
 "Not yet written" below. Nothing in this repository has been executed.
 
@@ -110,6 +110,17 @@ platform-capability refusal, ownership transfer), `PermissionTeamBootstrapper`
 `PermissionController`, 3 form requests, 2 resources,
 `asids:sync-permissions` command, `AuthorizationServiceProvider`.
 
+### Organization module — complete
+`OrganizationStatus` enum, `Company` (fiscal-calendar arithmetic, membership-scoped
+`accessibleBy`), `Branch`, `CompanyMembership`, `LedgerActivityProbe` seam +
+`NoLedgerActivity`, `CreateCompanyData`, `CompanyService` (atomic company + primary
+branch + creator membership; currency/fiscal immutability; unique code/slug
+derivation), `BranchService` (single-active-primary invariant), `MembershipService`
+(reinstate-not-duplicate, default promotion on revoke), 5 domain exceptions,
+4 domain events, `ResolveActiveCompany` middleware, `CompanyPolicy`, `BranchPolicy`,
+`CompanyMembershipPolicy`, 3 controllers, 5 form requests, 3 resources,
+`OrganizationServiceProvider`.
+
 ### Documentation
 ADR 0001 (tenancy strategy), ADR 0002 (tenant/company/branch hierarchy),
 ADR 0003 (permissions in code, roles in data), ADR 0004 (minimal config surface),
@@ -132,13 +143,6 @@ will succeed but the application will not boot until they exist.
 - Form requests and resources for each of the above
 - `EnsureTwoFactorIsConfirmed` middleware — referenced by `bootstrap/app.php`
 - `UserPolicy`; domain events + listeners; `IdentityServiceProvider`
-
-### Organization — models/services not started
-Migrations are complete. Still needed: `Company`, `Branch`, `CompanyMembership` models;
-`CreateCompanyData`; `CompanyService` (referenced by `TenantProvisioningService`),
-`BranchService`, `MembershipService`; repositories; `ResolveActiveCompany` middleware
-(referenced by `bootstrap/app.php`); controllers, requests, resources, policies;
-`OrganizationServiceProvider`.
 
 ### Settings — not started
 `Setting` model, `SettingDefinition` + `SettingsRegistry` (code-defined catalogue),
@@ -197,8 +201,10 @@ docker compose up -d postgres redis && php artisan migrate --seed
 ## Suggested order for the next session
 
 1. ~~`Authorization` module~~ — done.
-2. `Organization` models + `CompanyService` (unblocks provisioning).
+2. ~~`Organization` models + `CompanyService`~~ — done.
 3. `UserService` + Identity HTTP layer (completes the sign-in path end to end).
+   This is now the **only** thing standing between the tree and a working
+   `php artisan migrate --seed` plus sign-in.
 4. `Audit` + `Settings` (both are leaf modules; nothing depends on them).
 5. Routes, seeders, factories — at which point `php artisan migrate --seed` should run.
 6. Test suite, then the Vue front end.
