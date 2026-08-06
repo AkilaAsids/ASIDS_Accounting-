@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (backend, front end and documentation complete; tests outstanding)
+**Last updated:** 2026-08-06 (all Phase 1 artefacts written; none executed)
 **State:** The backend is structurally complete — every internal class reference resolves
 and nothing is missing. It has still never been executed: no PHP, Composer, Node or
 Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
@@ -235,13 +235,22 @@ Node is absent too, so the front end has never been built or rendered.
 
 ## Remaining Phase 1 work
 
-- **Test suite** — `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant
-  isolation including a real RLS test, auth + lockout + 2FA, RBAC escalation refusal,
-  companies, memberships, settings resolution, audit chain integrity), unit tests, Vitest
+### Test suite — first tranche written
 
-This is the **only** remaining Phase 1 deliverable. It is deliberately last: a test suite
-nobody has seen pass is a guess about behaviour, so it should be written against a running
-toolchain, not added to the pile of unverified code.
+| File | Cases | Covers |
+| --- | --- | --- |
+| `tests/Pest.php` | — | `toBeProblem`, `toBeEnvelope`, `toNotLeak` expectations; `catchPlatformException` |
+| `tests/TestCase.php` | — | Permission catalogue synchronised per test via the real synchroniser; setup under an RLS bypass |
+| `tests/Support/InteractsWithTenants.php` | — | Workspaces built through the real provisioning services, not fabricated rows |
+| `Feature/Tenancy/TenantIsolationTest` | 19 | Read scoping, fail-closed behaviour, write guarding, escape hatches, cache isolation |
+| `Feature/Tenancy/RowLevelSecurityTest` | 11 | Raw SQL, `withoutGlobalScopes()`, raw insert/update/delete — **skips loudly** if policies are not in force |
+| `Feature/Authorization/PrivilegeEscalationTest` | 16 | Owner-role refusal, level ordering, last-owner protection, clamping, the owner short circuit |
+| `Feature/Identity/AuthenticationTest` | 16 | Identical answers for unknown vs wrong password, cross-workspace credential refusal, lockout, challenge issuance |
+| `Feature/Audit/AuditChainIntegrityTest` | 15 | Append-only trigger incl. TRUNCATE, sealing, idempotency, hash-mismatch vs broken-link detection, redaction |
+
+**77 test cases.** Still to write: Organization (company/branch invariants, membership),
+Settings (four-level resolution, scope refusal), the Identity HTTP surface end to end, unit
+tests for the services, and the Vitest suite for the front end.
 
 ## First things to check once PHP exists
 
