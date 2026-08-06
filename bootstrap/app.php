@@ -14,7 +14,6 @@ use Asids\Core\Tenancy\Presentation\Http\Middleware\ResolveTenant;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\TrustProxies;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
 
@@ -27,16 +26,11 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Trust the load balancer in front of the application so that HTTPS
-        // detection, client IP resolution and rate limiting stay correct.
-        $middleware->trustProxies(
-            at: config('asids.trusted_proxies'),
-            headers: TrustProxies::HEADER_X_FORWARDED_FOR
-                | TrustProxies::HEADER_X_FORWARDED_HOST
-                | TrustProxies::HEADER_X_FORWARDED_PORT
-                | TrustProxies::HEADER_X_FORWARDED_PROTO
-                | TrustProxies::HEADER_X_FORWARDED_AWS_ELB,
-        );
+        // NOTE: this closure runs when the kernel is resolved, which is *before* the
+        // config service is registered. `config()` is therefore unavailable here — it
+        // fails with "Target class [config] does not exist" and the application never
+        // boots. Trusted proxies are configured in AppServiceProvider::boot() instead,
+        // where config is loaded, via TrustProxies' static setters.
 
         // The SPA authenticates with Sanctum cookies; mobile and third-party
         // integrations authenticate with personal access tokens.

@@ -32,7 +32,9 @@
     </coverage>
     <php>
         <env name="APP_ENV" value="testing"/>
-        <env name="APP_KEY" value="base64:Zm9yLXRlc3Rpbmctb25seS1kby1ub3QtdXNlLWluLXByb2Q="/>
+        <!-- A real 256-bit key: the encrypter rejects anything else, and the audit
+             trail and 2FA secrets both go through it. -->
+        <env name="APP_KEY" value="base64:YXNpZHMtdGVzdGluZy1rZXktMzItYnl0ZXMtbG9uZyE="/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>

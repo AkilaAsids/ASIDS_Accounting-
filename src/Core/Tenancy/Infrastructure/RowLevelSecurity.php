@@ -58,37 +58,45 @@ final class RowLevelSecurity
 
     /**
      * Reports whether the policies are actually in force for the connecting role.
-     * Used by `asids:security-check` — a deployment where the application connects
-     * as the table owner has RLS silently disabled unless the tables are FORCED,
-     * and that is exactly the misconfiguration worth alarming on.
+     *
+     * Three independent conditions must all hold, and missing any one of them disables tenant
+     * isolation at the database with no error anywhere:
+     *
+     *   1. The role is not a SUPERUSER. **Superusers bypass row level security unconditionally,
+     *      even on a FORCED table** — this is the condition that is easiest to get wrong,
+     *      because a local or CI database commonly connects as one.
+     *   2. The role does not hold BYPASSRLS.
+     *   3. The table has RLS enabled, and either the role does not own it or it is FORCED.
+     *
+     * `asids:security-check` gates releases on this, so a false positive here is worse than no
+     * check at all.
      */
     public static function isEnforced(string $table = 'companies'): bool
     {
-        /** @var object{relrowsecurity: bool, relforcerowsecurity: bool}|null $row */
-        $row = DB::selectOne(
-            'SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = ?',
-            [$table]
+        /** @var object{is_superuser: bool, can_bypass: bool}|null $role */
+        $role = DB::selectOne(
+            'SELECT rolsuper AS is_superuser, rolbypassrls AS can_bypass
+             FROM pg_roles WHERE rolname = current_user'
         );
 
-        if ($row === null) {
+        if ($role === null || (bool) $role->is_superuser || (bool) $role->can_bypass) {
             return false;
         }
 
-        // Either the connecting role is not the owner (policies apply normally) or
-        // the table forces them even for its owner.
-        return (bool) $row->relrowsecurity
-            && ((bool) $row->relforcerowsecurity || ! self::connectedAsOwner($table));
-    }
-
-    private static function connectedAsOwner(string $table): bool
-    {
-        /** @var object{is_owner: bool}|null $row */
-        $row = DB::selectOne(
-            'SELECT pg_get_userbyid(relowner) = current_user AS is_owner FROM pg_class WHERE relname = ?',
+        /** @var object{enabled: bool, forced: bool, is_owner: bool}|null $relation */
+        $relation = DB::selectOne(
+            'SELECT relrowsecurity AS enabled,
+                    relforcerowsecurity AS forced,
+                    pg_get_userbyid(relowner) = current_user AS is_owner
+             FROM pg_class WHERE relname = ?',
             [$table]
         );
 
-        return (bool) ($row->is_owner ?? false);
+        if ($relation === null || ! (bool) $relation->enabled) {
+            return false;
+        }
+
+        return (bool) $relation->forced || ! (bool) $relation->is_owner;
     }
 
     private static function set(string $value): void

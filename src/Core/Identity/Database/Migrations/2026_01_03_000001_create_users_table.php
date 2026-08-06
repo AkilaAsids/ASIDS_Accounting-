@@ -24,7 +24,16 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('users', function (Blueprint $table): void {
-            $table->uuid('id')->primary();
+            $table->uuid('id');
+
+            // Declared as an explicit command rather than fluently as `->primary()`.
+            // Laravel converts fluent indexes to commands at *compile* time, appending them
+            // after commands added during declaration — which includes the foreign key from
+            // `invited_by_id`'s `constrained()` below. Because that key references this same
+            // table, PostgreSQL rejects it: the primary key it needs does not exist yet.
+            // Calling `primary()` here adds the command eagerly, in the right order.
+            $table->primary('id');
+
             $table->foreignUuid('tenant_id')
                 ->nullable()
                 ->constrained('tenants')

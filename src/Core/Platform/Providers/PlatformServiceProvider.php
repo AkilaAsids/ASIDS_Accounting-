@@ -9,6 +9,7 @@ use Asids\Core\Platform\Domain\Contracts\CompliancePackContract;
 use Asids\Core\Platform\Support\NullCompliancePack;
 use Asids\Core\Platform\Support\RequestContext;
 use Illuminate\Database\Connection;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Events\QueryExecuted;
@@ -44,6 +45,7 @@ final class PlatformServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureModels();
+        $this->configureFactoryResolution();
         $this->configureMorphMap();
         $this->configurePasswordDefaults();
         $this->configureQueryMonitoring();
@@ -76,6 +78,22 @@ final class PlatformServiceProvider extends ServiceProvider
                 ]);
             });
         }
+    }
+
+    /**
+     * Teaches Laravel where this codebase keeps its factories.
+     *
+     * The default guess assumes models live in `App\Models` and mirrors the whole namespace
+     * beneath `Database\Factories` — for `Asids\Core\Tenancy\Domain\Models\Tenant` it looks for
+     * `Database\Factories\Asids\Core\Tenancy\Domain\Models\TenantFactory`, which does not
+     * exist. Factories are flat in `database/factories`, so the class basename is all that
+     * matters.
+     */
+    private function configureFactoryResolution(): void
+    {
+        Factory::guessFactoryNamesUsing(
+            static fn (string $modelName): string => 'Database\\Factories\\'.class_basename($modelName).'Factory',
+        );
     }
 
     /**

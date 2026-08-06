@@ -8,7 +8,7 @@ use Asids\Core\Authorization\Domain\Catalogue\PermissionCatalogue;
 use Asids\Core\Authorization\Domain\Models\Permission;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
+
 use Spatie\Permission\PermissionRegistrar;
 
 /**
@@ -47,7 +47,10 @@ final readonly class PermissionSynchroniser
                 $current = $existing[$definition->name()] ?? null;
 
                 if ($current === null) {
-                    Permission::query()->create(['id' => (string) Str::uuid7(), ...$row]);
+                    // No explicit id: `HasUuids` generates a UUID v7 on create, and `id` is
+                    // deliberately not fillable — passing it would require opening mass
+                    // assignment on the primary key of the capability catalogue.
+                    Permission::query()->create($row);
                     $created++;
 
                     continue;

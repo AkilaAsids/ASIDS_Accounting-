@@ -130,10 +130,13 @@ describe('write guarding', function (): void {
         expect($company->tenant_id)->toBe($this->acme['tenant']->getKey());
     });
 
-    it('refuses to create a record belonging to another workspace', function (): void {
+    it('refuses mass assignment of another workspace’s tenant_id', function (): void {
         $this->withinTenant($this->acme['tenant']);
 
-        $exception = catchPlatformException(fn () => Company::query()->create([
+        // `tenant_id` is deliberately absent from Company's $fillable — BelongsToTenant stamps
+        // it — so mass assignment protection rejects this before the domain guard is reached.
+        // Two independent barriers, and this asserts the outer one.
+        expect(fn () => Company::query()->create([
             'tenant_id' => $this->globex['tenant']->getKey(),
             'name' => 'Smuggled Ltd',
             'code' => 'SMUG',
@@ -141,7 +144,26 @@ describe('write guarding', function (): void {
             'base_currency_code' => 'LKR',
             'country_code' => 'LK',
             'timezone' => 'Asia/Colombo',
-        ]));
+        ]))->toThrow(Illuminate\Database\Eloquent\MassAssignmentException::class);
+    });
+
+    it('refuses to create a record belonging to another workspace', function (): void {
+        $this->withinTenant($this->acme['tenant']);
+
+        // The realistic bypass: attributes set directly, past mass assignment protection.
+        $company = new Company();
+        $company->fill([
+            'name' => 'Smuggled Ltd',
+            'code' => 'SMUG',
+            'slug' => 'smuggled',
+            'base_currency_code' => 'LKR',
+            'country_code' => 'LK',
+            'timezone' => 'Asia/Colombo',
+        ]);
+        $company->status = Asids\Core\Organization\Domain\Enums\OrganizationStatus::Active;
+        $company->tenant_id = $this->globex['tenant']->getKey();
+
+        $exception = catchPlatformException(fn () => $company->save());
 
         expect($exception)->toBeInstanceOf(CrossTenantWriteAttempted::class)
             // The identifiers stay in the log, never in the response — telling a caller which
@@ -252,6 +274,17 @@ describe('escape hatches', function (): void {
 
 describe('cache isolation', function (): void {
     it('does not let one workspace read another’s cached value under the same key', function (): void {
+        // The `array` store ignores `cache.prefix` completely, so tenant prefixing is
+        // unobservable under it — the assertion would fail for a reason that has nothing to do
+        // with isolation. Skipped loudly rather than deleted, because the property is real and
+        // must be verified against the driver production actually uses.
+        if (config('cache.default') === 'array') {
+            test()->markTestSkipped(
+                'The array cache store does not honour cache.prefix. Run with CACHE_STORE=redis '
+                .'(or database) to exercise tenant cache isolation.'
+            );
+        }
+
         app(TenantContext::class)->runFor(
             $this->acme['tenant'],
             fn () => cache()->put('dashboard.totals', 'acme-figures', 60),
