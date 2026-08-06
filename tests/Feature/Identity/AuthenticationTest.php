@@ -26,9 +26,17 @@ beforeEach(function (): void {
     ]);
 });
 
-function signIn(array $payload): Illuminate\Testing\TestResponse
+/**
+ * Signs in against a named workspace.
+ *
+ * The `X-Tenant` header is not optional: `users` is tenant scoped, so a request arriving on the
+ * central domain resolves no workspace and the lookup correctly finds nobody. Omitting it does
+ * not weaken the test — it makes every sign-in fail with "incorrect credentials", which is the
+ * application behaving properly and the test asserting nothing.
+ */
+function signIn(array $payload, string $workspace = 'acme'): Illuminate\Testing\TestResponse
 {
-    return test()->postJson('/api/v1/auth/login', $payload);
+    return test()->withHeader('X-Tenant', $workspace)->postJson('/api/v1/auth/login', $payload);
 }
 
 describe('successful sign-in', function (): void {
@@ -100,7 +108,7 @@ describe('enumeration defences', function (): void {
 
         // Correct password, wrong workspace. The user lookup is tenant-scoped, so this is
         // indistinguishable from a non-existent account.
-        $response = signIn(['email' => $other->email, 'password' => UserFactory::PASSWORD]);
+        $response = signIn(['email' => $other->email, 'password' => UserFactory::PASSWORD], workspace: 'acme');
 
         expect($response)->toBeProblem('authentication-failed', 401);
     });
@@ -192,7 +200,7 @@ describe('two factor challenge', function (): void {
     });
 
     it('rejects an expired or unknown challenge', function (): void {
-        $response = $this->postJson('/api/v1/auth/two-factor-challenge', [
+        $response = $this->withHeader('X-Tenant', 'acme')->postJson('/api/v1/auth/two-factor-challenge', [
             'challenge' => str_repeat('a', 64),
             'code' => '123456',
         ]);
@@ -203,8 +211,8 @@ describe('two factor challenge', function (): void {
 
 describe('forgotten password', function (): void {
     it('answers identically whether or not the address exists', function (): void {
-        $known = $this->postJson('/api/v1/auth/forgot-password', ['email' => 'kumari@acme.test']);
-        $unknown = $this->postJson('/api/v1/auth/forgot-password', ['email' => 'nobody@acme.test']);
+        $known = $this->withHeader('X-Tenant', 'acme')->postJson('/api/v1/auth/forgot-password', ['email' => 'kumari@acme.test']);
+        $unknown = $this->withHeader('X-Tenant', 'acme')->postJson('/api/v1/auth/forgot-password', ['email' => 'nobody@acme.test']);
 
         expect($known->getStatusCode())->toBe(202)
             ->and($unknown->getStatusCode())->toBe(202)

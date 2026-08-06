@@ -356,7 +356,7 @@ final readonly class RoleService
         $ownerRoleId = Role::query()->assignable()->where('is_owner', true)->value('id');
 
         if ($ownerRoleId === null) {
-            throw LastOwnerCannotBeRemoved::make();
+            throw LastOwnerCannotBeRemoved::forWorkspace();
         }
 
         $others = DB::table('model_has_roles')
@@ -365,7 +365,7 @@ final readonly class RoleService
             ->count();
 
         if ($others === 0) {
-            throw LastOwnerCannotBeRemoved::make();
+            throw LastOwnerCannotBeRemoved::forWorkspace();
         }
     }
 }

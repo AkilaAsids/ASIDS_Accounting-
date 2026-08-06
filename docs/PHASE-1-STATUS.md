@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (tenancy suite executed and green: 32 passed, 49 assertions)
+**Last updated:** 2026-08-06 (74 of 78 feature tests green; 13 real bugs found by running them)
 **State:** The backend is structurally complete — every internal class reference resolves
 and nothing is missing. It has still never been executed: no PHP, Composer, Node or
 Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
@@ -251,6 +251,26 @@ Node is absent too, so the front end has never been built or rendered.
 **77 test cases.** Still to write: Organization (company/branch invariants, membership),
 Settings (four-level resolution, scope refusal), the Identity HTTP surface end to end, unit
 tests for the services, and the Vitest suite for the front end.
+
+## Test suite status
+
+| Tranche | Result |
+| --- | --- |
+| `Feature/Tenancy` (32) | **all pass** — verified against real FORCED RLS as a NOBYPASSRLS role |
+| `Feature/Authorization` (16) | **all pass** |
+| `Feature/Audit` (14) | **all pass** — append-only trigger, seal path and tamper detection all verified |
+| `Feature/Identity` (16) | 12 pass, **4 fail** |
+
+The four Identity failures are diagnosed and are test-side, not application-side:
+
+1. `toNotLeak('password')` matches the *key* `requires.password_change`, not a leaked value.
+   The assertion needs to target the hash and secret values, not the word.
+2. + 3. Two lockout tests: the account is not locked after `max_attempts` failures. Needs
+   confirming whether `registerFailure` is reached on every attempt, or whether the route
+   limiter absorbs some. **This is the one that could still be an application bug** and should
+   be settled before the suite is called green.
+4. `LoginHistory::value('outcome')` returns a cast enum, not the raw string the test compares
+   against.
 
 ## Operational hazard found by running the suite
 

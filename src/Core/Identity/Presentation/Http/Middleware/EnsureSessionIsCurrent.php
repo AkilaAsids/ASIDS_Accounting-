@@ -47,12 +47,12 @@ final class EnsureSessionIsCurrent
                 // entire customer base on deploy.
                 $session->put(self::SESSION_EPOCH, $currentEpoch);
             } elseif (! hash_equals($currentEpoch, $sessionEpoch)) {
-                return $this->terminate($request);
+                return $this->endSession($request);
             }
         }
 
         if ($this->hasGoneIdle($user)) {
-            return $this->terminate($request);
+            return $this->endSession($request);
         }
 
         return $next($request);
@@ -74,7 +74,13 @@ final class EnsureSessionIsCurrent
         return $user->last_activity_at->addMinutes($minutes)->isPast();
     }
 
-    private function terminate(Request $request): never
+    /**
+     * NOT named `terminate()`. Laravel's Kernel calls `terminate($request, $response)` on any
+     * middleware that declares one, and `method_exists()` sees private methods — so a private
+     * `terminate()` here is invoked by the framework with the wrong signature from the wrong
+     * scope, fatally, on *every* request that passes through this middleware.
+     */
+    private function endSession(Request $request): never
     {
         auth()->guard('web')->logout();
         $request->session()->invalidate();

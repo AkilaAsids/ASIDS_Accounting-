@@ -25,7 +25,7 @@ final class NoCompanyAccess extends PlatformException
 {
     private int $status = Response::HTTP_NOT_FOUND;
 
-    private string $code = 'company-not-available';
+    private string $problemCode = 'company-not-available';
 
     public static function toCompany(): self
     {
@@ -39,14 +39,14 @@ final class NoCompanyAccess extends PlatformException
         );
 
         $exception->status = Response::HTTP_FORBIDDEN;
-        $exception->code = 'no-company-membership';
+        $exception->problemCode = 'no-company-membership';
 
         return $exception;
     }
 
     public function problemCode(): string
     {
-        return $this->code;
+        return $this->problemCode;
     }
 
     public function problemTitle(): string

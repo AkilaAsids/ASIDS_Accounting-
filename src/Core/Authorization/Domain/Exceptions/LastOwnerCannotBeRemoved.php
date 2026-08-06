@@ -15,7 +15,12 @@ use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
  */
 final class LastOwnerCannotBeRemoved extends BusinessRuleViolation
 {
-    public static function make(): self
+    /**
+     * Named specifically rather than `make()`: the parent declares a static
+     * `make(string $code, string $message, array $context)`, and a no-argument override of it is
+     * an incompatible signature — a fatal error the moment the class is autoloaded.
+     */
+    public static function forWorkspace(): self
     {
         return new self(
             'This is the only owner of the workspace. Make another user an owner before removing this one.',

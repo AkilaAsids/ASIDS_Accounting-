@@ -21,7 +21,9 @@ class BusinessRuleViolation extends PlatformException
      */
     public function __construct(
         string $message,
-        private readonly string $code = 'business-rule-violation',
+        // NOT named `$code`: Exception already declares a non-readonly `$code`, and redeclaring
+        // it as readonly is a fatal error — every throw of this class would crash the request.
+        private readonly string $problemCode = 'business-rule-violation',
         array $context = [],
     ) {
         parent::__construct($message, $context);
@@ -37,7 +39,7 @@ class BusinessRuleViolation extends PlatformException
 
     public function problemCode(): string
     {
-        return $this->code;
+        return $this->problemCode;
     }
 
     public function problemTitle(): string

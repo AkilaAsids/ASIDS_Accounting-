@@ -76,11 +76,16 @@ describe('append-only enforcement', function (): void {
 
 describe('sealing', function (): void {
     it('leaves new entries unchained on the write path', function (): void {
+        // Measured as a delta, not an absolute. Provisioning the workspace in beforeEach is
+        // itself audited — granting the owner company access writes an entry — so asserting an
+        // absolute count would silently encode however many entries setup happens to produce.
+        $before = AuditLog::query()->unsealed()->count();
+
         ($this->recordSome)(3);
 
         // Lock-free by design: chaining inline would hold a lock for the whole surrounding
         // business transaction, serialising every audited write in the workspace.
-        expect(AuditLog::query()->unsealed()->count())->toBe(3);
+        expect(AuditLog::query()->unsealed()->count() - $before)->toBe(3);
     });
 
     it('chains entries in sequence order', function (): void {

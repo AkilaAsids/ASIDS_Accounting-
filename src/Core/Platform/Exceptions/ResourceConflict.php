@@ -21,7 +21,7 @@ final class ResourceConflict extends PlatformException
      */
     public function __construct(
         string $message,
-        private readonly string $code = 'resource-conflict',
+        private readonly string $problemCode = 'resource-conflict',
         array $context = [],
     ) {
         parent::__construct($message, $context);
@@ -31,7 +31,7 @@ final class ResourceConflict extends PlatformException
     {
         return new self(
             message: sprintf('A %s with %s "%s" already exists.', $resource, $attribute, $value),
-            code: 'duplicate-resource',
+            problemCode: 'duplicate-resource',
             context: ['resource' => $resource, 'attribute' => $attribute, 'value' => $value],
         );
     }
@@ -43,14 +43,14 @@ final class ResourceConflict extends PlatformException
                 'This %s was modified by someone else. Reload it and try again.',
                 $resource
             ),
-            code: 'stale-version',
+            problemCode: 'stale-version',
             context: ['resource' => $resource, 'expected_version' => $expected, 'actual_version' => $actual],
         );
     }
 
     public function problemCode(): string
     {
-        return $this->code;
+        return $this->problemCode;
     }
 
     public function problemTitle(): string
