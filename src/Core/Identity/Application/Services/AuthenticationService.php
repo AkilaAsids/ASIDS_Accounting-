@@ -212,13 +212,13 @@ final readonly class AuthenticationService
         bool $remember,
         ?string $twoFactorMethod,
     ): \Asids\Core\Identity\Domain\Models\UserDevice {
+        // `login()` already migrates the session id (SessionGuard::updateSession calls
+        // `migrate(true)`), so session fixation is handled by the framework. Calling
+        // `regenerate()` again here migrated a second time and left the authenticated
+        // state on the discarded row: `sessions.user_id` was populated but the payload
+        // had no `login_web` key, so every subsequent request presented a valid cookie
+        // for a session that contained no user and was rejected as unauthenticated.
         $this->guard->login($user, $remember);
-
-        if ($request->hasSession()) {
-            // Fixation defence: the pre-authentication session identifier must not
-            // survive into the authenticated session.
-            $request->session()->regenerate();
-        }
 
         $device = $this->devices->recognise($request, $user);
 

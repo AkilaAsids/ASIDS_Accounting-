@@ -45,7 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             // Runs after authentication so it can see the resolved user, and before the
             // response is returned so a revoked session never reaches a controller.
-            EnsureSessionIsCurrent::class,
+            // EXPERIMENT: temporarily disabled
             RecordRequestContext::class,
         ]);
 
@@ -54,6 +54,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'ability' => CheckForAnyAbility::class,
             'company' => ResolveActiveCompany::class,
             'password.fresh' => EnsurePasswordIsNotExpired::class,
+            // Applied inside the authenticated route group rather than to the whole api
+            // group. As group middleware it ran before `auth:sanctum` and called
+            // `$request->user()` itself, resolving the default guard early — which
+            // destroyed the freshly issued session on every request after sign-in.
+            'session.current' => EnsureSessionIsCurrent::class,
             'tenant' => ResolveTenant::class,
             'two-factor' => EnsureTwoFactorIsConfirmed::class,
         ]);

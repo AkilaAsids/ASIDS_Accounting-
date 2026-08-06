@@ -108,7 +108,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     |----------------------------------------------------------------------
     */
 
-    Route::middleware('auth:sanctum')->group(function (): void {
+    Route::middleware(['auth:sanctum', 'session.current'])->group(function (): void {
 
         // ── Reachable with an expired password ───────────────────────────
         // A user whose password has expired is authenticated but confined. These four

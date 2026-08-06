@@ -51,7 +51,10 @@ final class EnsureSessionIsCurrent
             }
         }
 
-        if ($this->hasGoneIdle($user)) {
+        // Idle timeout is evaluated only when the user has a recorded activity timestamp.
+        // Treating a missing one as "idle" would end the session of anyone whose account
+        // predates the column being populated — including the session just issued.
+        if ($user->last_activity_at !== null && $this->hasGoneIdle($user)) {
             return $this->endSession($request);
         }
 

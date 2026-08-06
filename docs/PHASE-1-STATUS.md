@@ -272,6 +272,37 @@ The four Identity failures are diagnosed and are test-side, not application-side
 4. `LoginHistory::value('outcome')` returns a cast enum, not the raw string the test compares
    against.
 
+## OPEN BLOCKER: sessions do not persist past sign-in
+
+The app is not usable beyond the first response. `POST /auth/login` returns 200, but every
+subsequent request is 401 — in curl **and** in a real browser.
+
+Established by measurement, not assumption:
+
+| Checked | Result |
+| --- | --- |
+| Session cookie issued on login? | **Yes** — `asids_erp_cloud_session`, `Max-Age=7200`, `path=/`, `httponly`, `samesite=lax` |
+| `sessions.user_id` populated? | **Yes**, on the login row |
+| Session payload contains `login_web`? | **No** — the guard's auth state is absent from the payload |
+| Cause = `EnsureSessionIsCurrent`? | Inconclusive. Removing it from the api group gave one 200; moving it to route scope did not help |
+| Cause = double `session()->regenerate()`? | **No.** Removed it (correct anyway — `SessionGuard::login()` already migrates) and the 401 persists |
+| Cause = sanctum stateful matching? | Unlikely — the login request *was* stateful, and cookies are issued |
+
+So: the cookie round-trips, the session row exists and knows the user id, but the payload
+carries no authentication state. Something is writing the session *without* the guard's keys, or
+writing them to a row the cookie does not point at.
+
+**Next probe, in order:**
+1. Decode the payload of the row the cookie actually points to (not the newest row) and compare
+   its id against the cookie value.
+2. Log `$request->session()->all()` immediately after `$this->guard->login()` inside
+   `completeSignIn()` — this settles whether the keys are ever written.
+3. Check the `StatefulGuard` binding in `IdentityServiceProvider`: it resolves
+   `auth()->guard('web')` eagerly, and if that instance is not the one the session middleware
+   later populates, `login()` would write to a guard whose session is discarded.
+
+Hypothesis 3 is the strongest remaining candidate and is the cheapest to test.
+
 ## Operational hazard found by running the suite
 
 `TENANCY_ENFORCE_RLS=false` against a database whose policies **do** exist is far worse than
