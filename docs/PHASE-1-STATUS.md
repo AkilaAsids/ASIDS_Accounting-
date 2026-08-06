@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (all seven backend modules complete)
+**Last updated:** 2026-08-06 (backend + Vue front end complete)
 **State:** The backend is structurally complete — every internal class reference resolves
 and nothing is missing. It has still never been executed: no PHP, Composer, Node or
 Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
@@ -176,6 +176,23 @@ writes, reset-to-inherit, orphan purge), `SettingPolicy`, `SettingsController`
 
 ---
 
+## Vue 3 front end — complete
+
+35 files. `styles/app.css` (design tokens as RGB triplets for runtime re-theming; dark
+mode as a token swap; `prefers-reduced-motion` honoured globally), `types/api.ts` +
+`types/domain.ts` (full wire contracts, no `any`), `api/client.ts` (cookie auth, CSRF
+handshake memoised on the promise, RFC 9457 → typed `ApiError`, **automatic step-up replay**,
+419 re-handshake), `stores/auth.ts` (session, two-step sign-in, permission checks),
+`stores/ui.ts` (cookie-backed theme, notices), `router/index.ts` (13 lazy routes; guard
+ordering: auth → interstitials → permission), `app/main.ts` + `App.vue`, `AppLayout` +
+`AuthLayout`, 4 UI components (`BaseButton`, `TextField`, `AlertBanner`, `SurfaceCard`),
+4 app components (`PermissionGate`, `StepUpDialog`, `NoticeStack`, `ThemeToggle`,
+`CompanySwitcher`), 4 auth pages (sign-in, 2FA challenge with recovery-code path,
+forgot-password, account-link), dashboard, users, roles (server-driven permission matrix),
+settings (server-driven form metadata), security (2FA enrolment, devices, sign-in history),
+change-password, 403, 404, `useFormat` (company currency and timezone — never the
+browser's), `locales/en.ts`, `tests/Support/vitest.setup.ts`.
+
 ## Static verification (no PHP available)
 
 A cross-reference over the whole tree, re-run after each workstream:
@@ -186,19 +203,21 @@ PSR-4: every file matches its namespace and class name.
 Route handlers: 65 checked — all resolve.
 Every Asids\ class reference resolves — nothing missing.
 Policies: 10, covering 48 authorisation methods.
+
+Front end (35 files):
+  Internal imports checked: 95 — every @/ import resolves.
+  Lazy route components: 13 — all resolve.
 ```
 
 This proves the tree is internally consistent and will autoload. It does **not** prove it
-runs: nothing has been type-checked against the real Laravel 12 or spatie 6 APIs, no
-migration has been applied, and no test has been executed.
+runs: nothing has been type-checked against the real Laravel 12, spatie 6 or Vue 3.5 APIs,
+`vue-tsc` has never run, no migration has been applied, and no test has been executed.
+Node is absent too, so the front end has never been built or rendered.
 
 ---
 
 ## Remaining Phase 1 work
 
-- **Vue 3 front end** — API client, Pinia stores, router with guards, app shell (dark
-  mode, company switcher), design-system components, auth pages (sign-in, 2FA challenge,
-  password reset, invitation acceptance), users/roles/settings/security pages, i18n
 - **Test suite** — `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant
   isolation including a real RLS test, auth + lockout + 2FA, RBAC escalation refusal,
   companies, memberships, settings resolution, audit chain integrity), unit tests, Vitest
@@ -218,6 +237,10 @@ These are the specific places where I could not verify an external API by readin
    UPDATE is refused. This is the one piece of PL/pgSQL in the platform.
 5. `Tenant::getCustomColumns()` — that stancl/tenancy's data-column overflow does not
    swallow a real column.
+6. `useId()` in `TextField.vue` — Vue 3.5+ only. If the installed Vue is older, swap for a
+   module-scoped counter.
+7. `withXSRFToken: true` in `api/client.ts` — axios 1.7+ only; without it the Sanctum
+   cookie flow silently fails CSRF on every write.
 
 ---
 

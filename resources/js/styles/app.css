@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens.
+ *
+ * Declared as raw RGB triplets rather than hex, because Tailwind consumes them through
+ * `rgb(var(--token) / <alpha-value>)` — that is what keeps opacity utilities such as
+ * `bg-primary-500/20` working against a runtime-swappable variable.
+ *
+ * Every colour lives here so a tenant can be re-themed at runtime from the
+ * `branding.primary_colour` setting without rebuilding the asset bundle.
+ */
+@layer base {
+  :root {
+    --color-primary-50: 240 253 250;
+    --color-primary-100: 204 251 241;
+    --color-primary-200: 153 246 228;
+    --color-primary-300: 94 234 212;
+    --color-primary-400: 45 212 191;
+    --color-primary-500: 20 184 166;
+    --color-primary-600: 13 148 136;
+    --color-primary-700: 15 118 110;
+    --color-primary-800: 17 94 89;
+    --color-primary-900: 19 78 74;
+    --color-primary-950: 4 47 46;
+
+    --color-surface: 255 255 255;
+    --color-surface-raised: 255 255 255;
+    --color-surface-sunken: 248 250 252;
+    --color-surface-border: 226 232 240;
+
+    --color-content: 15 23 42;
+    --color-content-muted: 71 85 105;
+    --color-content-subtle: 148 163 184;
+    --color-content-inverted: 255 255 255;
+
+    --color-success: 21 128 61;
+    --color-warning: 180 83 9;
+    --color-danger: 185 28 28;
+    --color-info: 29 78 216;
+  }
+
+  /*
+   * Dark mode is a token swap, not a second set of utilities. Surfaces lift as they come
+   * forward (sunken → base → raised) rather than getting darker, which is how depth reads
+   * correctly on a dark background.
+   */
+  .dark {
+    --color-surface: 15 23 42;
+    --color-surface-raised: 30 41 59;
+    --color-surface-sunken: 2 6 23;
+    --color-surface-border: 51 65 85;
+
+    --color-content: 248 250 252;
+    --color-content-muted: 148 163 184;
+    --color-content-subtle: 100 116 139;
+    --color-content-inverted: 15 23 42;
+
+    /* Lightened for contrast against a dark surface — the light-mode values fail WCAG AA
+       on slate-900. */
+    --color-success: 74 222 128;
+    --color-warning: 251 191 36;
+    --color-danger: 248 113 113;
+    --color-info: 96 165 250;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  /* Respected globally: an accounting system is used all day, and motion sensitivity is
+     common enough that this is an accessibility requirement, not a nicety. */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    @apply bg-surface-sunken text-content;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Tabular figures everywhere a number is money. Proportional digits make a column of
+     amounts impossible to scan, which matters more here than in most products. */
+  .tabular, td.numeric, .amount {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A visible focus ring is kept for keyboard users and suppressed for pointer users, so
+     the interface stays keyboard-navigable without looking noisy. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-surface;
+  }
+}
+
+@layer components {
+  .field-label {
+    @apply block text-sm font-medium text-content;
+  }
+
+  .field-hint {
+    @apply mt-1 text-xs text-content-muted;
+  }
+
+  .field-error {
+    @apply mt-1 text-xs text-danger;
+  }
+
+  /* Skip link: first tab stop on every page, hidden until focused. */
+  .skip-link {
+    @apply sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50
+           focus:rounded-md focus:bg-primary-700 focus:px-4 focus:py-2
+           focus:text-content-inverted;
+  }
+}
