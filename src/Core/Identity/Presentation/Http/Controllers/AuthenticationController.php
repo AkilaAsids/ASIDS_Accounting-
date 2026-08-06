@@ -143,6 +143,7 @@ final class AuthenticationController extends Controller
             'roles:id,name,label,level,is_owner',
             'companies:id,name,code,base_currency_code,currency_precision,timezone',
             'defaultCompany:id,name,code',
+            'tenant:id,timezone,locale',
         ]);
 
         $tenant = $this->tenantContext->current();

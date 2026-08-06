@@ -27,7 +27,7 @@ final class ProfileController extends ApiController
         $user = $this->currentUser();
 
         return ApiResponse::item(new UserResource(
-            $user->load(['roles:id,name,label,level,is_owner', 'defaultCompany:id,name,code'])
+            $user->load(['roles:id,name,label,level,is_owner', 'defaultCompany:id,name,code', 'tenant:id,timezone,locale'])
                 ->loadCount('memberships')
         ));
     }

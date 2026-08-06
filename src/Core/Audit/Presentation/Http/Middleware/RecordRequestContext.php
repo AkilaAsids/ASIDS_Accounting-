@@ -28,6 +28,7 @@ final class RecordRequestContext
 
     public function handle(Request $request, Closure $next): Response
     {
+
         $user = $request->user();
 
         if ($user instanceof User) {

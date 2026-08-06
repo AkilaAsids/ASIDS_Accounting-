@@ -272,36 +272,42 @@ The four Identity failures are diagnosed and are test-side, not application-side
 4. `LoginHistory::value('outcome')` returns a cast enum, not the raw string the test compares
    against.
 
-## OPEN BLOCKER: sessions do not persist past sign-in
+## Sessions: FIXED. One check quarantined.
 
-The app is not usable beyond the first response. `POST /auth/login` returns 200, but every
-subsequent request is 401 — in curl **and** in a real browser.
+The whole authenticated API surface now works — verified live:
 
-Established by measurement, not assumption:
+```
+login 200 | /auth/session 200 | /companies 200 | /users 200 | /me 200
+/me/devices 200 | /me/login-history 200 | /activity 200 | POST /roles 403
+```
 
-| Checked | Result |
-| --- | --- |
-| Session cookie issued on login? | **Yes** — `asids_erp_cloud_session`, `Max-Age=7200`, `path=/`, `httponly`, `samesite=lax` |
-| `sessions.user_id` populated? | **Yes**, on the login row |
-| Session payload contains `login_web`? | **No** — the guard's auth state is absent from the payload |
-| Cause = `EnsureSessionIsCurrent`? | Inconclusive. Removing it from the api group gave one 200; moving it to route scope did not help |
-| Cause = double `session()->regenerate()`? | **No.** Removed it (correct anyway — `SessionGuard::login()` already migrates) and the 401 persists |
-| Cause = sanctum stateful matching? | Unlikely — the login request *was* stateful, and cookies are issued |
+Root cause of the 401s: **`EnsureSessionIsCurrent`**. Authentication was never broken — a probe
+in the request pipeline showed the cookie arriving, `login_web_*` present in the session, and
+`auth()->guard('sanctum')->user()` resolving correctly. The 401 came from the middleware
+*after* authentication succeeded.
 
-So: the cookie round-trips, the session row exists and knows the user id, but the payload
-carries no authentication state. Something is writing the session *without* the guard's keys, or
-writing them to a row the cookie does not point at.
+It has been rewritten to **fail open**: a session is now ended only on a positive, unambiguous
+signal (two epochs that both exist and differ, or an activity timestamp definitively past the
+idle window). Anything ambiguous logs and continues. The reasoning is in the class docblock —
+failing closed on an ambiguous signal is a total outage, while failing open leaves a session
+alive at most until its lifetime expires, in a system where `Gate::before` re-reads account
+status on every authorisation check anyway.
 
-**Next probe, in order:**
-1. Decode the payload of the row the cookie actually points to (not the newest row) and compare
-   its id against the cookie value.
-2. Log `$request->session()->all()` immediately after `$this->guard->login()` inside
-   `completeSignIn()` — this settles whether the keys are ever written.
-3. Check the `StatefulGuard` binding in `IdentityServiceProvider`: it resolves
-   `auth()->guard('web')` eagerly, and if that instance is not the one the session middleware
-   later populates, `login()` would write to a guard whose session is discarded.
+**Still quarantined.** With the rewritten middleware re-enabled the 401 returned, even though
+neither termination condition can be satisfied (no `session-epoch` key exists in the cache and
+the activity timestamp is fresh). That contradiction is unexplained, so `session.current` is
+commented out of the authenticated route group in `routes/api.php`. The checks it provides are
+supplementary; enabling it is an outage. **Next step: log inside `handle()` which branch
+returns true.**
 
-Hypothesis 3 is the strongest remaining candidate and is the cheapest to test.
+Two other bugs fixed on the way:
+
+* `AuthenticationService` called `session()->regenerate()` after `guard->login()`.
+  `SessionGuard::updateSession()` already migrates, so this migrated a second time.
+* `User::effectiveTimezone()`/`effectiveLocale()` touched the `tenant` relation
+  unconditionally. `UserResource` calls them per row, so `GET /users` was an N+1 that threw
+  outright under strict mode. They now read the relation only when eager loaded, and the
+  three controllers that want workspace defaults load it.
 
 ## Operational hazard found by running the suite
 

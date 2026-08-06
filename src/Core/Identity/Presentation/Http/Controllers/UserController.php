@@ -40,7 +40,7 @@ final class UserController extends ApiController
         );
 
         $users = User::query()
-            ->with(['roles:id,name,label,level,is_owner'])
+            ->with(['roles:id,name,label,level,is_owner', 'tenant:id,timezone,locale'])
             ->withCount('memberships')
             ->applyFilter(
                 $criteria->filter('status'),
@@ -93,7 +93,7 @@ final class UserController extends ApiController
         $this->authorize('view', $user);
 
         return ApiResponse::item(new UserResource(
-            $user->load(['roles:id,name,label,level,is_owner', 'defaultCompany:id,name,code'])
+            $user->load(['roles:id,name,label,level,is_owner', 'defaultCompany:id,name,code', 'tenant:id,timezone,locale'])
                 ->loadCount('memberships')
         ));
     }

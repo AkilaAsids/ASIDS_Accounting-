@@ -218,15 +218,29 @@ final class User extends Authenticatable implements MustVerifyEmail
     public function effectiveTimezone(): string
     {
         return $this->timezone
-            ?? $this->tenant?->timezone
+            ?? $this->loadedTenant()?->timezone
             ?? (string) config('asids.regional.default_timezone');
     }
 
     public function effectiveLocale(): string
     {
         return $this->locale
-            ?? $this->tenant?->locale
+            ?? $this->loadedTenant()?->locale
             ?? (string) config('asids.regional.default_locale');
+    }
+
+    /**
+     * The workspace, but only if it is already loaded.
+     *
+     * These accessors are called once per row by UserResource, so touching the relation
+     * unconditionally is an N+1 across the whole user list — and with strict mode on it throws
+     * outright rather than merely being slow. Callers that want workspace defaults eager load
+     * `tenant`; everyone else falls back to the platform default, which is what an unloaded
+     * relation should mean.
+     */
+    private function loadedTenant(): ?\Asids\Core\Tenancy\Domain\Models\Tenant
+    {
+        return $this->relationLoaded('tenant') ? $this->getRelation('tenant') : null;
     }
 
     /**

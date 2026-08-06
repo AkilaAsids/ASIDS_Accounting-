@@ -9,10 +9,12 @@ use Asids\Core\Identity\Domain\Models\User;
 use Closure;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
- * Terminates sessions that were invalidated server-side, and sessions that have gone idle.
+ * Terminates sessions that were revoked server-side, and sessions that have gone idle.
  *
  * WHY AN EPOCH
  * ------------
@@ -20,8 +22,28 @@ use Symfony\Component\HttpFoundation\Response;
  * "sign out everywhere" cannot simply delete rows. Instead a per-user epoch is bumped in the
  * cache when access is withdrawn (password change, suspension, deactivation, explicit
  * sign-out-everywhere). Each request compares the epoch stamped into the session against the
- * stored one, and a mismatch ends the session. One cache read per request buys immediate,
- * driver-independent revocation.
+ * stored one, and a mismatch ends the session.
+ *
+ * THIS MIDDLEWARE FAILS OPEN, DELIBERATELY
+ * ----------------------------------------
+ * An earlier version ended the session whenever it could not satisfy itself that the session
+ * was current. That inverted the risk. This check exists to revoke access that has *already*
+ * been withdrawn by an explicit administrative act; it is not what decides whether a user is
+ * authenticated — `auth:sanctum` has already done that, upstream. The two failure modes are
+ * therefore not symmetric:
+ *
+ *   Failing closed on an ambiguous signal locks every user out of the product. That is a total
+ *   outage, and it is exactly what happened: every request after sign-in returned 401 while
+ *   authentication itself was working perfectly.
+ *
+ *   Failing open leaves a session alive for at most the remainder of its lifetime, in a system
+ *   where account status is re-read from the database on every authorisation check anyway —
+ *   `Gate::before` denies an inactive account outright.
+ *
+ * A session is therefore ended only on a **positive, unambiguous** signal: two epochs that both
+ * exist and differ, or an activity timestamp that definitively predates the idle window.
+ * Anything else — a missing epoch, a missing timestamp, an unexpected exception — logs and
+ * continues.
  */
 final class EnsureSessionIsCurrent
 {
@@ -35,36 +57,59 @@ final class EnsureSessionIsCurrent
             return $next($request);
         }
 
-        $session = $request->session();
-        $currentEpoch = cache()->get(UserService::sessionEpochKey($user));
-
-        if (is_string($currentEpoch)) {
-            $sessionEpoch = $session->get(self::SESSION_EPOCH);
-
-            if (! is_string($sessionEpoch)) {
-                // A session predating the first revocation. Adopt the current epoch rather
-                // than terminating it, so introducing this middleware does not sign out the
-                // entire customer base on deploy.
-                $session->put(self::SESSION_EPOCH, $currentEpoch);
-            } elseif (! hash_equals($currentEpoch, $sessionEpoch)) {
+        try {
+            if ($this->wasRevoked($request, $user) || $this->hasGoneIdle($user)) {
                 return $this->endSession($request);
             }
-        }
-
-        // Idle timeout is evaluated only when the user has a recorded activity timestamp.
-        // Treating a missing one as "idle" would end the session of anyone whose account
-        // predates the column being populated — including the session just issued.
-        if ($user->last_activity_at !== null && $this->hasGoneIdle($user)) {
-            return $this->endSession($request);
+        } catch (AuthenticationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            // Cache unavailable, malformed session, anything unforeseen. Log loudly and let the
+            // request through: an authenticated user must not be locked out by a fault in a
+            // supplementary check.
+            Log::warning('Session currency check failed; allowing the request.', [
+                'user_id' => $user->getKey(),
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
         }
 
         return $next($request);
     }
 
     /**
-     * Idle timeout measured from the user's own last activity rather than from the session
-     * cookie's lifetime, so a tab left open on a dashboard that polls does not keep a
-     * finance system authenticated indefinitely.
+     * True only when the stored epoch and the session's epoch both exist and disagree.
+     *
+     * A session with no epoch stamped into it adopts the current one rather than being treated
+     * as suspect — that is what lets this middleware be introduced without signing out every
+     * existing session on deploy.
+     */
+    private function wasRevoked(Request $request, User $user): bool
+    {
+        $currentEpoch = cache()->get(UserService::sessionEpochKey($user));
+
+        if (! is_string($currentEpoch) || $currentEpoch === '') {
+            // No revocation has ever been recorded for this user.
+            return false;
+        }
+
+        $sessionEpoch = $request->session()->get(self::SESSION_EPOCH);
+
+        if (! is_string($sessionEpoch) || $sessionEpoch === '') {
+            $request->session()->put(self::SESSION_EPOCH, $currentEpoch);
+
+            return false;
+        }
+
+        return ! hash_equals($currentEpoch, $sessionEpoch);
+    }
+
+    /**
+     * Idle timeout measured from the user's own last activity rather than the cookie's lifetime,
+     * so a tab left open on a polling dashboard does not keep a finance system authenticated
+     * indefinitely.
+     *
+     * A null timestamp means "never recorded", which is not evidence of idleness.
      */
     private function hasGoneIdle(User $user): bool
     {
@@ -77,12 +122,6 @@ final class EnsureSessionIsCurrent
         return $user->last_activity_at->addMinutes($minutes)->isPast();
     }
 
-    /**
-     * NOT named `terminate()`. Laravel's Kernel calls `terminate($request, $response)` on any
-     * middleware that declares one, and `method_exists()` sees private methods — so a private
-     * `terminate()` here is invoked by the framework with the wrong signature from the wrong
-     * scope, fatally, on *every* request that passes through this middleware.
-     */
     private function endSession(Request $request): never
     {
         auth()->guard('web')->logout();
