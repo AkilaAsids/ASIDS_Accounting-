@@ -146,6 +146,9 @@ return [
     'audit' => [
         'hash_chain' => (bool) env('AUDIT_HASH_CHAIN_ENABLED', true),
         'retention_days' => (int) env('AUDIT_RETENTION_DAYS', 2555),
+        // The activity feed is a dashboard surface, not a record, so it is kept for months
+        // rather than years.
+        'activity_retention_days' => (int) env('ACTIVITY_RETENTION_DAYS', 90),
         'queue' => env('AUDIT_QUEUE', 'audit'),
         // Attribute names whose values are replaced with a redaction marker
         // before ever being written to the audit trail.

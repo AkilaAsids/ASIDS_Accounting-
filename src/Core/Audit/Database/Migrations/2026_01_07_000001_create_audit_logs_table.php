@@ -18,10 +18,20 @@ use Illuminate\Support\Facades\Schema;
  *      announce itself through a session variable that only the schema owner can
  *      set.
  *
- *   2. Hash chained. Each row stores the SHA-256 of its own canonical payload
- *      concatenated with the previous row's hash, per tenant. Removing or
- *      altering any row breaks every subsequent link, which the
- *      `asids:audit-verify` command detects.
+ *   2. Hash chained, out of band. Each sealed row stores the SHA-256 of its own
+ *      canonical payload concatenated with the previous sealed row's hash, per tenant,
+ *      so removing or altering any row breaks every subsequent link —
+ *      `asids:audit-verify` detects it.
+ *
+ *      The chaining happens in `asids:audit-seal` (every five minutes) rather than at
+ *      insert time, and that is a deliberate throughput decision. Computing the chain
+ *      inline requires reading the tenant's latest hash under a lock, which serialises
+ *      every audited write in the workspace for the duration of the surrounding business
+ *      transaction. At ten million transactions that is the platform's ceiling. Writing
+ *      unchained and sealing in batches keeps the hot path lock-free while still making
+ *      history tamper-evident; the only cost is that the newest few minutes of entries are
+ *      unsealed, and the row itself is still written atomically with the change it
+ *      describes, so nothing can be lost.
  *
  *   3. Self-describing. Old and new values, the actor, the impersonator (if any),
  *      the request that caused it and the resulting hash are all in one row, so
@@ -70,8 +80,11 @@ return new class extends Migration
             $table->text('reason')->nullable();
 
             // ── Integrity ──────────────────────────────────────────────────
+            // Both nullable, and `sealed_at` with them: entries are written unchained on
+            // the hot path and linked afterwards by the sealer. See the header comment.
             $table->char('previous_hash', 64)->nullable();
-            $table->char('hash', 64);
+            $table->char('hash', 64)->nullable();
+            $table->timestampTz('sealed_at')->nullable();
 
             $table->timestampTz('created_at')->useCurrent();
 
@@ -84,6 +97,10 @@ return new class extends Migration
             $table->index(['tenant_id', 'company_id', 'created_at']);
             $table->index('request_id');
         });
+
+        // The sealer's work queue: the unsealed tail of one tenant, in order. A partial index
+        // keeps it tiny — it holds minutes of entries, not years.
+        DB::statement('CREATE INDEX audit_logs_unsealed_index ON audit_logs (tenant_id, sequence) WHERE sealed_at IS NULL');
 
         // Let PostgreSQL own the sequence so no two writers can pick the same
         // ordinal, and make it unique so a gap or a duplicate is impossible.
@@ -108,14 +125,38 @@ return new class extends Migration
             AS $$
             BEGIN
                 IF TG_OP = 'UPDATE' THEN
+                    -- Sealing is the one permitted update. It may only ever fill in the chain
+                    -- columns of a not-yet-sealed row, and every column that carries meaning
+                    -- must be byte-identical. That makes "seal" incapable of rewriting history
+                    -- even though it holds UPDATE rights.
+                    IF COALESCE(current_setting('asids.audit_seal', true), 'off') = 'on'
+                        AND OLD.sealed_at IS NULL
+                        AND NEW.sealed_at IS NOT NULL
+                        AND NEW.id = OLD.id
+                        AND NEW.sequence = OLD.sequence
+                        AND NEW.tenant_id IS NOT DISTINCT FROM OLD.tenant_id
+                        AND NEW.company_id IS NOT DISTINCT FROM OLD.company_id
+                        AND NEW.auditable_type = OLD.auditable_type
+                        AND NEW.auditable_id = OLD.auditable_id
+                        AND NEW.event = OLD.event
+                        AND NEW.old_values IS NOT DISTINCT FROM OLD.old_values
+                        AND NEW.new_values IS NOT DISTINCT FROM OLD.new_values
+                        AND NEW.changed_attributes IS NOT DISTINCT FROM OLD.changed_attributes
+                        AND NEW.actor_type = OLD.actor_type
+                        AND NEW.actor_id IS NOT DISTINCT FROM OLD.actor_id
+                        AND NEW.impersonator_id IS NOT DISTINCT FROM OLD.impersonator_id
+                        AND NEW.created_at = OLD.created_at
+                    THEN
+                        RETURN NEW;
+                    END IF;
+
                     RAISE EXCEPTION 'audit_logs is append-only; UPDATE is not permitted (id=%)', OLD.id
                         USING ERRCODE = 'restrict_violation';
                 END IF;
 
                 IF TG_OP = 'DELETE' THEN
-                    -- Retention pruning is the only legitimate deletion. The
-                    -- pruning job announces itself, and the row must be older
-                    -- than the retention horizon it declares.
+                    -- Retention pruning is the only legitimate deletion, and it must announce
+                    -- itself through a session variable.
                     IF COALESCE(current_setting('asids.audit_prune', true), 'off') <> 'on' THEN
                         RAISE EXCEPTION 'audit_logs is append-only; DELETE is not permitted (id=%)', OLD.id
                             USING ERRCODE = 'restrict_violation';

@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Schema;
  * instead of holding a hundred thousand copies of every default.
  *
  * The catalogue of valid keys, their types, defaults and validation lives in
- * code (`Asids\Core\Settings\Domain\Registry`), not in a database table, so a
+ * code (`Asids\Core\Settings\Domain\Catalogue\SettingsCatalogue`), not in a database table, so a
  * setting cannot exist without the code that understands it.
  */
 return new class extends Migration

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Asids\Core\Audit\Presentation\Http\Controllers\ActivityLogController;
+use Asids\Core\Audit\Presentation\Http\Controllers\AuditLogController;
 use Asids\Core\Authorization\Presentation\Http\Controllers\PermissionController;
 use Asids\Core\Authorization\Presentation\Http\Controllers\RoleController;
 use Asids\Core\Identity\Presentation\Http\Controllers\AccessTokenController;
@@ -15,6 +17,7 @@ use Asids\Core\Identity\Presentation\Http\Controllers\UserController;
 use Asids\Core\Organization\Presentation\Http\Controllers\BranchController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyMembershipController;
+use Asids\Core\Settings\Presentation\Http\Controllers\SettingsController;
 use Asids\Core\Tenancy\Presentation\Http\Controllers\TenantRegistrationController;
 use Illuminate\Support\Facades\Route;
 
@@ -211,6 +214,47 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             });
 
             Route::get('login-history', [LoginHistoryController::class, 'index'])->name('login-history.index');
+
+            /*
+            |------------------------------------------------------------
+            | Settings
+            |------------------------------------------------------------
+            |
+            | `bootstrap` is outside the permission checks by design: the interface cannot
+            | render a date without the locale settings, so withholding them from a user who
+            | lacks the settings permission would leave them looking at raw timestamps.
+            */
+            Route::prefix('settings')->name('settings.')->group(function (): void {
+                Route::get('bootstrap', [SettingsController::class, 'bootstrap'])->name('bootstrap');
+                Route::get('/', [SettingsController::class, 'index'])->name('index');
+                Route::put('/', [SettingsController::class, 'update'])->name('update');
+                Route::delete('{key}', [SettingsController::class, 'reset'])
+                    ->where('key', '[a-z0-9_.]+')
+                    ->name('reset');
+            });
+
+            /*
+            |------------------------------------------------------------
+            | Audit trail and activity feed
+            |------------------------------------------------------------
+            */
+            Route::prefix('audit')->name('audit.')->group(function (): void {
+                Route::get('/', [AuditLogController::class, 'index'])->name('index');
+
+                // The morph alias, not a class name, so the URL cannot be used to probe for
+                // internal namespaces.
+                Route::get('records/{type}/{id}', [AuditLogController::class, 'forRecord'])
+                    ->where(['type' => '[a-z_]+', 'id' => '[0-9a-fA-F-]{36}'])
+                    ->name('for-record');
+
+                // Step-up protected: the result reveals whether the trail has been tampered
+                // with, which is information an attacker would very much like.
+                Route::post('verify', [AuditLogController::class, 'verify'])
+                    ->middleware('two-factor')
+                    ->name('verify');
+            });
+
+            Route::get('activity', [ActivityLogController::class, 'index'])->name('activity.index');
 
             /*
             |------------------------------------------------------------

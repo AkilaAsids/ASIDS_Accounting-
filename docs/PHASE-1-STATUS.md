@@ -1,8 +1,10 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (core modules, routing, seeders complete; Audit + Settings outstanding)
-**State:** In progress. The tree does **not** yet install, boot or pass tests — see
-"Not yet written" below. Nothing in this repository has been executed.
+**Last updated:** 2026-08-06 (all seven backend modules complete)
+**State:** The backend is structurally complete — every internal class reference resolves
+and nothing is missing. It has still never been executed: no PHP, Composer, Node or
+Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
+Vue front end, the test suite, and the ERD/OpenAPI/deployment documents.
 
 ---
 
@@ -50,13 +52,13 @@ See ADR 0004 for why the other framework config files are intentionally absent.
 ### Database schema — all Phase 1 migrations
 | Migration | Contents |
 | --- | --- |
-| `2026_01_01_000001` | cache, jobs, job_batches, failed_jobs, sessions, password_reset_tokens, notifications |
+| `2026_01_01_000001` | cache, jobs, job_batches, failed_jobs, sessions, notifications (no `password_reset_tokens` — see AccountLinkService) |
 | `2026_01_02_000001/2` | tenants, domains |
 | `2026_01_03_000001–6` | users, two_factor_recovery_codes, password_histories, login_histories, user_devices, personal_access_tokens |
 | `2026_01_04_000001` | permissions, roles, model_has_permissions, model_has_roles, role_has_permissions |
 | `2026_01_05_000001–3` | companies, branches, company_memberships |
 | `2026_01_06_000001` | settings |
-| `2026_01_07_000001/2` | audit_logs (append-only trigger + hash chain), activity_logs |
+| `2026_01_07_000001/2` | audit_logs (append-only trigger, seal-only UPDATE path, hash chain), activity_logs |
 | `2026_01_08_000001` | row level security policies, FORCED, on 16 tables |
 
 Schema highlights: UUID v7 keys throughout, `timestamptz` everywhere, partial and
@@ -149,42 +151,73 @@ ADR 0005 (provisioning ownership), README, this file.
 
 ---
 
-## Not yet written
+## Audit module — complete
 
-A static cross-reference of all 189 declared classes confirms PSR-4 layout is correct,
-every internal import resolves, and all 57 route handler methods exist. **Exactly four
-references remain unresolved**, all in the two unbuilt modules:
+`AuditEvent` (17 events) and `ActorType` enums, `AuditLog` (write-closed model, canonical
+payload, hash computation), `ActivityLog`, `Auditable` trait + `AuditableObserver`
+(past-tense hooks only), `AuditRecorder` (synchronous, in-transaction, lock-free,
+credential-redacting, never fails a business operation), `AuditChainSealer` (advisory-locked
+batch sealing + two-mode verification), `ActivityLogger` (with batching),
+`RecordRequestContext` middleware, `AuditLogPolicy` (no write methods by construction),
+`ActivityLogPolicy`, 2 controllers, 2 resources, `asids:audit-seal`,
+`asids:audit-verify`, `asids:audit-prune`, `AuditServiceProvider` (11 domain-event
+listeners covering the privilege and credential changes no model observer can see).
 
-| Missing class | Referenced by |
-| --- | --- |
-| `Audit\Providers\AuditServiceProvider` | `ModuleServiceProvider` |
-| `Audit\Presentation\Http\Middleware\RecordRequestContext` | `bootstrap/app.php` |
-| `Settings\Providers\SettingsServiceProvider` | `ModuleServiceProvider` |
-| `Settings\Domain\Models\Setting` | `PlatformServiceProvider` (morph map) |
+## Settings module — complete
 
-Until those exist the container cannot boot. Everything else is wired.
+`SettingScope` (4 levels + resolution order) and `SettingType` (10 types with coercion
+and validation rules) enums, `SettingDefinition`, `SettingsCatalogue` (13 settings across
+localisation, security, branding, notifications — nothing speculative), `Setting` model,
+`SettingsResolver` (four-level resolution, per-scope cache + per-request memoisation,
+targeted invalidation), `SettingsService` (scope-permission enforcement, atomic group
+writes, reset-to-inherit, orphan purge), `SettingPolicy`, `SettingsController`
+(server-driven form metadata), `UpdateSettingsRequest`, `SettingResource`,
+`SettingsServiceProvider`.
 
-### Settings — not started (blocks boot)
-`Setting` model, `SettingDefinition` + `SettingsRegistry` (code-defined catalogue),
-`SettingsResolver` (user → company → tenant → system → default, Redis cached),
-`SettingsService`, controllers, `SettingsServiceProvider`.
+---
 
-### Audit — not started (blocks boot)
-`AuditLog`, `ActivityLog` models; `AuditRecorder` (hash chain with per-tenant advisory
-lock), `Auditable` trait/observer, `ActivityLogger`; `RecordRequestContext` middleware
-(referenced by `bootstrap/app.php`); `asids:audit-verify` and `asids:audit-prune`
-commands; controllers; `AuditServiceProvider`.
+## Static verification (no PHP available)
 
-### Cross-cutting — remaining
+A cross-reference over the whole tree, re-run after each workstream:
 
-- Vue 3 front end: API client, Pinia stores, router with guards, app shell (dark mode,
-  company switcher), design-system components, auth pages (sign-in, 2FA challenge,
+```
+Declared classes: 221
+PSR-4: every file matches its namespace and class name.
+Route handlers: 65 checked — all resolve.
+Every Asids\ class reference resolves — nothing missing.
+Policies: 10, covering 48 authorisation methods.
+```
+
+This proves the tree is internally consistent and will autoload. It does **not** prove it
+runs: nothing has been type-checked against the real Laravel 12 or spatie 6 APIs, no
+migration has been applied, and no test has been executed.
+
+---
+
+## Remaining Phase 1 work
+
+- **Vue 3 front end** — API client, Pinia stores, router with guards, app shell (dark
+  mode, company switcher), design-system components, auth pages (sign-in, 2FA challenge,
   password reset, invitation acceptance), users/roles/settings/security pages, i18n
-- Test suite: `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant isolation
-  incl. a real RLS test, auth + lockout + 2FA, RBAC + escalation refusal, companies,
-  memberships), unit tests, Vitest tests
-- `docs/`: ERD (Mermaid), OpenAPI 3.1 spec, architecture overview, local + AWS deployment
-  runbooks, security review, Phase 1 code review record
+- **Test suite** — `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant
+  isolation including a real RLS test, auth + lockout + 2FA, RBAC escalation refusal,
+  companies, memberships, settings resolution, audit chain integrity), unit tests, Vitest
+- **Documentation** — ERD (Mermaid), OpenAPI 3.1 spec, architecture overview, local + AWS
+  deployment runbooks, security review, Phase 1 code review record
+
+## First things to check once PHP exists
+
+These are the specific places where I could not verify an external API by reading:
+
+1. `PermissionTeamBootstrapper` — `setPermissionsTeamId()` and `forgetInstance()` against
+   the installed spatie/laravel-permission 6.x.
+2. `Builder::macro('applyFilter')` under PHPStan level 8 — six controllers depend on it.
+3. `TwoFactorService::verifyTotp` — `verifyKeyNewer()` named arguments against
+   pragmarx/google2fa 8.x.
+4. The `audit_logs` seal trigger — that a legitimate seal UPDATE passes and any other
+   UPDATE is refused. This is the one piece of PL/pgSQL in the platform.
+5. `Tenant::getCustomColumns()` — that stancl/tenancy's data-column overflow does not
+   swallow a real column.
 
 ---
 
@@ -223,8 +256,8 @@ docker compose up -d postgres redis && php artisan migrate --seed
    internally consistent; the remaining gaps are the two leaf modules and the
    routes that expose everything.
 4. ~~Routes, seeders, factories~~ — done.
-5. **`Audit` + `Settings`** — the only remaining blockers to boot. Both are leaves:
-   nothing depends on them, so they can be built in either order.
-6. Then `php artisan migrate --seed` should run, and sign-in should work end to end.
+5. ~~`Audit` + `Settings`~~ — done. The backend is structurally complete.
+6. **Install the toolchain and run it.** `composer install`, `migrate --seed`,
+   `asids:security-check`. Fix whatever the five items above turn up.
 7. Test suite, then the Vue front end.
 8. ERD, OpenAPI, deployment runbook, code review record.
