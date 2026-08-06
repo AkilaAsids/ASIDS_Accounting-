@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Asids\Core\Audit\Presentation\Http\Middleware\RecordRequestContext;
 use Asids\Core\Authorization\Presentation\Http\Middleware\EnsurePasswordIsNotExpired;
+use Asids\Core\Identity\Presentation\Http\Middleware\EnsureSessionIsCurrent;
 use Asids\Core\Identity\Presentation\Http\Middleware\EnsureTwoFactorIsConfirmed;
 use Asids\Core\Organization\Presentation\Http\Middleware\ResolveActiveCompany;
 use Asids\Core\Platform\Exceptions\ApiExceptionRenderer;
@@ -48,6 +49,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->api(append: [
+            // Runs after authentication so it can see the resolved user, and before the
+            // response is returned so a revoked session never reaches a controller.
+            EnsureSessionIsCurrent::class,
             RecordRequestContext::class,
         ]);
 

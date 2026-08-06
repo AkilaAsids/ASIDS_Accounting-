@@ -74,11 +74,13 @@ return new class extends Migration
             $table->integer('last_activity')->index();
         });
 
-        Schema::create('password_reset_tokens', function (Blueprint $table): void {
-            $table->string('email')->primary();
-            $table->string('token');
-            $table->timestampTz('created_at')->nullable();
-        });
+        // Laravel's `password_reset_tokens` table is deliberately NOT created.
+        //
+        // It is keyed on the e-mail address alone, and in ASIDS an address is unique only
+        // *within* a tenant — the same external accountant may hold accounts at several
+        // customers. A shared token table would therefore let a reset requested for one
+        // workspace be redeemed in another. ASIDS issues expiring signed links bound to the
+        // user's UUID and current credential hash instead; see AccountLinkService.
 
         Schema::create('notifications', function (Blueprint $table): void {
             $table->uuid('id')->primary();
@@ -100,7 +102,6 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('notifications');
-        Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
         Schema::dropIfExists('failed_jobs');
         Schema::dropIfExists('job_batches');

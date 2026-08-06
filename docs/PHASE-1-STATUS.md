@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (Authorization + Organization workstreams complete)
+**Last updated:** 2026-08-06 (Authorization, Organization, Identity workstreams complete)
 **State:** In progress. The tree does **not** yet install, boot or pass tests — see
 "Not yet written" below. Nothing in this repository has been executed.
 
@@ -90,13 +90,23 @@ closed), `BelongsToTenant` (auto-stamp + cross-tenant write guard),
 `TenantProvisioned` event, four domain exceptions, sign-up controller/request/resource,
 `TenancyServiceProvider`.
 
-### Identity module — partial (see below)
-Complete: `UserStatus`, `LoginOutcome`, `User`, `UserDevice`, `LoginHistory`,
+### Identity module — complete
+`UserStatus`, `LoginOutcome`, `User`, `UserDevice`, `LoginHistory`,
 `PasswordHistory`, `TwoFactorRecoveryCode`, `PersonalAccessToken` (with CIDR
 restriction), seven domain exceptions, `CreateUserData`, `PasswordPolicyService`,
 `TwoFactorService` (two-phase TOTP enrolment, replay-resistant verification, atomic
 recovery-code consumption), `DeviceService`, `AuthenticationService` (two-step sign-in
 with cache-backed challenge, timing equalisation, account lockout).
+
+Plus, this workstream: `UserService` (invite/accept/reset/suspend/reinstate/deactivate,
+seat accounting, last-active-owner protection), `AccountLinkService` (signed
+invitation and reset links, single-use via credential fingerprint — no token table),
+`AccessTokenService` (abilities intersected with the creator's own permissions),
+`UserRepositoryContract` + `EloquentUserRepository`, 7 domain events,
+`EnsureTwoFactorIsConfirmed` (step-up + workspace enforcement),
+`EnsureSessionIsCurrent` (epoch-based revocation + idle timeout), `UserPolicy`,
+`AccessTokenPolicy`, 8 controllers, 10 form requests, 4 resources,
+3 notifications, `IdentityServiceProvider`.
 
 ### Authorization module — complete
 `Permission` and `Role` models, `HasTenantRoles` (memoised `isTenantOwner()`,
@@ -133,17 +143,6 @@ ADR 0005 (provisioning ownership), README, this file.
 The tree contains forward references to these classes, so `composer dump-autoload`
 will succeed but the application will not boot until they exist.
 
-### Identity — remaining
-- `UserService` (create/invite/activate/suspend/deactivate, seat-limit enforcement,
-  `setDefaultCompany`) — referenced by `TenantProvisioningService`
-- `AccessTokenService`; `UserRepositoryContract` + `EloquentUserRepository`
-- Controllers: `AuthenticationController`, `TwoFactorController`, `PasswordController`,
-  `ProfileController`, `UserController`, `DeviceController`, `LoginHistoryController`,
-  `AccessTokenController`
-- Form requests and resources for each of the above
-- `EnsureTwoFactorIsConfirmed` middleware — referenced by `bootstrap/app.php`
-- `UserPolicy`; domain events + listeners; `IdentityServiceProvider`
-
 ### Settings — not started
 `Setting` model, `SettingDefinition` + `SettingsRegistry` (code-defined catalogue),
 `SettingsResolver` (user → company → tenant → system → default, Redis cached),
@@ -156,7 +155,9 @@ lock), `Auditable` trait/observer, `ActivityLogger`; `RecordRequestContext` midd
 commands; controllers; `AuditServiceProvider`.
 
 ### Cross-cutting — not started
-- `routes/api.php`, `routes/web.php`, `routes/console.php`
+- `routes/api.php`, `routes/web.php`, `routes/console.php` — **the immediate blocker**:
+  `AccountLinkService` signs the named route `api.v1.account-link.consume`, which does
+  not exist yet, so invitation and reset links cannot be generated until routing lands
 - Seeders: `PermissionSeeder`, `RoleTemplateSeeder`, `DemoTenantSeeder`
 - Factories: `TenantFactory`, `UserFactory`, `CompanyFactory`, `BranchFactory`
 - `asids:security-check` command
@@ -202,9 +203,9 @@ docker compose up -d postgres redis && php artisan migrate --seed
 
 1. ~~`Authorization` module~~ — done.
 2. ~~`Organization` models + `CompanyService`~~ — done.
-3. `UserService` + Identity HTTP layer (completes the sign-in path end to end).
-   This is now the **only** thing standing between the tree and a working
-   `php artisan migrate --seed` plus sign-in.
+3. ~~`UserService` + Identity HTTP layer~~ — done. All five core modules are now
+   internally consistent; the remaining gaps are the two leaf modules and the
+   routes that expose everything.
 4. `Audit` + `Settings` (both are leaf modules; nothing depends on them).
 5. Routes, seeders, factories — at which point `php artisan migrate --seed` should run.
 6. Test suite, then the Vue front end.
