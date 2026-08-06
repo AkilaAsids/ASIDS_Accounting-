@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Audit\Presentation\Http\Middleware;
 
+use Asids\Core\Identity\Domain\Models\PersonalAccessToken;
 use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Platform\Support\RequestContext;
 use Closure;
@@ -34,7 +35,11 @@ final class RecordRequestContext
 
             $token = $user->currentAccessToken();
 
-            if ($token !== null) {
+            // `instanceof`, not a null check. On a cookie-authenticated request Sanctum returns a
+            // TransientToken — a stand-in with no id, no abilities and no `getKey()` — so testing
+            // for null and then calling `getKey()` fatals on every SPA request that reaches this
+            // middleware.
+            if ($token instanceof PersonalAccessToken) {
                 // Recorded so a compromised integration's activity can be isolated from the
                 // owner's own interactive work — which is impossible if both appear as the
                 // same actor.

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use Asids\Core\Identity\Domain\Models\PersonalAccessToken;
 use Asids\Core\Identity\Domain\Models\User;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -80,13 +81,14 @@ final class RouteServiceProvider extends ServiceProvider
     {
         $token = $request->user()?->currentAccessToken();
 
-        // Token-authenticated integrations get their own bucket so a runaway
-        // integration cannot exhaust the interactive users' allowance.
+        // Token-authenticated integrations get their own bucket so a runaway integration cannot
+        // exhaust the interactive users' allowance. Cookie-authenticated requests yield a
+        // TransientToken, which has no key — hence the instanceof rather than a null check.
         return implode(':', array_filter([
             'p',
             $user->tenant_id ?? 'platform',
             $user->getKey(),
-            $token?->getKey(),
+            $token instanceof PersonalAccessToken ? $token->getKey() : null,
         ]));
     }
 
