@@ -12,6 +12,7 @@ use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Identity\Infrastructure\Repositories\EloquentUserRepository;
 use Asids\Core\Identity\Policies\AccessTokenPolicy;
 use Asids\Core\Identity\Policies\UserPolicy;
+use Asids\Core\Identity\Presentation\Console\RevokeExpiredTokensCommand;
 use Asids\Core\Identity\Presentation\Notifications\InvitationLink;
 use Asids\Core\Identity\Presentation\Notifications\PasswordChangedAlert;
 use Illuminate\Contracts\Auth\StatefulGuard;
@@ -47,6 +48,10 @@ final class IdentityServiceProvider extends ServiceProvider
         Gate::policy(PersonalAccessToken::class, AccessTokenPolicy::class);
 
         $this->registerNotificationListeners();
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([RevokeExpiredTokensCommand::class]);
+        }
     }
 
     /**

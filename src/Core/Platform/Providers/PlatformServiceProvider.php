@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Platform\Providers;
 
+use Asids\Core\Platform\Console\SecurityCheckCommand;
 use Asids\Core\Platform\Domain\Contracts\CompliancePackContract;
 use Asids\Core\Platform\Support\NullCompliancePack;
 use Asids\Core\Platform\Support\RequestContext;
@@ -46,6 +47,10 @@ final class PlatformServiceProvider extends ServiceProvider
         $this->configureMorphMap();
         $this->configurePasswordDefaults();
         $this->configureQueryMonitoring();
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([SecurityCheckCommand::class]);
+        }
     }
 
     /**

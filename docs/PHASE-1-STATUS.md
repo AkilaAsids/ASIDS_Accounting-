@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (Authorization, Organization, Identity workstreams complete)
+**Last updated:** 2026-08-06 (core modules, routing, seeders complete; Audit + Settings outstanding)
 **State:** In progress. The tree does **not** yet install, boot or pass tests — see
 "Not yet written" below. Nothing in this repository has been executed.
 
@@ -131,6 +131,17 @@ derivation), `BranchService` (single-active-primary invariant), `MembershipServi
 `CompanyMembershipPolicy`, 3 controllers, 5 form requests, 3 resources,
 `OrganizationServiceProvider`.
 
+### API surface, scheduling, seeders — complete
+`routes/api.php` (57 endpoints under `api.v1.*`; three middleware layers; step-up
+protection on the six credential-bearing routes), `routes/web.php` (SPA catch-all),
+`routes/console.php` (four scheduled sweeps, all `onOneServer`),
+`resources/views/app.blade.php` (flash-free dark mode from a cookie),
+`RevokeExpiredTokensCommand`, `SecurityCheckCommand` (six deployment assertions,
+fails the release if RLS is not actually in force), `DatabaseSeeder`,
+`PermissionSeeder`, `DemoWorkspaceSeeder` (built by calling the real provisioning
+services, so `migrate --seed` is itself an end-to-end integration check),
+`TenantFactory`, `UserFactory`, `CompanyFactory`, `BranchFactory`.
+
 ### Documentation
 ADR 0001 (tenancy strategy), ADR 0002 (tenant/company/branch hierarchy),
 ADR 0003 (permissions in code, roles in data), ADR 0004 (minimal config surface),
@@ -140,35 +151,40 @@ ADR 0005 (provisioning ownership), README, this file.
 
 ## Not yet written
 
-The tree contains forward references to these classes, so `composer dump-autoload`
-will succeed but the application will not boot until they exist.
+A static cross-reference of all 189 declared classes confirms PSR-4 layout is correct,
+every internal import resolves, and all 57 route handler methods exist. **Exactly four
+references remain unresolved**, all in the two unbuilt modules:
 
-### Settings — not started
+| Missing class | Referenced by |
+| --- | --- |
+| `Audit\Providers\AuditServiceProvider` | `ModuleServiceProvider` |
+| `Audit\Presentation\Http\Middleware\RecordRequestContext` | `bootstrap/app.php` |
+| `Settings\Providers\SettingsServiceProvider` | `ModuleServiceProvider` |
+| `Settings\Domain\Models\Setting` | `PlatformServiceProvider` (morph map) |
+
+Until those exist the container cannot boot. Everything else is wired.
+
+### Settings — not started (blocks boot)
 `Setting` model, `SettingDefinition` + `SettingsRegistry` (code-defined catalogue),
 `SettingsResolver` (user → company → tenant → system → default, Redis cached),
 `SettingsService`, controllers, `SettingsServiceProvider`.
 
-### Audit — not started
+### Audit — not started (blocks boot)
 `AuditLog`, `ActivityLog` models; `AuditRecorder` (hash chain with per-tenant advisory
 lock), `Auditable` trait/observer, `ActivityLogger`; `RecordRequestContext` middleware
 (referenced by `bootstrap/app.php`); `asids:audit-verify` and `asids:audit-prune`
 commands; controllers; `AuditServiceProvider`.
 
-### Cross-cutting — not started
-- `routes/api.php`, `routes/web.php`, `routes/console.php` — **the immediate blocker**:
-  `AccountLinkService` signs the named route `api.v1.account-link.consume`, which does
-  not exist yet, so invitation and reset links cannot be generated until routing lands
-- Seeders: `PermissionSeeder`, `RoleTemplateSeeder`, `DemoTenantSeeder`
-- Factories: `TenantFactory`, `UserFactory`, `CompanyFactory`, `BranchFactory`
-- `asids:security-check` command
+### Cross-cutting — remaining
+
 - Vue 3 front end: API client, Pinia stores, router with guards, app shell (dark mode,
   company switcher), design-system components, auth pages (sign-in, 2FA challenge,
-  password reset), users/roles/settings/security pages, i18n scaffold
-- Test suite: `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant
-  isolation incl. a real RLS test, auth + lockout + 2FA, RBAC, companies, settings,
-  audit chain integrity), unit tests, Vitest tests
-- `docs/`: ERD (Mermaid), OpenAPI 3.1 spec, architecture overview, local + AWS
-  deployment runbooks, security review, Phase 1 code review record
+  password reset, invitation acceptance), users/roles/settings/security pages, i18n
+- Test suite: `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant isolation
+  incl. a real RLS test, auth + lockout + 2FA, RBAC + escalation refusal, companies,
+  memberships), unit tests, Vitest tests
+- `docs/`: ERD (Mermaid), OpenAPI 3.1 spec, architecture overview, local + AWS deployment
+  runbooks, security review, Phase 1 code review record
 
 ---
 
@@ -206,7 +222,9 @@ docker compose up -d postgres redis && php artisan migrate --seed
 3. ~~`UserService` + Identity HTTP layer~~ — done. All five core modules are now
    internally consistent; the remaining gaps are the two leaf modules and the
    routes that expose everything.
-4. `Audit` + `Settings` (both are leaf modules; nothing depends on them).
-5. Routes, seeders, factories — at which point `php artisan migrate --seed` should run.
-6. Test suite, then the Vue front end.
-7. ERD, OpenAPI, deployment runbook, code review record.
+4. ~~Routes, seeders, factories~~ — done.
+5. **`Audit` + `Settings`** — the only remaining blockers to boot. Both are leaves:
+   nothing depends on them, so they can be built in either order.
+6. Then `php artisan migrate --seed` should run, and sign-in should work end to end.
+7. Test suite, then the Vue front end.
+8. ERD, OpenAPI, deployment runbook, code review record.
