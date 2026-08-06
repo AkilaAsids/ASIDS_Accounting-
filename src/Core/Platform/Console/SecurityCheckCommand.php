@@ -60,6 +60,30 @@ final class SecurityCheckCommand extends Command
     private function checkRowLevelSecurity(): void
     {
         if (! (bool) config('asids.tenancy.enforce_rls')) {
+            // A *policies exist but publishing is off* mismatch is far worse than either state
+            // alone: the policies constrain every query, nothing publishes a tenant for them to
+            // match, and the application reads empty result sets everywhere with no error. It
+            // presents as "all my data vanished", which is the least diagnosable outcome
+            // available, so it is always a hard failure regardless of environment.
+            /** @var object{enabled: bool}|null $relation */
+            $relation = DB::selectOne(
+                'SELECT relrowsecurity AS enabled FROM pg_class WHERE relname = ?',
+                ['companies']
+            );
+
+            if ($relation !== null && (bool) $relation->enabled) {
+                $this->record(
+                    'Row level security',
+                    'fail',
+                    'TENANCY_ENFORCE_RLS is off but the policies exist in the database. Nothing '
+                    .'will publish a tenant for them to match, so every tenant-scoped query '
+                    .'returns nothing. Either turn enforcement on, or roll back the row level '
+                    .'security migration.',
+                );
+
+                return;
+            }
+
             $this->record(
                 'Row level security',
                 app()->environment('local', 'testing') ? 'warn' : 'fail',
@@ -111,12 +135,20 @@ final class SecurityCheckCommand extends Command
         $debug = (bool) config('app.debug');
         $production = app()->isProduction();
 
+        // The message must match the verdict. Reporting PASS beside "stack traces would be
+        // exposed" trains an operator to skim past this check, which is the opposite of useful.
         $this->record(
             'Debug mode',
-            ($debug && $production) ? 'fail' : 'pass',
-            $debug
-                ? 'APP_DEBUG is on. Stack traces and configuration would be exposed on error.'
-                : 'APP_DEBUG is off.',
+            match (true) {
+                $debug && $production => 'fail',
+                $debug => 'warn',
+                default => 'pass',
+            },
+            match (true) {
+                $debug && $production => 'APP_DEBUG is on in production. Stack traces and configuration are exposed on error.',
+                $debug => 'APP_DEBUG is on, which is expected outside production.',
+                default => 'APP_DEBUG is off.',
+            },
         );
     }
 

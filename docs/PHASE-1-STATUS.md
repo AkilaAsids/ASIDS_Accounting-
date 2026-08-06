@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (all Phase 1 artefacts written; none executed)
+**Last updated:** 2026-08-06 (tenancy suite executed and green: 32 passed, 49 assertions)
 **State:** The backend is structurally complete — every internal class reference resolves
 and nothing is missing. It has still never been executed: no PHP, Composer, Node or
 Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
@@ -251,6 +251,16 @@ Node is absent too, so the front end has never been built or rendered.
 **77 test cases.** Still to write: Organization (company/branch invariants, membership),
 Settings (four-level resolution, scope refusal), the Identity HTTP surface end to end, unit
 tests for the services, and the Vitest suite for the front end.
+
+## Operational hazard found by running the suite
+
+`TENANCY_ENFORCE_RLS=false` against a database whose policies **do** exist is far worse than
+either state alone: the policies constrain every query, nothing publishes a tenant for them to
+match, and the application reads **empty result sets everywhere with no error**. It presents as
+"all my data has vanished".
+
+`asids:security-check` now fails hard on this mismatch in every environment. The two settings
+must agree: enforcement on, or the RLS migration rolled back.
 
 ## First things to check once PHP exists
 

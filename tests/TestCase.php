@@ -9,6 +9,7 @@ use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Tests\Support\InteractsWithTenants;
+use Throwable;
 
 /**
  * Base test case.
@@ -43,7 +44,17 @@ abstract class TestCase extends BaseTestCase
     {
         // Tenancy state is static on the container; a leaked tenant would make the next test's
         // scope resolve against the previous one's workspace.
-        $this->endTenancy();
+        //
+        // Guarded because a test that deliberately provokes a database error — an RLS refusal, a
+        // check constraint — leaves the transaction aborted, and any statement here would throw
+        // a second exception that both masks the first and prevents RefreshDatabase from rolling
+        // back. The un-rolled-back transaction then holds locks that block the *next* test
+        // indefinitely, which presents as the whole suite hanging rather than as one failure.
+        try {
+            $this->endTenancy();
+        } catch (Throwable) {
+            // The rollback below resets session state regardless.
+        }
 
         parent::tearDown();
     }

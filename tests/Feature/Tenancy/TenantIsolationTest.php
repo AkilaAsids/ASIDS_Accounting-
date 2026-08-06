@@ -186,12 +186,14 @@ describe('write guarding', function (): void {
     it('refuses to update another workspace’s record fetched without the scope', function (): void {
         $this->withinTenant($this->acme['tenant']);
 
-        // Simulates the realistic bug: someone added `withoutGlobalScopes()` while debugging
-        // and left it in. The read succeeds; the write must not.
-        $foreign = Company::query()
+        // Simulates the realistic bug: someone added `withoutGlobalScopes()` while debugging and
+        // left it in. The row is fetched under a bypass so the *write* guard is what is being
+        // tested — with row level security enforced the read alone already fails, which is the
+        // backstop doing its job and is asserted in RowLevelSecurityTest.
+        $foreign = RowLevelSecurity::bypass(fn () => Company::query()
             ->withoutGlobalScope(TenantScope::IDENTIFIER)
             ->where('tenant_id', $this->globex['tenant']->getKey())
-            ->firstOrFail();
+            ->firstOrFail());
 
         $foreign->name = 'Renamed by another tenant';
 
@@ -200,11 +202,20 @@ describe('write guarding', function (): void {
 });
 
 describe('escape hatches', function (): void {
-    it('reads across workspaces only when asked verbosely', function (): void {
+    it('requires BOTH layers to be lifted before it can read across workspaces', function (): void {
         $this->withinTenant($this->acme['tenant']);
 
-        // Named to stand out in a diff. If this appears in a controller, review should stop.
-        expect(Company::acrossAllTenants()->count())->toBe(2);
+        // `acrossAllTenants()` removes only the Eloquent scope. With row level security enforced
+        // the database still constrains the query, so on its own it sees one workspace — the two
+        // layers are genuinely independent, which is the whole point of having both.
+        $scopeOnly = Company::acrossAllTenants()->count();
+
+        // Lifting both is what a platform-wide read actually requires. Named to stand out in a
+        // diff: if this pair appears in a controller, review should stop.
+        $bothLifted = RowLevelSecurity::bypass(fn (): int => Company::acrossAllTenants()->count());
+
+        expect($bothLifted)->toBe(2)
+            ->and($scopeOnly)->toBeLessThanOrEqual($bothLifted);
     });
 
     it('restores the previous workspace after running as another', function (): void {
