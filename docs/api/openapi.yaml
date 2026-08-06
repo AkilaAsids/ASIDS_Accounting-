@@ -1,0 +1,2603 @@
+openapi: 3.1.0
+
+info:
+  title: ASIDS ERP Cloud API
+  version: 1.0.0
+  summary: Multi-tenant accounting and ERP platform — Phase 1 surface.
+  description: |
+    Every endpoint the platform exposes as of Phase 1: workspace sign-up, authentication,
+    two factor, users, roles, permissions, companies, branches, company access, settings and
+    the audit trail. Accounting, sales, purchasing, inventory and payroll arrive in later
+    phases and will extend this document rather than replace it.
+
+    ## Conventions
+
+    **Success** is always `{ "data": …, "meta": { … } }`. `meta` always carries `request_id`
+    and `api_version`, and carries `pagination` on collections. New `meta` members may be
+    added at any time and must not break a consumer.
+
+    **Failure** is always an RFC 9457 problem document with `Content-Type:
+    application/problem+json`. Branch on `type` — it is stable and documented. Never branch
+    on `title` or `detail`, which are prose and may be reworded or translated.
+
+    ## Identifying the workspace
+
+    Two mechanisms. Browsers use the hostname (`acme.erp.asidstech.com`), which is also what
+    makes session cookies naturally workspace-scoped. Integrations that cannot vary their base
+    URL send `X-Tenant: acme` instead. Both are equivalent.
+
+    ## Authenticating
+
+    | Client | Mechanism |
+    | --- | --- |
+    | First-party SPA | Sanctum cookie session. `GET /sanctum/csrf-cookie` first, then send `X-XSRF-TOKEN` on writes. No token is ever held in JavaScript. |
+    | Mobile, integrations | `Authorization: Bearer asids_pat_…` |
+
+    A token's abilities are intersected with its creator's own permissions at issue time, so a
+    token can never be more privileged than the person who created it.
+
+    ## Rate limits
+
+    | Bucket | Limit | Applies to |
+    | --- | --- | --- |
+    | `login` | 10/min | sign-in, sign-up, availability |
+    | `two-factor` | 10/min | challenge, confirm, recovery codes |
+    | `password-reset` | 5/min | forgot-password, account links |
+    | authenticated | 300/min | everything else |
+
+    Credential buckets key on both source address and submitted identity, so neither a single
+    victim nor a single attacker can be attacked or attack freely. Exceeding a limit returns
+    `429` with `retry_after_seconds`.
+
+    ## Step-up authentication
+
+    Six routes that create or remove a credential answer `428` with
+    `type: …/two-factor-confirmation-required` unless the caller has proved possession of
+    their second factor in the last 15 minutes. Resolve it by `POST
+    /auth/two-factor/confirm-session` with a **TOTP code** — a recovery code is refused here —
+    then replay the original request. A hijacked session must not be sufficient to transfer
+    workspace ownership or mint an API token.
+
+  contact:
+    name: ASIDS Technologies Pvt Ltd
+    url: https://asidstech.com
+    email: support@asidstech.com
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://{workspace}.erp.asidstech.com/api/v1
+    description: Production — workspace subdomain
+    variables:
+      workspace:
+        default: acme
+        description: The workspace slug.
+  - url: https://erp.asidstech.com/api/v1
+    description: Production — central domain. Sign-up only, or with an X-Tenant header.
+  - url: http://asids.localhost/api/v1
+    description: Local development.
+
+security:
+  - sessionCookie: []
+  - bearerToken: []
+
+tags:
+  - name: Workspaces
+    description: Public sign-up. No authentication.
+  - name: Authentication
+    description: Sign in, second factor, sign out, session bootstrap.
+  - name: Account links
+    description: Signed invitation and password reset links.
+  - name: Profile
+    description: The signed-in user's own account.
+  - name: Users
+    description: User administration.
+  - name: Roles & permissions
+    description: Role definition and assignment.
+  - name: Companies
+    description: Legal entities, branches and access.
+  - name: Settings
+    description: Hierarchical typed settings.
+  - name: Audit
+    description: The append-only trail and the activity feed.
+
+paths:
+  # ── Workspaces ────────────────────────────────────────────────────────────
+  /workspaces:
+    post:
+      tags: [Workspaces]
+      operationId: createWorkspace
+      summary: Create a workspace
+      description: |
+        Provisions a complete workspace atomically: the tenant, its hostname, five system
+        roles, the owner account, and a first company with its primary branch. A partial
+        provision is worse than a failure — the customer could not sign in and could not
+        retry, because the slug would be taken — so all five commit or none do.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWorkspaceRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Workspace' }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          owner_email: { type: string, format: email }
+                          temporary_password:
+                            type: [string, 'null']
+                            description: Present only when the caller supplied no password (back-office provisioning).
+        '409':
+          description: The workspace address is taken.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /workspaces/availability:
+    get:
+      tags: [Workspaces]
+      operationId: checkWorkspaceAvailability
+      summary: Check whether a workspace address is free
+      description: |
+        Returns alternatives as well as a verdict, because "taken" without a suggestion is
+        where sign-up funnels lose people. A workspace address is inherently public — it
+        appears in the hostname — so this discloses nothing that DNS does not.
+      security: []
+      parameters:
+        - name: slug
+          in: query
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' }
+      responses:
+        '200':
+          description: Verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      slug: { type: string }
+                      valid: { type: boolean }
+                      available: { type: boolean }
+                      suggestions: { type: array, items: { type: string } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  # ── Authentication ────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [Authentication]
+      operationId: signIn
+      summary: Sign in (step one — password)
+      description: |
+        Returns **either** an authenticated session **or** a two factor challenge. Both are
+        `200`: a challenge is the successful outcome of a correct password, not an error.
+
+        Every failure — unknown address, wrong password, wrong workspace — returns the same
+        `401` with the same message. Distinguishing them would make this an account
+        enumeration oracle. Response time is equalised for the same reason.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, maxLength: 1024 }
+                remember: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Authenticated, or a challenge issued.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - title: Authenticated
+                    type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Session' }
+                      meta: { $ref: '#/components/schemas/Meta' }
+                  - title: Second factor required
+                    type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          two_factor_required: { const: true }
+                          challenge:
+                            type: string
+                            description: Single-use, 5-minute bearer credential proving the password step passed. Never place it in a URL.
+                          expires_in: { type: integer, example: 300 }
+                      meta: { $ref: '#/components/schemas/Meta' }
+        '401':
+          description: Credentials rejected.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: https://docs.asidstech.com/errors/authentication-failed
+                title: Sign-in failed
+                status: 401
+                detail: The e-mail address or password is incorrect.
+        '403':
+          description: Credentials correct, but the account or workspace may not sign in.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: Locked after repeated failures. `retry_after_seconds` is disclosed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/two-factor-challenge:
+    post:
+      tags: [Authentication]
+      operationId: completeTwoFactorChallenge
+      summary: Sign in (step two — second factor)
+      description: |
+        Accepts a TOTP code **or** an unused recovery code. `trust_device` is honoured only
+        for a TOTP code: a recovery code is what someone uses when the device is lost, so
+        trusting the browser off one would defeat the purpose.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge, code]
+              properties:
+                challenge: { type: string, minLength: 64, maxLength: 64 }
+                code: { type: string, minLength: 6, maxLength: 64 }
+                trust_device: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Session' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401':
+          description: The challenge expired or was already used.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The code is not valid. Counts toward account lockout.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/session:
+    get:
+      tags: [Authentication]
+      operationId: getSession
+      summary: Bootstrap the session
+      description: |
+        Everything the interface needs to render, in one call: the user, their permissions,
+        the workspace, the accessible companies, and any interstitial they owe. Deliberately
+        one request rather than four — the shell cannot render until all of them arrive, so
+        splitting them only adds latency to the most latency-sensitive screen in the product.
+      responses:
+        '200':
+          description: The session, or `{ "authenticated": false }` for a guest.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    oneOf:
+                      - $ref: '#/components/schemas/Session'
+                      - type: object
+                        properties:
+                          authenticated: { const: false }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: signOut
+      summary: Sign out of this session
+      responses:
+        '200': { $ref: '#/components/responses/SignedOut' }
+
+  /auth/logout-everywhere:
+    post:
+      tags: [Authentication]
+      operationId: signOutEverywhere
+      summary: Sign out of every session
+      description: |
+        Takes effect immediately on every device, including ones whose sessions are held in
+        Redis and cannot be enumerated by user — a per-user epoch is bumped and every request
+        checks it.
+      responses:
+        '200': { $ref: '#/components/responses/SignedOut' }
+
+  /auth/password:
+    put:
+      tags: [Authentication]
+      operationId: changePassword
+      summary: Change your own password
+      description: |
+        The current password is required even when the existing one has expired: without it a
+        hijacked session could lock the real owner out of their own account. This session
+        stays alive; every other session ends.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, password, password_confirmation]
+              properties:
+                current_password: { type: string }
+                password: { type: string }
+                password_confirmation: { type: string }
+      responses:
+        '200':
+          description: Changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      changed: { const: true }
+                      password_changed_at: { type: string, format: date-time }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /auth/forgot-password:
+    post:
+      tags: [Authentication]
+      operationId: requestPasswordReset
+      summary: Request a password reset link
+      description: |
+        Always `202` with an identical message, whether or not the address exists. A different
+        message, status or measurable response time would turn this into an account
+        enumeration oracle — and a customer list is exactly what a competitor wants from an
+        SME accounting platform.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '202':
+          description: Accepted. Says nothing about whether the address exists.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  # ── Two factor ────────────────────────────────────────────────────────────
+  /auth/two-factor:
+    get:
+      tags: [Authentication]
+      operationId: getTwoFactorStatus
+      summary: Two factor status
+      responses:
+        '200':
+          description: Status, including remaining recovery codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      enabled: { type: boolean }
+                      enrolled_at: { type: [string, 'null'], format: date-time }
+                      confirmed_at: { type: [string, 'null'], format: date-time }
+                      unused_recovery_codes: { type: integer }
+                      required_by_workspace: { type: boolean }
+                  meta: { $ref: '#/components/schemas/Meta' }
+    delete:
+      tags: [Authentication]
+      operationId: disableTwoFactor
+      summary: Turn off two factor authentication
+      description: Requires a fresh TOTP code, so a hijacked session cannot remove the control that would have stopped it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CodeRequest' }
+      responses:
+        '200':
+          description: Disabled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: object, properties: { enabled: { const: false } } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '422':
+          description: Wrong code, or the workspace mandates two factor.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /auth/two-factor/enrol:
+    post:
+      tags: [Authentication]
+      operationId: beginTwoFactorEnrolment
+      summary: Begin enrolment
+      description: |
+        Issues a secret and a server-rendered SVG QR code, but does **not** activate the
+        factor. Enrolment is two-phase deliberately: a single-phase flow locks out every user
+        whose authenticator was misconfigured.
+      responses:
+        '200':
+          description: Enrolment material. The secret is shown so a user without a camera can type it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      secret: { type: string }
+                      otpauth_uri: { type: string }
+                      qr_code_svg: { type: string, description: Inline SVG. No QR library ships to the browser. }
+                      digits: { type: integer, const: 6 }
+                      period: { type: integer, const: 30 }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  /auth/two-factor/confirm:
+    post:
+      tags: [Authentication]
+      operationId: confirmTwoFactorEnrolment
+      summary: Confirm enrolment and activate
+      description: Returns the recovery codes. They are shown **exactly once** and cannot be retrieved again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CodeRequest' }
+      responses:
+        '200':
+          description: Active. Save the codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      enabled: { const: true }
+                      recovery_codes: { type: array, items: { type: string }, minItems: 8, maxItems: 8 }
+                      notice: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /auth/two-factor/confirm-session:
+    post:
+      tags: [Authentication]
+      operationId: confirmStepUp
+      summary: Open the step-up window
+      description: |
+        Call this after receiving `428 two-factor-confirmation-required`, then replay the
+        original request. **TOTP only** — a recovery code is refused, because accepting one
+        would let a single intercepted code authorise an ownership transfer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CodeRequest' }
+      responses:
+        '200':
+          description: Confirmed for `expires_in` seconds.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      confirmed: { const: true }
+                      expires_in: { type: integer, example: 900 }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /auth/two-factor/recovery-codes:
+    post:
+      tags: [Authentication]
+      operationId: regenerateRecoveryCodes
+      summary: Issue a fresh set of recovery codes
+      description: Invalidates the previous set. Requires a TOTP code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CodeRequest' }
+      responses:
+        '200':
+          description: New codes. Shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      recovery_codes: { type: array, items: { type: string } }
+                      notice: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  # ── Account links ─────────────────────────────────────────────────────────
+  /account-link/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - name: purpose
+        in: query
+        required: true
+        schema: { type: string, enum: [invitation, password-reset] }
+      - name: fp
+        in: query
+        required: true
+        description: Fingerprint binding the link to the user's credential state at issue time.
+        schema: { type: string }
+      - name: expires
+        in: query
+        required: true
+        schema: { type: integer }
+      - name: signature
+        in: query
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Account links]
+      operationId: inspectAccountLink
+      summary: Inspect a signed link
+      description: |
+        Lets the client show whose account it is and which password rules apply *before* the
+        user types anything — an invitation that rejects a password after the fact is where
+        new users give up.
+
+        GET and POST share one path deliberately: a signature covers the URL string, not the
+        method, so one signature serves both.
+      security: []
+      responses:
+        '200':
+          description: Valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      valid: { const: true }
+                      purpose: { type: string, enum: [invitation, password-reset] }
+                      email: { type: string, format: email }
+                      first_name: { type: string }
+                      workspace: { type: [string, 'null'] }
+                      password_policy:
+                        type: object
+                        properties:
+                          min_length: { type: integer }
+                          requires_mixed_case: { type: boolean }
+                          requires_numbers: { type: boolean }
+                          requires_symbols: { type: boolean }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '410': { $ref: '#/components/responses/LinkGone' }
+    post:
+      tags: [Account links]
+      operationId: consumeAccountLink
+      summary: Consume a signed link and set a password
+      description: |
+        Accepting an invitation or completing a reset. Setting the password changes the
+        credential fingerprint, which invalidates the link — that is the single-use
+        guarantee, with no token store and no cleanup job.
+
+        The caller is deliberately **not** signed in afterwards. Signing in with the new
+        password confirms it works and routes through the ordinary path, including the two
+        factor challenge, which this flow must not bypass.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose, fp, password, password_confirmation]
+              properties:
+                purpose: { type: string, enum: [invitation, password-reset] }
+                fp: { type: string }
+                password: { type: string }
+                password_confirmation: { type: string }
+      responses:
+        '200':
+          description: Done. Sign in with the new password.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      completed: { const: true }
+                      email: { type: string, format: email }
+                      message: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '410': { $ref: '#/components/responses/LinkGone' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  # ── Profile ───────────────────────────────────────────────────────────────
+  /me:
+    get:
+      tags: [Profile]
+      operationId: getProfile
+      summary: Your own profile
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+    put:
+      tags: [Profile]
+      operationId: updateProfile
+      summary: Update your own profile
+      description: |
+        Narrower than the administrative form. Job title and employee number are HR records
+        someone else maintains; the e-mail address is the login identifier and changes through
+        its own flow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name: { type: string, maxLength: 100 }
+                last_name: { type: [string, 'null'], maxLength: 100 }
+                phone: { type: [string, 'null'], maxLength: 32 }
+                timezone: { type: [string, 'null'] }
+                locale: { type: [string, 'null'], enum: [en, si, ta] }
+                theme: { type: [string, 'null'], enum: [system, light, dark] }
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /me/devices:
+    get:
+      tags: [Profile]
+      operationId: listOwnDevices
+      summary: Devices you are signed in from
+      parameters:
+        - name: active_only
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Devices, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Device' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  /me/login-history:
+    get:
+      tags: [Profile]
+      operationId: listOwnLoginHistory
+      summary: Your recent sign-ins, successful and failed
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated history.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/LoginHistoryEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+
+  /devices/{deviceId}:
+    delete:
+      tags: [Profile]
+      operationId: revokeDevice
+      summary: Revoke a device
+      description: |
+        Always permitted for your own device — it is the control a user reaches for when they
+        lose a laptop, and gating it behind a permission would be actively harmful. Revoking
+        someone else's requires `identity.devices.revoke` and outranking them.
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Revoked. Trust is cleared in the same write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Device' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── API tokens ────────────────────────────────────────────────────────────
+  /tokens:
+    get:
+      tags: [Profile]
+      operationId: listAccessTokens
+      summary: Your API tokens
+      description: Nobody, including an owner, can list another user's tokens.
+      responses:
+        '200':
+          description: Tokens. The secret is never included.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AccessToken' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+    post:
+      tags: [Profile]
+      operationId: createAccessToken
+      summary: Issue an API token
+      description: |
+        **Step-up protected.** Requested abilities are intersected with your own permissions,
+        so a token can never outrank you — check `meta.granted_abilities` to see whether the
+        intersection reduced what you asked for.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, abilities]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                description: { type: [string, 'null'], maxLength: 500 }
+                abilities:
+                  type: array
+                  minItems: 1
+                  items: { type: string, example: organization.companies.view }
+                expires_in_days: { type: [integer, 'null'], minimum: 1, maximum: 730 }
+                allowed_ip_ranges:
+                  type: array
+                  items: { type: string, example: 203.0.113.0/24 }
+                  description: Optional source restriction. IPv4 and IPv6 CIDR both supported.
+      responses:
+        '201':
+          description: Created. The plaintext is in `meta` and is never retrievable again.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AccessToken' }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          plaintext_token: { type: string, example: asids_pat_1|xxxxx }
+                          notice: { type: string }
+                          granted_abilities: { type: array, items: { type: string } }
+        '402':
+          description: Token limit reached for this user.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '428': { $ref: '#/components/responses/StepUpRequired' }
+
+  /tokens/{tokenId}:
+    delete:
+      tags: [Profile]
+      operationId: revokeAccessToken
+      summary: Revoke an API token
+      description: Always permitted for your own token, even without the permission — a user who suspects a leak must not wait for an administrator.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Revoked. Recorded, not deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AccessToken' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  # ── Users ─────────────────────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List users
+      description: '`meta.seats` reports licensed seat usage, because the administrator deciding whether to invite someone is looking at exactly this screen.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: sort
+          in: query
+          description: 'Prefix with `-` for descending. Allow-listed; anything else is rejected.'
+          schema: { type: string, enum: [first_name, last_name, email, created_at, last_login_at, status, -first_name, -last_name, -email, -created_at, -last_login_at, -status] }
+        - name: filter[status]
+          in: query
+          schema: { type: string, enum: [pending_invitation, active, suspended, deactivated] }
+        - name: filter[role]
+          in: query
+          schema: { type: string }
+        - name: filter[company_id]
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Paginated users.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/User' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/PaginatedMeta'
+                      - type: object
+                        properties:
+                          seats:
+                            type: object
+                            properties:
+                              consumed: { type: integer, description: Active plus outstanding invitations. }
+                              limit: { type: [integer, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Users]
+      operationId: inviteUser
+      summary: Invite a user
+      description: |
+        No password field. The invitee chooses their own via a signed link, which is what
+        proves they control the address — and means no administrator ever knows a colleague's
+        credential, so no action taken with it is deniable.
+
+        Roles above the inviter's own level are refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, email, role_ids, company_ids]
+              properties:
+                first_name: { type: string, maxLength: 100 }
+                last_name: { type: [string, 'null'], maxLength: 100 }
+                email: { type: string, format: email }
+                phone: { type: [string, 'null'] }
+                job_title: { type: [string, 'null'] }
+                employee_number: { type: [string, 'null'] }
+                timezone: { type: [string, 'null'] }
+                locale: { type: [string, 'null'], enum: [en, si, ta] }
+                role_ids: { type: array, items: { type: string, format: uuid }, maxItems: 20 }
+                company_ids: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: Invited.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties: { invitation_sent: { const: true } }
+        '402':
+          description: The workspace has no licensed seat available. A commercial fix, not a form error.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: That address is already in use in this workspace.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /users/{userId}:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    get:
+      tags: [Users]
+      operationId: getUser
+      summary: Get a user
+      description: '`security` is present only for the account holder or a viewer holding `identity.login_history.view`.'
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Users]
+      operationId: updateUser
+      summary: Update a user
+      description: |
+        Profile fields only. Status, roles and credentials each have their own endpoint —
+        folding privileged transitions into a general edit is how "manage users" quietly
+        becomes "escalate privilege".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name: { type: string }
+                last_name: { type: [string, 'null'] }
+                email: { type: string, format: email, description: Changing this clears e-mail verification. }
+                phone: { type: [string, 'null'] }
+                job_title: { type: [string, 'null'] }
+                employee_number: { type: [string, 'null'] }
+                timezone: { type: [string, 'null'] }
+                locale: { type: [string, 'null'] }
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /users/{userId}/suspend:
+    post:
+      tags: [Users]
+      operationId: suspendUser
+      summary: Suspend a user
+      description: Takes effect immediately — every session ends. Refused for the last active owner, and for yourself.
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The only active owner, or acting on yourself.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /users/{userId}/reinstate:
+    post:
+      tags: [Users]
+      operationId: reinstateUser
+      summary: Restore a suspended user
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '402':
+          description: No seat available to reinstate into.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /users/{userId}/deactivate:
+    post:
+      tags: [Users]
+      operationId: deactivateUser
+      summary: Deactivate a user
+      description: |
+        The terminal state. Access ends and every token and device is revoked, but the identity
+        remains resolvable — an accounting system must keep the person who approved a journal
+        entry three years ago attributable. There is no delete endpoint.
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{userId}/send-password-reset:
+    post:
+      tags: [Users]
+      operationId: sendUserPasswordReset
+      summary: Send a user a reset link
+      description: '**Step-up protected.** Produces a credential-bearing link for another account.'
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '202':
+          description: Link sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: object, properties: { message: { type: string } } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '428': { $ref: '#/components/responses/StepUpRequired' }
+
+  /users/{userId}/two-factor:
+    delete:
+      tags: [Users]
+      operationId: resetUserTwoFactor
+      summary: Clear a user's second factor
+      description: |
+        The "lost my phone and my recovery codes" path. **Step-up protected** — it removes a
+        security control from an account you do not own, and is never permitted against a peer
+        or a senior.
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '200': { $ref: '#/components/responses/UserResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '428': { $ref: '#/components/responses/StepUpRequired' }
+
+  /users/{userId}/roles:
+    put:
+      tags: [Roles & permissions]
+      operationId: assignRoles
+      summary: Replace a user's roles
+      description: |
+        A full replacement — an empty array removes every role. **Step-up protected.**
+
+        Refused when: the set contains the owner role (ownership is transferred, not
+        assigned); any role is at or above your own level; or you are the target
+        (self-assignment is the shortest path from "can manage users" to "can do anything");
+        or it would remove the workspace's last owner.
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_ids]
+              properties:
+                role_ids: { type: array, items: { type: string, format: uuid }, maxItems: 20 }
+      responses:
+        '200':
+          description: Roles replaced.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id: { type: string, format: uuid }
+                      roles:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string, format: uuid }
+                            name: { type: string }
+                            label: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '422':
+          description: Escalation refused, or the last owner would be removed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '428': { $ref: '#/components/responses/StepUpRequired' }
+
+  /users/{userId}/transfer-ownership:
+    post:
+      tags: [Roles & permissions]
+      operationId: transferOwnership
+      summary: Transfer workspace ownership
+      description: |
+        The most consequential action in the product, and the only privilege change that
+        raises someone above the actor. Owners only, **step-up protected**, and the grant
+        happens before the removal so there is no instant without an owner.
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '200':
+          description: Transferred.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message: { type: string }
+                      new_owner_id: { type: string, format: uuid }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '428': { $ref: '#/components/responses/StepUpRequired' }
+
+  /login-history:
+    get:
+      tags: [Users]
+      operationId: listLoginHistory
+      summary: Workspace-wide sign-in history
+      description: |
+        Includes attempts against addresses that do not exist — discarding those would blind
+        credential-stuffing detection. Filtering by `ip_address` distinguishes one compromised
+        password from a distributed attack.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: filter[outcome]
+          in: query
+          schema: { type: string, enum: [succeeded, failed, locked_out, two_factor_required, two_factor_failed, password_expired, account_inactive] }
+        - name: filter[user_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: filter[ip_address]
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated history.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/LoginHistoryEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── Roles and permissions ─────────────────────────────────────────────────
+  /roles:
+    get:
+      tags: [Roles & permissions]
+      operationId: listRoles
+      summary: List roles
+      description: |
+        `capabilities` on each role tells the client *why* a control is disabled, so the
+        interface does not re-derive the rules and eventually disagree with the server.
+        `meta.actor_role_level` bounds every control the client offers.
+      responses:
+        '200':
+          description: Roles, highest level first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Role' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          actor_role_level: { type: integer }
+                          actor_is_owner: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Roles & permissions]
+      operationId: createRole
+      summary: Create a role
+      description: |
+        The new role's level is clamped to strictly below your own, so creating a role can
+        never be a route to escalation. Platform-only capabilities are refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Role' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '409':
+          description: A role with that name already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /roles/{roleId}:
+    parameters:
+      - name: roleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Roles & permissions]
+      operationId: getRole
+      summary: Get a role with its permissions
+      responses:
+        '200': { $ref: '#/components/responses/RoleResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Roles & permissions]
+      operationId: updateRole
+      summary: Update a role
+      description: |
+        A built-in role's permissions are editable; its name and label are not, because
+        provisioning and integrations refer to `owner` and `administrator` by name. A role at
+        or above your own level cannot be edited at all — otherwise you could add capabilities
+        to a role you hold and self-escalate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RoleResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Roles & permissions]
+      operationId: deleteRole
+      summary: Delete a role
+      description: Refused for built-in roles and for any role still assigned — cascading would silently strip users of access nobody asked to remove.
+      responses:
+        '204': { description: Deleted. }
+        '422':
+          description: Built in, or still assigned. The assigned count is disclosed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /permissions:
+    get:
+      tags: [Roles & permissions]
+      operationId: listPermissions
+      summary: The capability catalogue
+      description: |
+        Grouped by module and resource, which is how the permission matrix is rendered —
+        making the client regroup a flat list would put the grouping rules in two places.
+        Platform-staff capabilities are excluded. Read-only: the catalogue is defined in code
+        and synchronised by deployment.
+      responses:
+        '200':
+          description: Grouped catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        module: { type: string }
+                        resources:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              resource: { type: string }
+                              permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties: { total: { type: integer } }
+
+  # ── Companies ─────────────────────────────────────────────────────────────
+  /companies:
+    get:
+      tags: [Companies]
+      operationId: listCompanies
+      summary: List companies you can access
+      description: Scoped by membership, not merely by workspace — an administrator who is not a member of a group company does not see its details.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: filter[status]
+          in: query
+          schema: { type: string, enum: [active, archived] }
+      responses:
+        '200':
+          description: Paginated companies.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Company' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+    post:
+      tags: [Companies]
+      operationId: createCompany
+      summary: Create a company
+      description: |
+        Atomic across three things: the company, its primary branch, and a membership for you.
+        A company its creator cannot open is the most confusing possible partial state.
+
+        `is_vat_registered` is derived from whether a VAT number was supplied, never trusted
+        from the client — a company claiming registration with no number would produce
+        invoices that fail an IRD audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCompanyRequest' }
+      responses:
+        '201':
+          description: Created, with its primary branch.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Company' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '402':
+          description: The workspace has reached its company limit.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Companies]
+      operationId: getCompany
+      summary: Get a company
+      description: '`accounting.current_fiscal_year` is resolved server-side — the fiscal calendar is the single most error-prone calculation to duplicate on a client.'
+      responses:
+        '200': { $ref: '#/components/responses/CompanyResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Companies]
+      operationId: updateCompany
+      summary: Update a company
+      description: |
+        `code` and `slug` are absent: both appear on posted document numbers and in URLs, so
+        they are fixed at creation.
+
+        `base_currency_code` and the fiscal year start **are** accepted, but are refused once
+        the company has ledger activity — changing either would silently restate every
+        historical balance rather than converting it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCompanyRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/CompanyResponse' }
+        '422':
+          description: Validation failed, or the accounting configuration is locked.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/archive:
+    post:
+      tags: [Companies]
+      operationId: archiveCompany
+      summary: Archive a company
+      description: |
+        Closes it to further activity and revokes every membership. Never a delete: a company
+        that has appeared on a financial statement must stay resolvable. Refused for the
+        workspace default and for the last active company.
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+      responses:
+        '200': { $ref: '#/components/responses/CompanyResponse' }
+        '422':
+          description: It is the default, or the only active company.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/restore:
+    post:
+      tags: [Companies]
+      operationId: restoreCompany
+      summary: Restore an archived company
+      description: Memberships are not restored — regranting access is a deliberate administrative act.
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+      responses:
+        '200': { $ref: '#/components/responses/CompanyResponse' }
+
+  /companies/{companyId}/make-default:
+    post:
+      tags: [Companies]
+      operationId: makeCompanyDefault
+      summary: Make this the workspace default
+      description: Affects every user, so it requires `settings.workspace.update` rather than a company permission.
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+      responses:
+        '200': { $ref: '#/components/responses/CompanyResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /companies/{companyId}/select:
+    post:
+      tags: [Companies]
+      operationId: selectCompany
+      summary: Choose which company you land in
+      description: A preference, not a privilege — no permission required beyond membership. A bookkeeper with two companies should not need an administrator to switch.
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+      responses:
+        '200':
+          description: Your default company changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Membership' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  /companies/{companyId}/branches:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Companies]
+      operationId: listBranches
+      summary: List a company's branches
+      description: Primary first — it is the one users pick most, and burying it alphabetically slows every branch selector.
+      parameters:
+        - name: active_only
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Branches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Branch' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+    post:
+      tags: [Companies]
+      operationId: createBranch
+      summary: Add a branch
+      description: A branch is a *dimension* on transactions, not a separate set of books — a company's trial balance is the sum across its branches.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BranchRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/BranchResponse' }
+        '409':
+          description: That branch code is already used in this company.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/branches/{branchId}:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/BranchId'
+    get:
+      tags: [Companies]
+      operationId: getBranch
+      summary: Get a branch
+      responses:
+        '200': { $ref: '#/components/responses/BranchResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Companies]
+      operationId: updateBranch
+      summary: Update a branch
+      description: The code is fixed once anything has been posted against the branch — historical document numbers embed it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BranchRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/BranchResponse' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/branches/{branchId}/archive:
+    post:
+      tags: [Companies]
+      operationId: archiveBranch
+      summary: Archive a branch
+      description: Refused for the primary branch — it is where transactions land when a document names none.
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200': { $ref: '#/components/responses/BranchResponse' }
+        '422':
+          description: It is the primary branch.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/branches/{branchId}/restore:
+    post:
+      tags: [Companies]
+      operationId: restoreBranch
+      summary: Restore an archived branch
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200': { $ref: '#/components/responses/BranchResponse' }
+
+  /companies/{companyId}/branches/{branchId}/make-primary:
+    post:
+      tags: [Companies]
+      operationId: makeBranchPrimary
+      summary: Move the primary designation
+      description: Both writes are inseparable — a partial application would leave the company with two primaries or none.
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200': { $ref: '#/components/responses/BranchResponse' }
+
+  /companies/{companyId}/members:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Companies]
+      operationId: listCompanyMembers
+      summary: Who can access this company's books
+      description: '`active_only=false` includes revoked grants — "who used to have access" is the question an auditor arrives with.'
+      parameters:
+        - name: active_only
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Memberships.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Membership' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+    post:
+      tags: [Companies]
+      operationId: grantCompanyAccess
+      summary: Grant access to a company
+      description: |
+        You must already be a member of the company you are granting, and you cannot grant to
+        yourself. Without those rules "can manage company access" would silently mean "can
+        read every set of books in the workspace".
+
+        Platform staff cannot be granted access at all — staff access goes through the audited
+        impersonation flow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                branch_id:
+                  type: [string, 'null']
+                  format: uuid
+                  description: Narrows the user to one branch. Null means every branch.
+                make_default: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Granted. A previously revoked grant is reinstated, preserving its original join date.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Membership' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/members/{membershipId}:
+    delete:
+      tags: [Companies]
+      operationId: revokeCompanyAccess
+      summary: Revoke access to a company
+      description: |
+        Recorded with a timestamp, never deleted, so "who could see these books in March"
+        stays answerable. If it was the user's landing company they are moved to their oldest
+        remaining one rather than left with none. You cannot revoke your own access.
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - name: membershipId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Revoked. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── Settings ──────────────────────────────────────────────────────────────
+  /settings:
+    get:
+      tags: [Settings]
+      operationId: listSettings
+      summary: Settings at a scope, with resolved values
+      description: |
+        Each field arrives with its type, label, help text, options and whether it is
+        currently an override — so the client renders the correct control without knowing what
+        the setting is, and adding one server-side needs no front-end change.
+
+        `user` scope always resolves to *your own* settings, whatever permissions you hold.
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [user, company, tenant], default: tenant }
+      responses:
+        '200':
+          description: Grouped settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        group: { type: string, example: security }
+                        settings: { type: array, items: { $ref: '#/components/schemas/Setting' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          scope: { type: string }
+                          scope_id: { type: [string, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Settings]
+      operationId: updateSettings
+      summary: Update settings at a scope
+      description: |
+        Atomic across the whole group — half a security policy is worse than none. Writing at
+        a scope the setting does not permit is refused: a per-user override of
+        `security.require_two_factor` would let any user opt out of the control their
+        administrator mandated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, settings]
+              properties:
+                scope: { type: string, enum: [user, company, tenant] }
+                scope_id:
+                  type: [string, 'null']
+                  format: uuid
+                  description: Required for `company`; prohibited for `tenant`; ignored for `user`.
+                settings:
+                  type: object
+                  additionalProperties: true
+                  example: { security.session_idle_timeout: 15, localisation.date_format: d/m/Y }
+      responses:
+        '200':
+          description: Saved. Returns the resolved values after writing.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: object, additionalProperties: true }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          scope: { type: string }
+                          updated: { type: integer }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /settings/bootstrap:
+    get:
+      tags: [Settings]
+      operationId: bootstrapSettings
+      summary: The settings the interface needs to render
+      description: |
+        Locale formats and branding, resolved for the current user. Deliberately requires no
+        settings permission — withholding the date format from a user who lacks it would leave
+        them looking at raw timestamps.
+      responses:
+        '200':
+          description: Resolved public settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: object, additionalProperties: true }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  /settings/{key}:
+    delete:
+      tags: [Settings]
+      operationId: resetSetting
+      summary: Remove an override so the value inherits again
+      description: |
+        Distinct from setting the default explicitly: an override equal to today's default
+        would silently stop tracking a change to that default in a later release.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9_.]+$' }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [user, company, tenant] }
+      responses:
+        '200':
+          description: Reset. The inherited value is returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      key: { type: string }
+                      value: {}
+                      is_overridden: { const: false }
+                  meta: { $ref: '#/components/schemas/Meta' }
+
+  # ── Audit ─────────────────────────────────────────────────────────────────
+  /audit:
+    get:
+      tags: [Audit]
+      operationId: listAuditEntries
+      summary: The audit trail
+      description: |
+        Ordered by `sequence`, not `created_at`: two entries can share a timestamp to the
+        microsecond, and only the sequence gives the total order the hash chain follows.
+
+        Filter by date rather than paging back — an auditor works in "the year ended 31
+        March", and paging through a million rows to reach it is not viable.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: filter[event]
+          in: query
+          schema: { type: string, example: permission_changed }
+        - name: filter[actor_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: filter[auditable_type]
+          in: query
+          description: Morph alias, e.g. `user`, `company`, `role`.
+          schema: { type: string }
+        - name: filter[auditable_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: filter[company_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: filter[from]
+          in: query
+          schema: { type: string, format: date }
+        - name: filter[to]
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Paginated entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /audit/records/{type}/{id}:
+    get:
+      tags: [Audit]
+      operationId: getRecordHistory
+      summary: The full history of one record
+      description: The question an auditor asks most often. `type` is a morph alias, so the URL cannot be used to probe for internal namespaces.
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z_]+$', example: company }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Entries for that record, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+
+  /audit/verify:
+    post:
+      tags: [Audit]
+      operationId: verifyAuditChain
+      summary: Verify the audit trail has not been altered
+      description: |
+        Walks the sealed chain and reports the first break. **Step-up protected** — the result
+        reveals whether the trail has been tampered with, which is information an attacker
+        would like to have.
+
+        Two failure kinds are distinguished because they mean different things: `hash_mismatch`
+        means a row's contents were altered; `broken_link` means a row was removed.
+
+        `unsealed_entries` is normal and not a fault — the chain is sealed every five minutes,
+        so the newest entries are legitimately unchained.
+      responses:
+        '200':
+          description: Verification result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      intact: { type: boolean }
+                      entries_verified: { type: integer }
+                      failure:
+                        type: [object, 'null']
+                        properties:
+                          kind: { type: string, enum: [hash_mismatch, broken_link] }
+                          detail: { type: string }
+                          sequence: { type: integer }
+                          id: { type: string, format: uuid }
+                      unsealed_entries: { type: integer }
+                      message: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '428': { $ref: '#/components/responses/StepUpRequired' }
+
+  /activity:
+    get:
+      tags: [Audit]
+      operationId: listActivity
+      summary: The activity feed
+      description: A readable feed for dashboards — a product surface, not a compliance record. Short retention, and `batch_id` collapses one bulk action into one entry.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: filter[channel]
+          in: query
+          schema: { type: string, example: security }
+        - name: filter[causer_id]
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Paginated activity.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ActivityEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: asids_session
+      description: |
+        First-party SPA. `GET /sanctum/csrf-cookie` first, then send the value of the
+        `XSRF-TOKEN` cookie as `X-XSRF-TOKEN` on every write. No token is held in JavaScript,
+        so XSS cannot exfiltrate a long-lived credential.
+    bearerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: asids_pat_{id}|{secret}
+      description: |
+        Personal access token for mobile and integrations. Abilities are intersected with the
+        creator's own permissions at issue time. Optionally restricted to CIDR ranges.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PerPage:
+      name: per_page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 25 }
+    Search:
+      name: q
+      in: query
+      description: Free-text search. Two characters minimum — below that a trigram match costs more than it helps.
+      schema: { type: string, minLength: 2, maxLength: 120 }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CompanyId:
+      name: companyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BranchId:
+      name: branchId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    ValidationFailed:
+      description: One or more fields failed validation. `errors` maps field to messages.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://docs.asidstech.com/errors/validation-failed
+            title: The submitted data is invalid.
+            status: 422
+            detail: One or more fields failed validation. See `errors` for details.
+            request_id: 01936f2a-0000-7000-8000-000000000000
+            errors:
+              email: [The email has already been taken.]
+    Forbidden:
+      description: |
+        Permission denied. The missing permission is deliberately not named — that would
+        enumerate the capability catalogue.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: |
+        Not found, or not accessible to you. The two are deliberately indistinguishable, so
+        this endpoint cannot confirm that an id exists in another workspace.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    StepUpRequired:
+      description: |
+        A fresh second-factor confirmation is needed. `POST /auth/two-factor/confirm-session`
+        with a TOTP code, then replay this request.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://docs.asidstech.com/errors/two-factor-confirmation-required
+            title: Confirmation required
+            status: 428
+            detail: This action needs to be confirmed with your authenticator code.
+            confirmation_endpoint: /api/v1/auth/two-factor/confirm-session
+    LinkGone:
+      description: The link expired, was already used, or was tampered with. The three are deliberately indistinguishable.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    SignedOut:
+      description: Signed out.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { type: object, properties: { authenticated: { const: false } } }
+              meta: { $ref: '#/components/schemas/Meta' }
+    UserResponse:
+      description: A user.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/User' }
+              meta: { $ref: '#/components/schemas/Meta' }
+    RoleResponse:
+      description: A role.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/Role' }
+              meta: { $ref: '#/components/schemas/Meta' }
+    CompanyResponse:
+      description: A company.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/Company' }
+              meta: { $ref: '#/components/schemas/Meta' }
+    BranchResponse:
+      description: A branch.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/Branch' }
+              meta: { $ref: '#/components/schemas/Meta' }
+
+  schemas:
+    Meta:
+      type: object
+      required: [request_id, api_version]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Quote this to support. It correlates every log line for the request.
+        api_version: { type: string, const: v1 }
+      additionalProperties: true
+
+    PaginatedMeta:
+      allOf:
+        - $ref: '#/components/schemas/Meta'
+        - type: object
+          properties:
+            pagination:
+              type: object
+              properties:
+                total: { type: integer }
+                per_page: { type: integer }
+                current_page: { type: integer }
+                last_page: { type: integer }
+                from: { type: [integer, 'null'] }
+                to: { type: [integer, 'null'] }
+
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      description: RFC 9457 problem document. Branch on `type`, never on `title` or `detail`.
+      properties:
+        type: { type: string, format: uri, description: Stable, documented identifier. }
+        title: { type: string, description: Short human-readable summary. Prose — may change. }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        request_id: { type: string, format: uuid }
+        errors:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+        retry_after_seconds: { type: integer }
+      additionalProperties: true
+
+    CodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, minLength: 6, maxLength: 64 }
+
+    ReasonRequest:
+      type: object
+      properties:
+        reason: { type: string, description: Recorded in the audit trail. }
+
+    Session:
+      type: object
+      description: Everything the interface needs to render, in one payload.
+      properties:
+        authenticated: { const: true }
+        user: { $ref: '#/components/schemas/User' }
+        permissions:
+          type: array
+          items: { type: string }
+          description: |
+            For presentation only — hiding controls the user cannot use. The server authorises
+            every request independently, so this is not a security boundary.
+        workspace: { $ref: '#/components/schemas/Workspace' }
+        companies:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              code: { type: string }
+              base_currency_code: { type: string }
+              currency_precision: { type: integer }
+              timezone: { type: string }
+              is_default: { type: boolean }
+        requires:
+          type: object
+          description: Interstitials the client must resolve before proceeding.
+          properties:
+            password_change: { type: boolean }
+            two_factor_enrolment: { type: boolean }
+            company_selection: { type: boolean }
+
+    Workspace:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        status: { type: string, enum: [provisioning, active, suspended, cancelled] }
+        country_code: { type: string }
+        currency_code: { type: string }
+        timezone: { type: string }
+        locale: { type: string }
+        primary_url: { type: string, format: uri }
+        on_trial: { type: boolean }
+        trial_ends_at: { type: [string, 'null'], format: date-time }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: [string, 'null'] }
+        full_name: { type: string }
+        initials: { type: string }
+        email: { type: string, format: email }
+        email_verified: { type: boolean }
+        phone: { type: [string, 'null'] }
+        job_title: { type: [string, 'null'] }
+        employee_number: { type: [string, 'null'] }
+        status: { type: string, enum: [pending_invitation, active, suspended, deactivated] }
+        status_label: { type: string }
+        is_platform_admin: { type: boolean }
+        is_owner: { type: boolean }
+        two_factor_enabled: { type: boolean }
+        preferences:
+          type: object
+          properties:
+            locale: { type: string }
+            timezone: { type: string }
+            theme: { type: string, enum: [system, light, dark] }
+        roles:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              label: { type: string }
+              level: { type: integer }
+              is_owner: { type: boolean }
+        security:
+          type: object
+          description: Present only for the account holder or a viewer with `identity.login_history.view`.
+          properties:
+            last_login_at: { type: [string, 'null'], format: date-time }
+            last_login_ip: { type: [string, 'null'] }
+            last_activity_at: { type: [string, 'null'], format: date-time }
+            password_changed_at: { type: [string, 'null'], format: date-time }
+            password_expired: { type: boolean }
+            must_change_password: { type: boolean }
+            is_locked: { type: boolean }
+            locked_until: { type: [string, 'null'], format: date-time }
+            failed_login_attempts: { type: integer }
+        created_at: { type: [string, 'null'], format: date-time }
+
+    Role:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, description: Machine name. Stable — integrations refer to it. }
+        label: { type: string }
+        description: { type: [string, 'null'] }
+        level: { type: integer, description: Total order. You may only act on roles strictly below your own. }
+        is_system: { type: boolean }
+        is_owner: { type: boolean }
+        is_template: { type: boolean }
+        capabilities:
+          type: object
+          description: Why a control is enabled or not. Sent so the client does not re-derive the rules.
+          properties:
+            renameable: { type: boolean }
+            deletable: { type: boolean }
+            permissions_editable: { type: boolean }
+            grantable_by_current_user: { type: boolean }
+        permissions:
+          type: array
+          items: { type: string }
+          description: For the owner role this is the whole grantable catalogue — its authority is implicit, not a stored set.
+        assigned_user_count: { type: integer }
+
+    Permission:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: organization.companies.update }
+        module: { type: string }
+        resource: { type: string }
+        action: { type: string }
+        label: { type: string }
+        description: { type: [string, 'null'] }
+        is_sensitive:
+          type: boolean
+          description: Can move money, alter posted history, or weaken another user's security.
+
+    Company:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        legal_name: { type: [string, 'null'] }
+        display_name: { type: string }
+        code: { type: string, description: Appears on document numbers. Fixed at creation. }
+        slug: { type: string }
+        status: { type: string, enum: [active, archived] }
+        is_default: { type: boolean }
+        accounting:
+          type: object
+          properties:
+            base_currency_code: { type: string, description: Immutable once the ledger has activity. }
+            currency_precision: { type: integer }
+            fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12 }
+            fiscal_year_start_day: { type: integer, minimum: 1, maximum: 28 }
+            uses_calendar_fiscal_year: { type: boolean }
+            current_fiscal_year:
+              type: object
+              properties:
+                starts_on: { type: string, format: date }
+                ends_on: { type: string, format: date }
+        registrations:
+          type: object
+          properties:
+            registration_number: { type: [string, 'null'] }
+            tax_identification_number: { type: [string, 'null'] }
+            vat_registration_number: { type: [string, 'null'] }
+            svat_registration_number: { type: [string, 'null'] }
+            is_vat_registered: { type: boolean, description: Derived from whether a number was supplied. }
+            is_svat_registered: { type: boolean, description: Implies VAT registration. }
+        locale:
+          type: object
+          properties:
+            country_code: { type: string }
+            timezone: { type: string }
+            locale: { type: string }
+        branch_count: { type: integer }
+        member_count: { type: integer }
+
+    Branch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        name: { type: string }
+        code: { type: string }
+        is_primary: { type: boolean, description: Where transactions land when a document names no branch. }
+        status: { type: string, enum: [active, archived] }
+
+    Membership:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        branch_id: { type: [string, 'null'], format: uuid }
+        is_branch_restricted: { type: boolean }
+        is_default: { type: boolean }
+        is_active: { type: boolean }
+        joined_at: { type: [string, 'null'], format: date-time }
+        revoked_at: { type: [string, 'null'], format: date-time }
+
+    Device:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Chrome on macOS }
+        device_type: { type: [string, 'null'], enum: [desktop, mobile, tablet, null] }
+        platform: { type: [string, 'null'] }
+        browser: { type: [string, 'null'] }
+        is_trusted: { type: boolean, description: May skip the two factor challenge until trust expires. }
+        trust_expires_at: { type: [string, 'null'], format: date-time }
+        last_ip_address: { type: [string, 'null'] }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+        is_current_device: { type: boolean }
+        revoked_at: { type: [string, 'null'], format: date-time }
+
+    LoginHistoryEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        outcome: { type: string, enum: [succeeded, failed, locked_out, two_factor_required, two_factor_failed, password_expired, account_inactive] }
+        succeeded: { type: boolean }
+        failure_reason: { type: [string, 'null'], description: Machine code, so the client can translate it. }
+        channel: { type: string, enum: [web, api, mobile, sso] }
+        ip_address: { type: string }
+        country_code: { type: [string, 'null'] }
+        platform: { type: [string, 'null'] }
+        browser: { type: [string, 'null'] }
+        two_factor_used: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    AccessToken:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        abilities: { type: array, items: { type: string } }
+        is_usable: { type: boolean }
+        expires_at: { type: [string, 'null'], format: date-time }
+        revoked_at: { type: [string, 'null'], format: date-time }
+        revocation_reason: { type: [string, 'null'] }
+        allowed_ip_ranges: { type: array, items: { type: string } }
+        last_used_at: { type: [string, 'null'], format: date-time, description: Null means configured and forgotten — the token most worth revoking. }
+        last_used_ip: { type: [string, 'null'] }
+        created_at: { type: [string, 'null'], format: date-time }
+
+    Setting:
+      type: object
+      properties:
+        key: { type: string, example: security.session_idle_timeout }
+        label: { type: string }
+        description: { type: string }
+        group: { type: string }
+        type: { type: string, enum: [string, text, integer, float, boolean, array, json, date, datetime, time] }
+        value: { description: The resolved value at this scope. }
+        default: { description: The definition's default in code. }
+        is_overridden: { type: boolean, description: False means inherited — the client should show that and offer a reset. }
+        overridden_at: { type: [string, 'null'], enum: [user, company, tenant, system, null] }
+        options:
+          type: [object, 'null']
+          additionalProperties: { type: string }
+          description: Present for a select control. The allowed values.
+        overridable_at: { type: array, items: { type: string, enum: [user, company, tenant, system] } }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sequence: { type: integer, description: Total order. The hash chain follows it. }
+        event: { type: string, example: permission_changed }
+        event_label: { type: string }
+        high_signal: { type: boolean, description: Privilege, credential and destructive events an auditor always wants surfaced. }
+        record:
+          type: object
+          properties:
+            type: { type: string, description: Morph alias, not a class name — a namespace refactor cannot orphan history. }
+            id: { type: string, format: uuid }
+        changes:
+          type: object
+          properties:
+            attributes: { type: array, items: { type: string } }
+            before: { type: [object, 'null'], additionalProperties: true }
+            after: { type: [object, 'null'], additionalProperties: true }
+        actor:
+          type: object
+          properties:
+            type: { type: string, enum: [user, system, api_token, console, job] }
+            type_label: { type: string }
+            id: { type: [string, 'null'], format: uuid }
+            label: { type: [string, 'null'], description: As recorded at the time — reads correctly after the account is renamed. }
+            impersonator_id: { type: [string, 'null'], format: uuid }
+            via_access_token: { type: boolean }
+        context:
+          type: object
+          properties:
+            ip_address: { type: [string, 'null'] }
+            channel: { type: string }
+            request_method: { type: [string, 'null'] }
+            request_url: { type: [string, 'null'] }
+            request_id: { type: [string, 'null'], format: uuid }
+            company_id: { type: [string, 'null'], format: uuid }
+        tags: { type: array, items: { type: string } }
+        reason: { type: [string, 'null'] }
+        integrity:
+          type: object
+          properties:
+            sealed: { type: boolean, description: False for the newest few minutes. Not less trustworthy, only not yet chained. }
+            sealed_at: { type: [string, 'null'], format: date-time }
+            hash: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+
+    ActivityEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        channel: { type: string, example: security }
+        event: { type: [string, 'null'] }
+        description: { type: string, example: Nimal Perera changed roles for Kumari Silva }
+        subject:
+          type: [object, 'null']
+          properties:
+            type: { type: string }
+            id: { type: string, format: uuid }
+            label: { type: string, description: As recorded — survives a rename. }
+        causer:
+          type: object
+          properties:
+            type: { type: [string, 'null'] }
+            id: { type: [string, 'null'], format: uuid }
+            label: { type: string }
+        properties: { type: object, additionalProperties: true }
+        batch_id: { type: [string, 'null'], format: uuid, description: Collapses one bulk action into one feed entry. }
+        created_at: { type: string, format: date-time }
+
+    CreateWorkspaceRequest:
+      type: object
+      required: [tenant_name, slug, owner_first_name, owner_email, owner_password, owner_password_confirmation, accepts_terms]
+      properties:
+        tenant_name: { type: string, minLength: 2, maxLength: 255 }
+        legal_name: { type: [string, 'null'] }
+        slug:
+          type: string
+          minLength: 3
+          maxLength: 63
+          pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+          description: Becomes a DNS label. Reserved slugs are refused.
+        owner_first_name: { type: string, maxLength: 100 }
+        owner_last_name: { type: [string, 'null'], maxLength: 100 }
+        owner_email: { type: string, format: email }
+        owner_password: { type: string }
+        owner_password_confirmation: { type: string }
+        company_name: { type: [string, 'null'], description: Defaults to the workspace name — an SME should not answer the same question twice. }
+        country_code: { type: string, default: LK }
+        currency_code: { type: string, default: LKR }
+        timezone: { type: string, default: Asia/Colombo }
+        locale: { type: string, enum: [en, si, ta], default: en }
+        contact_phone: { type: [string, 'null'] }
+        tax_identification_number: { type: [string, 'null'] }
+        accepts_terms: { type: boolean, const: true }
+
+    CreateCompanyRequest:
+      type: object
+      required: [name, base_currency_code, country_code, timezone]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 255 }
+        legal_name: { type: [string, 'null'] }
+        code:
+          type: [string, 'null']
+          maxLength: 24
+          description: Derived from the name when absent. A numeric suffix is appended on collision rather than failing.
+        base_currency_code: { type: string, minLength: 3, maxLength: 3 }
+        currency_precision: { type: integer, minimum: 0, maximum: 6, default: 2 }
+        fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, default: 1 }
+        fiscal_year_start_day:
+          type: integer
+          minimum: 1
+          maximum: 28
+          default: 1
+          description: Capped at 28 so the fiscal calendar is defined in February.
+        country_code: { type: string, minLength: 2, maxLength: 2 }
+        timezone: { type: string }
+        locale: { type: string, enum: [en, si, ta] }
+        registration_number: { type: [string, 'null'] }
+        tax_identification_number: { type: [string, 'null'] }
+        vat_registration_number: { type: [string, 'null'] }
+        svat_registration_number: { type: [string, 'null'], description: Requires a VAT registration number. }
+        business_type: { type: [string, 'null'] }
+        industry: { type: [string, 'null'] }
+        established_on: { type: [string, 'null'], format: date }
+        email: { type: [string, 'null'], format: email }
+        phone: { type: [string, 'null'] }
+        website: { type: [string, 'null'], format: uri }
+        address_line_1: { type: [string, 'null'] }
+        address_line_2: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        district: { type: [string, 'null'] }
+        postal_code: { type: [string, 'null'] }
+        primary_branch_name: { type: string, default: Head Office }
+        primary_branch_code: { type: string, default: HO }
+
+    UpdateCompanyRequest:
+      type: object
+      description: '`code` and `slug` are absent — both are fixed at creation.'
+      properties:
+        name: { type: string }
+        legal_name: { type: [string, 'null'] }
+        base_currency_code: { type: string, description: Refused once the ledger has activity. }
+        currency_precision: { type: integer, minimum: 0, maximum: 6 }
+        fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12 }
+        fiscal_year_start_day: { type: integer, minimum: 1, maximum: 28 }
+        country_code: { type: string }
+        timezone: { type: string }
+        locale: { type: string }
+        registration_number: { type: [string, 'null'] }
+        tax_identification_number: { type: [string, 'null'] }
+        vat_registration_number: { type: [string, 'null'] }
+        svat_registration_number: { type: [string, 'null'] }
+        business_type: { type: [string, 'null'] }
+        industry: { type: [string, 'null'] }
+        established_on: { type: [string, 'null'], format: date }
+        email: { type: [string, 'null'], format: email }
+        phone: { type: [string, 'null'] }
+        website: { type: [string, 'null'] }
+        address_line_1: { type: [string, 'null'] }
+        address_line_2: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        district: { type: [string, 'null'] }
+        postal_code: { type: [string, 'null'] }
+
+    BranchRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 255 }
+        code: { type: [string, 'null'], maxLength: 24 }
+        manager_id: { type: [string, 'null'], format: uuid }
+        email: { type: [string, 'null'], format: email }
+        phone: { type: [string, 'null'] }
+        address_line_1: { type: [string, 'null'] }
+        address_line_2: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        district: { type: [string, 'null'] }
+        postal_code: { type: [string, 'null'] }
+        country_code: { type: [string, 'null'], description: Inherits the company's when absent. }
+        timezone: { type: [string, 'null'] }
+
+    RoleRequest:
+      type: object
+      required: [label, permissions]
+      properties:
+        label: { type: string, minLength: 2, maxLength: 120, description: Ignored for a built-in role — its identity is fixed. }
+        description: { type: [string, 'null'], maxLength: 1000 }
+        permissions:
+          type: array
+          items: { type: string }
+          description: Full replacement. Platform-only capabilities are refused.
+        level:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 99
+          description: Clamped to strictly below your own level, so this cannot be a route to escalation.
