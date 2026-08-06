@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (backend + Vue front end complete)
+**Last updated:** 2026-08-06 (backend, front end and documentation complete; tests outstanding)
 **State:** The backend is structurally complete — every internal class reference resolves
 and nothing is missing. It has still never been executed: no PHP, Composer, Node or
 Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
@@ -193,6 +193,19 @@ settings (server-driven form metadata), security (2FA enrolment, devices, sign-i
 change-password, 403, 404, `useFormat` (company currency and timezone — never the
 browser's), `locales/en.ts`, `tests/Support/vitest.setup.ts`.
 
+## Documentation — complete
+
+| Document | Contents |
+| --- | --- |
+| [`database/erd.md`](database/erd.md) | Five Mermaid diagrams covering every Phase 1 table, plus the RLS coverage matrix, the index strategy, and the two session variables that are the only exceptions to the audit trail's append-only trigger |
+| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI 3.1 — 54 paths, 69 operations, 24 schemas. Documents the *reasoning* a consumer needs, not just the shapes |
+| [`architecture/overview.md`](architecture/overview.md) | Module map and dependency rule, request lifecycle with the two load-bearing orderings, isolation layers, extensibility seams |
+| [`deployment/local.md`](deployment/local.md) | First run, demo accounts, quality gates, six troubleshooting entries |
+| [`deployment/aws.md`](deployment/aws.md) | Topology, **the five things that will bite you**, release sequence, backup drill, alarm priorities |
+| [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md) | OWASP Top 10 treatment with every control marked verified or **UNVERIFIED**; nine residual risks with owners; explicitly **not signed off** |
+| [`PHASE-1-CODE-REVIEW.md`](PHASE-1-CODE-REVIEW.md) | The ten bugs found while building, five strengths, seven weaknesses I judge to remain |
+| ADRs [0001](adr/0001-tenancy-strategy.md)–[0005](adr/0005-workspace-provisioning-ownership.md) | Tenancy strategy, hierarchy, permissions-in-code, config surface, provisioning ownership |
+
 ## Static verification (no PHP available)
 
 A cross-reference over the whole tree, re-run after each workstream:
@@ -207,6 +220,10 @@ Policies: 10, covering 48 authorisation methods.
 Front end (35 files):
   Internal imports checked: 95 — every @/ import resolves.
   Lazy route components: 13 — all resolve.
+
+OpenAPI (2,603 lines):
+  No tabs. 69 operations, all operationIds unique. 41 $refs, all targets declared.
+  Not validated against a real OpenAPI parser — PyYAML is not installed either.
 ```
 
 This proves the tree is internally consistent and will autoload. It does **not** prove it
@@ -221,8 +238,10 @@ Node is absent too, so the front end has never been built or rendered.
 - **Test suite** — `tests/Pest.php`, tenant-aware `TestCase`, feature tests (tenant
   isolation including a real RLS test, auth + lockout + 2FA, RBAC escalation refusal,
   companies, memberships, settings resolution, audit chain integrity), unit tests, Vitest
-- **Documentation** — ERD (Mermaid), OpenAPI 3.1 spec, architecture overview, local + AWS
-  deployment runbooks, security review, Phase 1 code review record
+
+This is the **only** remaining Phase 1 deliverable. It is deliberately last: a test suite
+nobody has seen pass is a guess about behaviour, so it should be written against a running
+toolchain, not added to the pile of unverified code.
 
 ## First things to check once PHP exists
 
