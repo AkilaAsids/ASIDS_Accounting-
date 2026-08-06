@@ -108,14 +108,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     |----------------------------------------------------------------------
     */
 
-    // `session.current` (EnsureSessionIsCurrent) is QUARANTINED — see
-    // docs/PHASE-1-STATUS.md. Enabling it makes every request after sign-in return 401 even
-    // though authentication itself succeeds and neither of its two termination conditions can
-    // be satisfied (no epoch is stored and the activity timestamp is fresh). Until that
-    // contradiction is explained it stays off: the checks it provides are supplementary —
-    // account status is re-read on every authorisation check by `Gate::before` — whereas
-    // enabling it is a total outage.
-    Route::middleware('auth:sanctum')->group(function (): void {
+    Route::middleware(['auth:sanctum', 'session.current'])->group(function (): void {
 
         // ── Reachable with an expired password ───────────────────────────
         // A user whose password has expired is authenticated but confined. These four

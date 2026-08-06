@@ -272,42 +272,37 @@ The four Identity failures are diagnosed and are test-side, not application-side
 4. `LoginHistory::value('outcome')` returns a cast enum, not the raw string the test compares
    against.
 
-## Sessions: FIXED. One check quarantined.
+## Sessions: fixed at the root. Nothing quarantined.
 
-The whole authenticated API surface now works — verified live:
+The whole authenticated API surface returns 200, with `session.current` **enabled**:
 
 ```
-login 200 | /auth/session 200 | /companies 200 | /users 200 | /me 200
-/me/devices 200 | /me/login-history 200 | /activity 200 | POST /roles 403
+login | /auth/session | /companies | /users | /roles | /permissions
+/settings/bootstrap | /audit | /activity | /me/devices | /me/login-history | /tokens
+POST /roles -> 403 (correctly refused for an accountant)
 ```
 
-Root cause of the 401s: **`EnsureSessionIsCurrent`**. Authentication was never broken — a probe
-in the request pipeline showed the cookie arriving, `login_web_*` present in the session, and
-`auth()->guard('sanctum')->user()` resolving correctly. The 401 came from the middleware
-*after* authentication succeeded.
+The 401s were never an authentication or middleware-logic problem. Instrumenting
+`EnsureSessionIsCurrent` showed `idle = true` with an activity timestamp written seconds
+earlier — because **the PostgreSQL session time zone was not UTC**.
 
-It has been rewritten to **fail open**: a session is now ended only on a positive, unambiguous
-signal (two epochs that both exist and differ, or an activity timestamp definitively past the
-idle window). Anything ambiguous logs and continues. The reasoning is in the class docblock —
-failing closed on an ambiguous signal is a total outage, while failing open leaves a session
-alive at most until its lifetime expires, in a system where `Gate::before` re-reads account
-status on every authorisation check anyway.
+Laravel binds a Carbon as `'Y-m-d H:i:s'` with no offset — UTC wall time — and PostgreSQL
+interprets an offset-less literal in the *session* zone. On a server set to `Asia/Colombo`
+every `timestamptz` written through the query builder was stored **5h30m early**: audit
+`created_at`, `login_histories`, `last_activity_at`, all of it. Measured drift was 19,800
+seconds; it is now 1.
 
-**Still quarantined.** With the rewritten middleware re-enabled the 401 returned, even though
-neither termination condition can be satisfied (no `session-epoch` key exists in the cache and
-the activity timestamp is fresh). That contradiction is unexplained, so `session.current` is
-commented out of the authenticated route group in `routes/api.php`. The checks it provides are
-supplementary; enabling it is an outage. **Next step: log inside `handle()` which branch
-returns true.**
+Fixed by pinning `'timezone' => 'UTC'` on both connections in `config/database.php`, so
+correctness no longer depends on how the server was provisioned. `docker/postgres/init/01-bootstrap.sh`
+already set this on the role, which is exactly why a containerised environment never showed it —
+and why running outside Docker was worth doing.
 
-Two other bugs fixed on the way:
+This also fixed **two of the four failing Identity tests** (the lockout pair), with no change
+to the test code: they were failing on the same skew.
 
-* `AuthenticationService` called `session()->regenerate()` after `guard->login()`.
-  `SessionGuard::updateSession()` already migrates, so this migrated a second time.
-* `User::effectiveTimezone()`/`effectiveLocale()` touched the `tenant` relation
-  unconditionally. `UserResource` calls them per row, so `GET /users` was an N+1 that threw
-  outright under strict mode. They now read the relation only when eager loaded, and the
-  three controllers that want workspace defaults load it.
+Also fixed: `GET /roles` returned 500 from `withCount('users')`. spatie resolves that relation's
+model from the role's `guard_name`, which is null on a query builder rather than a hydrated
+instance. Replaced with a direct subquery on `model_has_roles`, which is also more accurate.
 
 ## Operational hazard found by running the suite
 

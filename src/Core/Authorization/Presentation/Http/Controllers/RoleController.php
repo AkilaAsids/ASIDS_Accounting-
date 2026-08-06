@@ -16,6 +16,7 @@ use Asids\Core\Platform\Http\Controllers\ApiController;
 use Asids\Core\Platform\Http\Responses\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 final class RoleController extends ApiController
 {
@@ -30,7 +31,15 @@ final class RoleController extends ApiController
         // two it is a guaranteed N+1 on a page that a customer opens often.
         $roles = Role::query()
             ->with('permissions:id,name')
-            ->withCount('users')
+            // A subquery rather than `withCount('users')`. spatie resolves the `users` relation's
+            // model from the role's `guard_name`, which is null on a query builder rather than a
+            // hydrated instance — so withCount fataled with "Class name must be a valid object or
+            // a string". Counting the pivot directly also counts every assignment regardless of
+            // the model type, which is what "how many users hold this role" actually means.
+            ->addSelect(['users_count' => DB::table('model_has_roles')
+                ->selectRaw('count(*)')
+                ->whereColumn('model_has_roles.role_id', 'roles.id'),
+            ])
             ->orderByDesc('level')
             ->orderBy('label')
             ->get();

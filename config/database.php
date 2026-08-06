@@ -42,6 +42,21 @@ return [
             'search_path' => env('DB_SCHEMA', 'public'),
             'sslmode' => env('DB_SSLMODE', 'prefer'),
             'application_name' => env('APP_NAME', 'asids').'-web',
+            // Pin the session time zone to UTC.
+            //
+            // Without this the connection inherits the server's zone, and every `timestamptz`
+            // written through the query builder shifts. Laravel binds a Carbon as
+            // 'Y-m-d H:i:s' with no offset — UTC wall time — and PostgreSQL interprets an
+            // offset-less literal in the *session* zone. On a server set to Asia/Colombo that
+            // stored each instant 5h30m early: audit entries, login history and
+            // `last_activity_at` were all wrong, and the session idle check fired immediately
+            // after sign-in because the activity timestamp appeared hours old.
+            //
+            // `docker/postgres/init/01-bootstrap.sh` sets `timezone = 'UTC'` on the role, which
+            // is why containerised environments never showed this. Setting it on the connection
+            // makes correctness independent of how the server was provisioned.
+            'timezone' => 'UTC',
+
             // Timeouts are also set on the role itself; repeating them here
             // keeps behaviour identical when connecting from outside Docker.
             'options' => [
@@ -63,6 +78,7 @@ return [
             'search_path' => env('DB_SCHEMA', 'public'),
             'sslmode' => env('DB_SSLMODE', 'prefer'),
             'application_name' => env('APP_NAME', 'asids').'-admin',
+            'timezone' => 'UTC',
         ],
     ],
 
