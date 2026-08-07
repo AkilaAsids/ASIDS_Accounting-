@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property bool $is_closed
  * @property CarbonImmutable|null $closed_at
  * @property string|null $closed_by_id
+ * @property string|null $closing_entry_id
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  * @property-read Company $company
@@ -49,6 +50,18 @@ final class FiscalYear extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /**
+     * Whether the year has been closed and its result moved to retained earnings.
+     *
+     * A method rather than reading the column directly, because closing gains conditions later — a
+     * filed year, a locked year — and every caller asking the question should get the same answer
+     * without each one learning what closing currently means.
+     */
+    public function isClosed(): bool
+    {
+        return $this->is_closed;
     }
 
     /**

@@ -60,6 +60,11 @@ final readonly class FiscalCalendarService
             $year->label = $this->labelFor($start, $end);
             $year->starts_on = $start;
             $year->ends_on = $end;
+            // Set explicitly even though the column defaults to false. A database default is applied
+            // server-side and never reaches the in-memory instance, so the model the caller receives
+            // would report `is_closed` as null — and under model strictness, reading it throws. The
+            // same trap cost Phase 1 two severe bugs.
+            $year->is_closed = false;
             $year->save();
 
             $this->generatePeriods($year);

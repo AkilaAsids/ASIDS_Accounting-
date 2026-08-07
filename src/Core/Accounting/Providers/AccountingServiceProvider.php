@@ -10,6 +10,8 @@ use Asids\Core\Accounting\Application\Services\DocumentNumberService;
 use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
 use Asids\Core\Accounting\Application\Services\JournalService;
 use Asids\Core\Accounting\Application\Services\LedgerBalanceService;
+use Asids\Core\Accounting\Application\Services\OpeningBalanceService;
+use Asids\Core\Accounting\Application\Services\PeriodCloseService;
 use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Contracts\AccountUsageProbe;
 use Asids\Core\Accounting\Domain\Events\JournalEntryPosted;
@@ -52,6 +54,8 @@ final class AccountingServiceProvider extends ServiceProvider
         $this->app->singleton(JournalService::class);
         $this->app->singleton(PostingService::class);
         $this->app->singleton(LedgerBalanceService::class);
+        $this->app->singleton(OpeningBalanceService::class);
+        $this->app->singleton(PeriodCloseService::class);
 
         // The real probe, now that `journal_lines` exists. `NoPostings` was the truthful answer
         // until tranche 3 created the table; the rules in ChartOfAccountsService did not change when

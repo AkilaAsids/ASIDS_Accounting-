@@ -29,6 +29,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property PeriodStatus $status
  * @property CarbonImmutable|null $closed_at
  * @property string|null $closed_by_id
+ * @property CarbonImmutable|null $reopened_at
+ * @property string|null $reopened_by_id
+ * @property string|null $reopen_reason
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  * @property-read Company $company
@@ -129,6 +132,7 @@ final class FiscalPeriod extends Model
             'ends_on' => 'immutable_date',
             'status' => PeriodStatus::class,
             'closed_at' => 'immutable_datetime',
+            'reopened_at' => 'immutable_datetime',
         ];
     }
 }
