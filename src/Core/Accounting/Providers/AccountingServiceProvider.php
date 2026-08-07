@@ -6,9 +6,19 @@ namespace Asids\Core\Accounting\Providers;
 
 use Asids\Core\Accounting\Application\Services\ChartOfAccountsService;
 use Asids\Core\Accounting\Application\Services\ChartTemplateService;
+use Asids\Core\Accounting\Application\Services\DocumentNumberService;
 use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
+use Asids\Core\Accounting\Application\Services\JournalService;
+use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Contracts\AccountUsageProbe;
-use Asids\Core\Accounting\Infrastructure\Ledger\NoPostings;
+use Asids\Core\Accounting\Domain\Models\Account;
+use Asids\Core\Accounting\Domain\Models\FiscalPeriod;
+use Asids\Core\Accounting\Domain\Models\FiscalYear;
+use Asids\Core\Accounting\Domain\Models\Journal;
+use Asids\Core\Accounting\Domain\Models\JournalEntry;
+use Asids\Core\Accounting\Domain\Models\JournalLine;
+use Asids\Core\Accounting\Infrastructure\Ledger\EloquentAccountUsageProbe;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -31,15 +41,44 @@ final class AccountingServiceProvider extends ServiceProvider
         $this->app->singleton(FiscalCalendarService::class);
         $this->app->singleton(ChartOfAccountsService::class);
         $this->app->singleton(ChartTemplateService::class);
+        $this->app->singleton(DocumentNumberService::class);
+        $this->app->singleton(JournalService::class);
+        $this->app->singleton(PostingService::class);
 
-        // Replaced by the Eloquent implementation in tranche 3, when `journal_lines` exists. Until
-        // then no account can have a posting, so `NoPostings` is the accurate answer rather than a
-        // convenient one — and the rules that consult it are already in force.
-        $this->app->bind(AccountUsageProbe::class, NoPostings::class);
+        // The real probe, now that `journal_lines` exists. `NoPostings` was the truthful answer
+        // until tranche 3 created the table; the rules in ChartOfAccountsService did not change when
+        // this binding did, which is the point of having had the seam.
+        $this->app->bind(AccountUsageProbe::class, EloquentAccountUsageProbe::class);
     }
 
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
+
+        $this->registerMorphAliases();
+    }
+
+    /**
+     * The module's own morph aliases.
+     *
+     * Declared here rather than appended to the central list in `PlatformServiceProvider`, and
+     * `morphMap()` merges rather than replaces, so each module owns the aliases for its own models.
+     * A single central list would mean every new module editing a Platform file, which is exactly
+     * the coupling `ModuleServiceProvider` exists to avoid.
+     *
+     * The map is *enforced*, so this is not optional decoration: `JournalEntry` applies the
+     * `Auditable` trait, and an audit entry for an unmapped class throws rather than storing a class
+     * name that a namespace refactor would orphan.
+     */
+    private function registerMorphAliases(): void
+    {
+        Relation::morphMap([
+            'account' => Account::class,
+            'fiscal_year' => FiscalYear::class,
+            'fiscal_period' => FiscalPeriod::class,
+            'journal' => Journal::class,
+            'journal_entry' => JournalEntry::class,
+            'journal_line' => JournalLine::class,
+        ]);
     }
 }

@@ -288,6 +288,10 @@ final readonly class Money implements Stringable
     /**
      * The decimal string the database column stores. Always four decimal places, so a round trip
      * through `numeric(19,4)` returns exactly what went in.
+     *
+     * Typed as a plain string rather than `numeric-string`: the format is guaranteed by construction,
+     * but PHPStan cannot see that through `sprintf`, and the only ways to make it agree are a cast or
+     * an assertion — both of which assert the property rather than establishing it.
      */
     public function toDecimalString(): string
     {
