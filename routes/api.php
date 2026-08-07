@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+use Asids\Core\Accounting\Presentation\Http\Controllers\AccountController;
+use Asids\Core\Accounting\Presentation\Http\Controllers\FiscalPeriodController;
+use Asids\Core\Accounting\Presentation\Http\Controllers\JournalEntryController;
+use Asids\Core\Accounting\Presentation\Http\Controllers\LedgerReportController;
 use Asids\Core\Audit\Presentation\Http\Controllers\ActivityLogController;
 use Asids\Core\Audit\Presentation\Http\Controllers\AuditLogController;
 use Asids\Core\Authorization\Presentation\Http\Controllers\PermissionController;
@@ -308,6 +312,54 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                     Route::post('{branch}/archive', [BranchController::class, 'archive'])->name('archive');
                     Route::post('{branch}/restore', [BranchController::class, 'restore'])->name('restore');
                     Route::post('{branch}/make-primary', [BranchController::class, 'makePrimary'])->name('make-primary');
+                });
+
+                /*
+                 * ── Accounting ──────────────────────────────────────────────
+                 *
+                 * Everything is nested under a company because a ledger belongs to one legal entity,
+                 * and a flat route would invite a query that forgets to scope by it — which in a
+                 * workspace holding several companies puts one entity's figures in another's report.
+                 *
+                 * Posting and reversing are their own endpoints rather than a status field on an
+                 * update. They are different capabilities held by different people, and a PATCH that
+                 * could set `status: posted` would make the bookkeeper/accountant split a matter of
+                 * what the client chose to send.
+                 */
+                Route::prefix('{company}/accounts')->name('accounts.')->middleware('company')->group(function (): void {
+                    Route::get('/', [AccountController::class, 'index'])->name('index');
+                    Route::post('/', [AccountController::class, 'store'])->name('store');
+                    Route::get('template', [AccountController::class, 'template'])->name('template');
+                    Route::post('template', [AccountController::class, 'applyTemplate'])->name('template.apply');
+                    Route::get('{account}', [AccountController::class, 'show'])->name('show');
+                    Route::put('{account}', [AccountController::class, 'update'])->name('update');
+                    Route::delete('{account}', [AccountController::class, 'destroy'])->name('destroy');
+                    Route::post('{account}/archive', [AccountController::class, 'archive'])->name('archive');
+                    Route::post('{account}/restore', [AccountController::class, 'restore'])->name('restore');
+                    Route::get('{account}/ledger', [LedgerReportController::class, 'accountLedger'])->name('ledger');
+                });
+
+                Route::prefix('{company}/journal-entries')->name('journal-entries.')->middleware('company')->group(function (): void {
+                    Route::get('/', [JournalEntryController::class, 'index'])->name('index');
+                    Route::post('/', [JournalEntryController::class, 'store'])->name('store');
+                    Route::get('{entry}', [JournalEntryController::class, 'show'])->name('show');
+                    Route::put('{entry}', [JournalEntryController::class, 'update'])->name('update');
+                    Route::delete('{entry}', [JournalEntryController::class, 'destroy'])->name('destroy');
+                    Route::post('{entry}/post', [JournalEntryController::class, 'post'])->name('post');
+                    Route::post('{entry}/reverse', [JournalEntryController::class, 'reverse'])->name('reverse');
+                });
+
+                Route::prefix('{company}/fiscal-calendar')->name('fiscal-calendar.')->middleware('company')->group(function (): void {
+                    Route::get('/', [FiscalPeriodController::class, 'index'])->name('index');
+                    Route::post('years', [FiscalPeriodController::class, 'openYear'])->name('years.open');
+                    Route::get('years/{year}/result', [FiscalPeriodController::class, 'yearResult'])->name('years.result');
+                    Route::post('years/{year}/close', [FiscalPeriodController::class, 'closeYear'])->name('years.close');
+                    Route::post('periods/{period}/close', [FiscalPeriodController::class, 'closePeriod'])->name('periods.close');
+                    Route::post('periods/{period}/reopen', [FiscalPeriodController::class, 'reopenPeriod'])->name('periods.reopen');
+                });
+
+                Route::prefix('{company}/reports')->name('reports.')->middleware('company')->group(function (): void {
+                    Route::get('trial-balance', [LedgerReportController::class, 'trialBalance'])->name('trial-balance');
                 });
 
                 Route::prefix('{company}/members')->name('members.')->middleware('company')->group(function (): void {

@@ -38,6 +38,7 @@ final class PermissionCatalogue
             ...self::organization(),
             ...self::settings(),
             ...self::audit(),
+            ...self::accounting(),
             ...self::platform(),
         ];
     }
@@ -175,6 +176,45 @@ final class PermissionCatalogue
             new PermissionDefinition('audit', 'logs', 'export', 'Export audit trail', 'Download the audit trail for an external auditor.', sensitive: true, sortOrder: 20),
             new PermissionDefinition('audit', 'logs', 'verify', 'Verify audit integrity', 'Run the hash-chain verification and see its result.', sortOrder: 30),
             new PermissionDefinition('audit', 'activity', 'view', 'View activity feed', 'See the human-readable activity feed.', sortOrder: 40),
+        ];
+    }
+
+    /**
+     * The accounting core.
+     *
+     * The split that shapes this list is drafting from posting. A bookkeeper records what happened; an
+     * accountant decides it is part of the record. That is how a Sri Lankan SME with one qualified
+     * accountant and two data-entry staff actually operates, and collapsing the two into one
+     * "manage journals" capability would mean the split could only be enforced by asking people
+     * nicely.
+     *
+     * Everything that alters posted history or closes a period is marked sensitive.
+     *
+     * @return list<PermissionDefinition>
+     */
+    private static function accounting(): array
+    {
+        return [
+            new PermissionDefinition('accounting', 'accounts', 'view', 'View chart of accounts', 'See the accounts a company keeps its books in.', sortOrder: 10),
+            new PermissionDefinition('accounting', 'accounts', 'manage', 'Manage chart of accounts', 'Add, rename, reclassify and archive accounts.', sensitive: true, sortOrder: 20),
+
+            new PermissionDefinition('accounting', 'journals', 'view', 'View journal entries', 'Read journal entries and their lines.', sortOrder: 30),
+            new PermissionDefinition('accounting', 'journals', 'draft', 'Draft journal entries', 'Prepare entries for someone else to post.', sortOrder: 40),
+            // Posting is what makes an entry part of the financial record, and it cannot be undone
+            // except by a reversal that is itself visible for ever.
+            new PermissionDefinition('accounting', 'journals', 'post', 'Post journal entries', 'Commit an entry to the ledger.', sensitive: true, sortOrder: 50),
+            new PermissionDefinition('accounting', 'journals', 'reverse', 'Reverse journal entries', 'Undo a posted entry by writing its mirror.', sensitive: true, sortOrder: 60),
+
+            new PermissionDefinition('accounting', 'periods', 'view', 'View fiscal calendar', 'See fiscal years and periods and their state.', sortOrder: 70),
+            new PermissionDefinition('accounting', 'periods', 'close', 'Close periods', 'Stop further postings into a period.', sensitive: true, sortOrder: 80),
+            // Reopening changes figures that may already have been filed with a bank or a tax
+            // authority, which is why it is separate from closing rather than implied by it.
+            new PermissionDefinition('accounting', 'periods', 'reopen', 'Reopen periods', 'Allow postings into a closed period again.', sensitive: true, sortOrder: 90),
+            new PermissionDefinition('accounting', 'periods', 'close-year', 'Close the financial year', 'Move the year\'s result to retained earnings.', sensitive: true, sortOrder: 100),
+
+            new PermissionDefinition('accounting', 'opening-balances', 'manage', 'Record opening balances', 'Enter the balances a business arrives with.', sensitive: true, sortOrder: 110),
+
+            new PermissionDefinition('accounting', 'reports', 'view', 'View accounting reports', 'Read the trial balance and account ledgers.', sortOrder: 120),
         ];
     }
 

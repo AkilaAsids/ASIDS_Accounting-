@@ -78,6 +78,20 @@ final readonly class RoleTemplate
                     'audit.logs.view',
                     'audit.logs.export',
                     'audit.activity.view',
+
+                    // The whole ledger. An accountant is who the drafting/posting split exists to
+                    // put on the deciding side of it — including closing a period, which is a
+                    // professional judgement about whether a month is final.
+                    'accounting.accounts.view',
+                    'accounting.accounts.manage',
+                    'accounting.journals.view',
+                    'accounting.journals.draft',
+                    'accounting.journals.post',
+                    'accounting.journals.reverse',
+                    'accounting.periods.view',
+                    'accounting.periods.close',
+                    'accounting.opening-balances.manage',
+                    'accounting.reports.view',
                 ],
             ),
 
@@ -92,6 +106,16 @@ final readonly class RoleTemplate
                     'organization.branches.view',
                     'settings.company.view',
                     'audit.activity.view',
+
+                    // Drafts, never posts. The whole point of the split: a bookkeeper records what
+                    // happened and an accountant decides it is part of the record. Reports are
+                    // included because a bookkeeper who cannot see a trial balance cannot tell
+                    // whether the entry they just drafted makes sense.
+                    'accounting.accounts.view',
+                    'accounting.journals.view',
+                    'accounting.journals.draft',
+                    'accounting.periods.view',
+                    'accounting.reports.view',
                 ],
             ),
 
@@ -104,6 +128,14 @@ final readonly class RoleTemplate
                     'organization.companies.view',
                     'organization.branches.view',
                     'settings.company.view',
+
+                    // Reads the books and changes nothing. This is the role an owner's external
+                    // accountant, a lender or an auditor is given, so the reports matter more here
+                    // than anywhere else.
+                    'accounting.accounts.view',
+                    'accounting.journals.view',
+                    'accounting.periods.view',
+                    'accounting.reports.view',
                 ],
             ),
         ];

@@ -23,11 +23,17 @@ use Asids\Core\Accounting\Domain\Models\Journal;
 use Asids\Core\Accounting\Domain\Models\JournalEntry;
 use Asids\Core\Accounting\Domain\Models\JournalLine;
 use Asids\Core\Accounting\Infrastructure\Ledger\EloquentAccountUsageProbe;
+use Asids\Core\Accounting\Infrastructure\Ledger\EloquentLedgerActivityProbe;
 use Asids\Core\Accounting\Listeners\MaintainAccountPeriodBalances;
+use Asids\Core\Accounting\Policies\AccountPolicy;
+use Asids\Core\Accounting\Policies\FiscalPeriodPolicy;
+use Asids\Core\Accounting\Policies\JournalEntryPolicy;
 use Asids\Core\Accounting\Presentation\Console\RebuildLedgerBalancesCommand;
 use Asids\Core\Accounting\Presentation\Console\VerifyLedgerCommand;
+use Asids\Core\Organization\Domain\Contracts\LedgerActivityProbe;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -61,6 +67,11 @@ final class AccountingServiceProvider extends ServiceProvider
         // until tranche 3 created the table; the rules in ChartOfAccountsService did not change when
         // this binding did, which is the point of having had the seam.
         $this->app->bind(AccountUsageProbe::class, EloquentAccountUsageProbe::class);
+
+        // Phase 1's seam, finally answered for real. It bound `NoLedgerActivity` because no postable
+        // table existed; the binding moving here is what makes a company's base currency and fiscal
+        // calendar genuinely immutable once its books have activity. Nothing in Organization changed.
+        $this->app->bind(LedgerActivityProbe::class, EloquentLedgerActivityProbe::class);
     }
 
     public function boot(): void
@@ -68,6 +79,10 @@ final class AccountingServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
         $this->registerMorphAliases();
+
+        Gate::policy(Account::class, AccountPolicy::class);
+        Gate::policy(JournalEntry::class, JournalEntryPolicy::class);
+        Gate::policy(FiscalPeriod::class, FiscalPeriodPolicy::class);
 
         Event::listen(JournalEntryPosted::class, [MaintainAccountPeriodBalances::class, 'handlePosted']);
         Event::listen(JournalEntryReversed::class, [MaintainAccountPeriodBalances::class, 'handleReversed']);
