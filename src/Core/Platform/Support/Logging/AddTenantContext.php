@@ -6,6 +6,7 @@ namespace Asids\Core\Platform\Support\Logging;
 
 use Illuminate\Log\Logger;
 use Monolog\Handler\ProcessableHandlerInterface;
+use Monolog\Logger as MonologLogger;
 
 /**
  * Laravel log "tap": attaches TenantContextProcessor to every handler on the
@@ -19,9 +20,17 @@ final class AddTenantContext
 {
     public function __invoke(Logger $logger): void
     {
-        $processor = new TenantContextProcessor();
+        $processor = new TenantContextProcessor;
 
-        foreach ($logger->getLogger()->getHandlers() as $handler) {
+        $monolog = $logger->getLogger();
+
+        // A channel is not required to be Monolog-backed — the null and custom drivers are not —
+        // and handlers only exist on Monolog. Nothing to decorate is not an error.
+        if (! $monolog instanceof MonologLogger) {
+            return;
+        }
+
+        foreach ($monolog->getHandlers() as $handler) {
             if ($handler instanceof ProcessableHandlerInterface) {
                 $handler->pushProcessor($processor);
             }

@@ -5,14 +5,15 @@ declare(strict_types=1);
 namespace Asids\Core\Tenancy\Infrastructure\Bootstrappers;
 
 use Asids\Core\Tenancy\Application\Services\TenantContext;
+use Asids\Core\Tenancy\Domain\Exceptions\TenantNotFound;
 use Asids\Core\Tenancy\Domain\Models\Tenant as TenantModel;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\Event;
-use Stancl\Tenancy\Contracts\Tenant;
 use Stancl\Tenancy\Contracts\TenancyBootstrapper;
+use Stancl\Tenancy\Contracts\Tenant;
 
 /**
  * Carries the tenant across the queue boundary.
@@ -88,7 +89,7 @@ final class QueueBootstrapper implements TenancyBootstrapper
                 // The tenant was deleted between dispatch and execution. Failing
                 // is correct: silently running the job with no context would let
                 // it write platform-visible rows.
-                throw new \Asids\Core\Tenancy\Domain\Exceptions\TenantNotFound(
+                throw new TenantNotFound(
                     'The workspace this job belongs to no longer exists.',
                     ['tenant_id' => $tenantId],
                 );

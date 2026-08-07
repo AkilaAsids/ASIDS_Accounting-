@@ -1,4 +1,4 @@
-import axios, { AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
+import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import type { ApiEnvelope, ListParams, ProblemDocument } from '@/types/api'
 
 /**
@@ -55,7 +55,10 @@ export class ApiError extends Error {
 
 /** Raised when no network response arrived at all — offline, DNS, TLS, or a hard timeout. */
 export class NetworkError extends Error {
-  constructor(readonly cause?: unknown) {
+  // `override` because `cause` is declared on Error itself since ES2022; without it the property
+  // shadows the base member rather than filling it in, and anything reading `error.cause`
+  // generically sees undefined.
+  constructor(override readonly cause?: unknown) {
     super('Could not reach the server. Check your connection and try again.')
     this.name = 'NetworkError'
   }
@@ -115,7 +118,10 @@ class ApiClient {
     this.companyId = companyId
   }
 
-  async get<T>(url: string, params?: ListParams | Record<string, unknown>): Promise<ApiEnvelope<T>> {
+  async get<T>(
+    url: string,
+    params?: ListParams | Record<string, unknown>,
+  ): Promise<ApiEnvelope<T>> {
     return this.send<T>({ method: 'GET', url, params })
   }
 
@@ -170,15 +176,16 @@ class ApiClient {
     config: AxiosRequestConfig,
     isReplay: boolean,
   ): Promise<ApiEnvelope<T>> {
-    if (!axios.isAxiosError(error)) {
+    // The generic is passed to the guard rather than applied with a cast afterwards, so the
+    // narrowing and the response body's type come from the same statement.
+    if (!axios.isAxiosError<ProblemDocument>(error)) {
       throw error
     }
 
-    const axiosError = error as AxiosError<ProblemDocument>
-    const response = axiosError.response
+    const response = error.response
 
     if (!response) {
-      throw new NetworkError(axiosError)
+      throw new NetworkError(error)
     }
 
     // A 419 means the CSRF token expired — the session outlived the token, which happens

@@ -40,7 +40,7 @@ final class EnsureTwoFactorIsConfirmed
         if (! $user->hasTwoFactorEnabled()) {
             // Enforcement mode: no second factor at all, and the workspace requires one.
             if ((bool) config('asids.auth.two_factor.enforced')) {
-                throw new TwoFactorEnrolmentRequired();
+                throw new TwoFactorEnrolmentRequired;
             }
 
             // Without enforcement there is nothing to step up to. Refusing here would make
@@ -50,7 +50,7 @@ final class EnsureTwoFactorIsConfirmed
         }
 
         if (! $this->confirmedRecently($request)) {
-            throw new TwoFactorConfirmationRequired();
+            throw new TwoFactorConfirmationRequired;
         }
 
         return $next($request);

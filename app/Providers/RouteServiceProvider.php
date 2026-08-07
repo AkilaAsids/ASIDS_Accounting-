@@ -96,7 +96,9 @@ final class RouteServiceProvider extends ServiceProvider
     {
         return implode(':', [
             'ip',
-            $request->header(config('asids.tenancy.header'), 'central'),
+            // `headers->get()` rather than `header()`: the latter is typed as possibly returning
+            // an array of values, which cannot be interpolated into a rate-limiter key.
+            $request->headers->get((string) config('asids.tenancy.header'), 'central'),
             (string) $request->ip(),
         ]);
     }

@@ -20,7 +20,16 @@ const ui = useUiStore()
 
 const scope = ref<SettingScope>('user')
 const groups = ref<SettingGroup[]>([])
-const draft = ref<Record<string, unknown>>({})
+/**
+ * What a setting's form control can hold.
+ *
+ * `SettingField.value` is `unknown` because the server's catalogue spans ten types, but the
+ * controls rendered below bind only these. Narrowing here is what lets `v-model` type-check
+ * instead of being asserted at four separate bindings.
+ */
+type SettingDraftValue = string | number | boolean | string[] | null
+
+const draft = ref<Record<string, SettingDraftValue>>({})
 const loading = ref(true)
 const saving = ref(false)
 
@@ -31,14 +40,63 @@ onMounted(() => {
     { value: 'user', label: 'Personal' },
     // Workspace and company settings are administrative, so the tabs only appear for someone
     // who can actually read them — an empty tab that 403s is worse than no tab.
-    ...(auth.can('settings.company.view') ? [{ value: 'company' as SettingScope, label: 'Company' }] : []),
-    ...(auth.can('settings.workspace.view') ? [{ value: 'tenant' as SettingScope, label: 'Workspace' }] : []),
+    ...(auth.can('settings.company.view')
+      ? [{ value: 'company' as SettingScope, label: 'Company' }]
+      : []),
+    ...(auth.can('settings.workspace.view')
+      ? [{ value: 'tenant' as SettingScope, label: 'Workspace' }]
+      : []),
   ]
 
   void load()
 })
 
 watch(scope, () => void load())
+
+/**
+ * Coerces a catalogue value into something a form control can bind.
+ *
+ * The `json` setting type is the reason this is not a cast: it arrives as an object, which no
+ * control here can edit, and rendering it would otherwise produce the string "[object Object]" and
+ * save that back over the real value.
+ */
+function toDraftValue(value: unknown): SettingDraftValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry))
+  }
+
+  return JSON.stringify(value)
+}
+
+/**
+ * The two halves of a text binding, kept explicit rather than using `v-model` on the draft record.
+ *
+ * A boolean setting is rendered as a checkbox and a set of options as a select, so the text
+ * controls only ever see strings and numbers — but the draft record is typed for every setting, so
+ * `v-model` on it offers a boolean to an `<input type="text">`. Reading and writing through these
+ * narrows honestly instead of asserting the branch away.
+ */
+function textValue(key: string): string | number {
+  const value = draft.value[key]
+
+  return typeof value === 'string' || typeof value === 'number' ? value : ''
+}
+
+function setTextValue(key: string, event: Event): void {
+  const target = event.target
+
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    draft.value[key] = target.value
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -48,10 +106,15 @@ async function load(): Promise<void> {
     groups.value = data
 
     draft.value = Object.fromEntries(
-      data.flatMap((group) => group.settings.map((field) => [field.key, field.value])),
+      data.flatMap((group) =>
+        group.settings.map((field) => [field.key, toDraftValue(field.value)]),
+      ),
     )
   } catch (thrown) {
-    ui.notify('error', thrown instanceof ApiError ? thrown.problem.detail : 'Could not load settings.')
+    ui.notify(
+      'error',
+      thrown instanceof ApiError ? thrown.problem.detail : 'Could not load settings.',
+    )
   } finally {
     loading.value = false
   }
@@ -78,7 +141,10 @@ async function save(): Promise<void> {
 
     ui.notify('success', 'Settings saved.')
   } catch (thrown) {
-    ui.notify('error', thrown instanceof ApiError ? thrown.problem.detail : 'Could not save settings.')
+    ui.notify(
+      'error',
+      thrown instanceof ApiError ? thrown.problem.detail : 'Could not save settings.',
+    )
   } finally {
     saving.value = false
   }
@@ -149,13 +215,19 @@ function humanise(value: string): string {
               >
                 Reset to inherited
               </button>
-              <span v-else class="shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-content-subtle">
+              <span
+                v-else
+                class="shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-content-subtle"
+              >
                 Inherited
               </span>
             </div>
 
             <div class="mt-2">
-              <label v-if="field.type === 'boolean'" class="flex items-center gap-2 text-sm text-content">
+              <label
+                v-if="field.type === 'boolean'"
+                class="flex items-center gap-2 text-sm text-content"
+              >
                 <input
                   :id="field.key"
                   v-model="draft[field.key]"
@@ -179,17 +251,19 @@ function humanise(value: string): string {
               <textarea
                 v-else-if="field.type === 'text'"
                 :id="field.key"
-                v-model="draft[field.key]"
+                :value="textValue(field.key)"
                 rows="3"
                 class="form-textarea w-full rounded-md border-surface-border bg-surface-raised text-sm text-content focus:border-primary-500 focus:ring-primary-500"
+                @input="setTextValue(field.key, $event)"
               />
 
               <input
                 v-else
                 :id="field.key"
-                v-model="draft[field.key]"
+                :value="textValue(field.key)"
                 :type="field.type === 'integer' || field.type === 'float' ? 'number' : 'text'"
                 class="form-input w-full rounded-md border-surface-border bg-surface-raised text-sm text-content focus:border-primary-500 focus:ring-primary-500 sm:w-64"
+                @input="setTextValue(field.key, $event)"
               />
             </div>
           </div>

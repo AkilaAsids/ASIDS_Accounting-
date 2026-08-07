@@ -14,6 +14,7 @@ use Asids\Core\Tenancy\Application\Services\TenantContext;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
 use Closure;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Workspace construction for tests.
@@ -28,14 +29,21 @@ trait InteractsWithTenants
     /**
      * A workspace with system roles, an owner, and a company the owner is a member of.
      *
+     * @param  array<string, mixed>  $tenantAttributes
      * @return array{tenant: Tenant, owner: User, company: Company, roles: array<string, Role>}
      */
     protected function createWorkspace(string $slug = 'acme', array $tenantAttributes = []): array
     {
-        return RowLevelSecurity::bypass(function () use ($slug, $tenantAttributes): array {
+        return RowLevelSecurity::bypass(fn (): array => app(TenantContext::class)->runCentrally(function () use ($slug, $tenantAttributes): array {
             /** @var Tenant $tenant */
             $tenant = Tenant::factory()->create(['slug' => $slug, ...$tenantAttributes]);
 
+            // `runCentrally` so this works regardless of what is active when it is called. Role
+            // provisioning happens before the `runFor` below — it takes the tenant as an argument
+            // rather than reading the context — so with another workspace active, the cross-tenant
+            // write guard correctly refuses rows stamped for the new one. Building a second
+            // workspace mid-test is a normal thing for an isolation test to want, and it should not
+            // depend on the order the helper happens to be called in.
             $ownerRole = app(RoleProvisioner::class)->provisionSystemRolesFor($tenant);
 
             return app(TenantContext::class)->runFor($tenant, function () use ($tenant, $ownerRole): array {
@@ -53,11 +61,13 @@ trait InteractsWithTenants
 
                 return ['tenant' => $tenant, 'owner' => $owner, 'company' => $company, 'roles' => $roles];
             });
-        });
+        }));
     }
 
     /**
      * A user in the given workspace holding a named system role.
+     *
+     * @param  array<string, mixed>  $attributes
      */
     protected function createUserWithRole(Tenant $tenant, string $roleName, array $attributes = []): User
     {
@@ -118,7 +128,7 @@ trait InteractsWithTenants
      */
     private function giveRole(User $user, Role $role): void
     {
-        \Illuminate\Support\Facades\DB::table('model_has_roles')->insertOrIgnore([
+        DB::table('model_has_roles')->insertOrIgnore([
             'role_id' => $role->getKey(),
             'model_type' => 'user',
             'model_uuid' => $user->getKey(),

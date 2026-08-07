@@ -31,18 +31,13 @@ use Illuminate\Support\Collection;
 abstract class EloquentRepository
 {
     /**
-     * @return class-string<TModel>
-     */
-    abstract protected function modelClass(): string;
-
-    /**
      * @return TModel
      */
     public function newModel(): Model
     {
         $class = $this->modelClass();
 
-        return new $class();
+        return new $class;
     }
 
     /**
@@ -50,7 +45,12 @@ abstract class EloquentRepository
      */
     public function query(): Builder
     {
-        return $this->newModel()->newQuery();
+        // `newQuery()` is declared as `Builder<Model>` on the base model, which loses TModel.
+        // Restated here so every caller downstream keeps the concrete model type.
+        /** @var Builder<TModel> $query */
+        $query = $this->newModel()->newQuery();
+
+        return $query;
     }
 
     /**
@@ -106,6 +106,11 @@ abstract class EloquentRepository
     }
 
     /**
+     * @return class-string<TModel>
+     */
+    abstract protected function modelClass(): string;
+
+    /**
      * Applies sorting, filtering and pagination described by a request-derived
      * criteria object. Centralising it here is what keeps `?sort=-created_at`
      * meaning the same thing on every endpoint, and keeps an attacker from
@@ -142,6 +147,7 @@ abstract class EloquentRepository
     {
         $query->orderBy($this->newModel()->getQualifiedKeyName())
             ->chunkById($size, static function (Collection $chunk) use ($handler): void {
+                /** @var Collection<int, TModel> $chunk */
                 $handler($chunk);
             });
     }

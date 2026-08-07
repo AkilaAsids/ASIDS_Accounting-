@@ -37,7 +37,7 @@ Schedule::command(VerifyAuditChainCommand::class)
     ->dailyAt('19:00')
     ->onOneServer()
     ->withoutOverlapping()
-    ->emailOutputOnFailure((string) env('SECURITY_ALERT_EMAIL', config('mail.from.address')))
+    ->emailOutputOnFailure((string) config('asids.audit.alert_email'))
     ->description('Verify audit trail integrity');
 
 // Retention. `--confirm` is passed here because the schedule *is* the deliberate decision; run

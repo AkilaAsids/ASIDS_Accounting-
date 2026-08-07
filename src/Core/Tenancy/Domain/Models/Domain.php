@@ -22,6 +22,11 @@ use Stancl\Tenancy\Database\Models\Domain as BaseDomain;
  * @property bool $is_primary
  * @property bool $is_custom
  * @property CarbonImmutable|null $verified_at
+ *
+ * Narrowed deliberately: stancl's base class types this as its own `Tenant` contract, which
+ * widens every read of `$domain->tenant` to `Model|Contracts\Tenant` and forces a cast at each
+ * call site.
+ * @property Tenant $tenant
  */
 final class Domain extends BaseDomain
 {
@@ -73,7 +78,7 @@ final class Domain extends BaseDomain
     {
         // Hostnames are case-insensitive; normalise on the way in so the unique
         // index on lower(domain) and every lookup agree.
-        static::saving(static function (self $domain): void {
+        self::saving(static function (self $domain): void {
             $domain->domain = strtolower(trim($domain->domain));
         });
     }

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Asids\Core\Tenancy\Application\Services;
 
 use Asids\Core\Platform\Support\RequestContext;
+use Asids\Core\Tenancy\Domain\Exceptions\NoActiveTenant;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Closure;
+use Illuminate\Support\Collection;
 use Stancl\Tenancy\Tenancy;
 use Throwable;
 
@@ -53,7 +55,7 @@ final readonly class TenantContext
         $tenant = $this->current();
 
         if ($tenant === null) {
-            throw new \Asids\Core\Tenancy\Domain\Exceptions\NoActiveTenant();
+            throw new NoActiveTenant;
         }
 
         return $tenant;
@@ -137,7 +139,7 @@ final readonly class TenantContext
         Tenant::query()
             ->active()
             ->orderBy('id')
-            ->chunkById(100, function (\Illuminate\Support\Collection $tenants) use ($callback, $onFailure): void {
+            ->chunkById(100, function (Collection $tenants) use ($callback, $onFailure): void {
                 foreach ($tenants as $tenant) {
                     /** @var Tenant $tenant */
                     try {

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Asids\Core\Platform\Support\Logging\AddTenantContext;
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Processor\PsrLogMessageProcessor;
@@ -64,7 +65,7 @@ return [
             'driver' => 'monolog',
             'level' => env('LOG_LEVEL', 'debug'),
             'handler' => StreamHandler::class,
-            'formatter' => Monolog\Formatter\JsonFormatter::class,
+            'formatter' => JsonFormatter::class,
             'formatter_with' => [
                 'appendNewline' => true,
             ],

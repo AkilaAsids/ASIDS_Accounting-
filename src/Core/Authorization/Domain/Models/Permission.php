@@ -6,6 +6,7 @@ namespace Asids\Core\Authorization\Domain\Models;
 
 use Asids\Core\Authorization\Domain\Catalogue\PermissionCatalogue;
 use Asids\Core\Authorization\Domain\Catalogue\PermissionDefinition;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Spatie\Permission\Models\Permission as SpatiePermission;
@@ -22,8 +23,13 @@ use Spatie\Permission\Models\Permission as SpatiePermission;
  * @property string $module
  * @property string $resource
  * @property string $action
+ * @property string $guard_name
  * @property string $label
+ * @property string|null $description
+ * @property int $sort_order
  * @property bool $is_sensitive
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
  */
 final class Permission extends SpatiePermission
 {

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Asids\Core\Tenancy\Domain\Concerns;
 
 use Asids\Core\Tenancy\Application\Services\TenantContext;
+use Asids\Core\Tenancy\Domain\Exceptions\CrossTenantWriteAttempted;
 use Asids\Core\Tenancy\Domain\Exceptions\NoActiveTenant;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Asids\Core\Tenancy\Domain\Scopes\TenantScope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -24,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * @property string|null $tenant_id
  *
- * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ * @phpstan-require-extends Model
  */
 trait BelongsToTenant
 {
@@ -54,7 +56,7 @@ trait BelongsToTenant
                     return;
                 }
 
-                throw new NoActiveTenant();
+                throw new NoActiveTenant;
             }
 
             $model->setAttribute($column, $tenantId);
@@ -65,7 +67,7 @@ trait BelongsToTenant
             $column = $model->tenantColumn();
 
             if ($model->isDirty($column) && $model->getOriginal($column) !== null) {
-                throw new \Asids\Core\Tenancy\Domain\Exceptions\CrossTenantWriteAttempted(
+                throw new CrossTenantWriteAttempted(
                     model: static::class,
                     from: (string) $model->getOriginal($column),
                     to: (string) $model->getAttribute($column),
@@ -112,11 +114,15 @@ trait BelongsToTenant
      * paired with a row level security bypass because removing the Eloquent scope
      * alone would now hit the database policy instead.
      *
-     * @return Builder<static>
+     * `self` rather than `static`: every model using this trait is final, so the two are the same
+     * class, and `self` keeps the builder's model parameter — which is invariant — identical on
+     * both sides of the return.
+     *
+     * @return Builder<self>
      */
     public static function acrossAllTenants(): Builder
     {
-        return static::query()->withoutGlobalScope(TenantScope::IDENTIFIER);
+        return self::query()->withoutGlobalScope(TenantScope::IDENTIFIER);
     }
 
     /**
@@ -141,7 +147,7 @@ trait BelongsToTenant
             return;
         }
 
-        throw new \Asids\Core\Tenancy\Domain\Exceptions\CrossTenantWriteAttempted(
+        throw new CrossTenantWriteAttempted(
             model: static::class,
             from: $activeTenant,
             to: (string) $rowTenant,

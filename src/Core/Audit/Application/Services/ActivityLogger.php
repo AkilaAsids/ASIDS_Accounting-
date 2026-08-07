@@ -6,6 +6,7 @@ namespace Asids\Core\Audit\Application\Services;
 
 use Asids\Core\Audit\Domain\Models\ActivityLog;
 use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Platform\Support\ModelAttributes;
 use Asids\Core\Platform\Support\RequestContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
@@ -86,7 +87,11 @@ final class ActivityLogger
     private function describe(Model $subject): string
     {
         foreach (['name', 'label', 'title', 'reference', 'number', 'code', 'email'] as $attribute) {
-            $value = $subject->getAttribute($attribute);
+            // `peek`, not `getAttribute`: this loop asks whether the model *happens* to carry each
+            // conventional name, and `getAttribute` throws for one it does not under model
+            // strictness. That made every activity-logged action whose subject is a User — role
+            // assignment, ownership transfer — return 500 outside production, where strictness is off.
+            $value = ModelAttributes::peek($subject, $attribute);
 
             if (is_string($value) && $value !== '') {
                 return Str::limit($value, 200, '');

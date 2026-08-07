@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api, ApiError } from '@/api/client'
-import type { SessionPayload, SessionResponse, User, Workspace, CompanySummary } from '@/types/domain'
+import type {
+  SessionPayload,
+  SessionResponse,
+  User,
+  Workspace,
+  CompanySummary,
+} from '@/types/domain'
 
 /**
  * Session state: who is signed in, what they may do, and which interstitials they owe.
@@ -66,7 +72,11 @@ export const useAuthStore = defineStore('auth', () => {
     workspace.value = null
     companies.value = []
     permissions.value = new Set()
-    requires.value = { password_change: false, two_factor_enrolment: false, company_selection: false }
+    requires.value = {
+      password_change: false,
+      two_factor_enrolment: false,
+      company_selection: false,
+    }
     twoFactorChallenge.value = null
     api.setActiveCompany(null)
   }

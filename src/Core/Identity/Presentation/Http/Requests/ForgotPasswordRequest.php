@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Identity\Presentation\Http\Requests;
 
+use Asids\Core\Platform\Support\Validation\EmailAddress;
 use Illuminate\Foundation\Http\FormRequest;
 
 final class ForgotPasswordRequest extends FormRequest
@@ -22,7 +23,7 @@ final class ForgotPasswordRequest extends FormRequest
         // confirm which addresses hold accounts, which is the enumeration leak the controller
         // goes out of its way to avoid.
         return [
-            'email' => ['required', 'string', 'email:rfc', 'max:255'],
+            'email' => ['required', ...EmailAddress::syntax(), 'max:255'],
         ];
     }
 

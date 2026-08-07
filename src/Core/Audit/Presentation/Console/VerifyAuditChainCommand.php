@@ -6,6 +6,7 @@ namespace Asids\Core\Audit\Presentation\Console;
 
 use Asids\Core\Audit\Application\Services\AuditChainSealer;
 use Asids\Core\Tenancy\Application\Services\TenantContext;
+use Asids\Core\Tenancy\Domain\Contracts\TenantRepositoryContract;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Illuminate\Console\Command;
 use Throwable;
@@ -32,7 +33,9 @@ final class VerifyAuditChainCommand extends Command
         $single = $this->option('tenant');
 
         if (is_string($single) && $single !== '') {
-            $tenant = Tenant::query()->where('id', $single)->orWhere('slug', $single)->first();
+            // See `findByIdOrSlug`: comparing a slug against the uuid `id` column is a cast error,
+            // not a non-match, so this option crashed for exactly the input it advertises.
+            $tenant = app(TenantRepositoryContract::class)->findByIdOrSlug($single);
 
             if ($tenant === null) {
                 $this->components->error("No workspace matches \"{$single}\".");

@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Hash;
  */
 final class UserFactory extends Factory
 {
+    public const string PASSWORD = 'password-for-testing-only';
+
     protected $model = User::class;
 
     /**
@@ -22,8 +24,6 @@ final class UserFactory extends Factory
      * phpunit.xml this is the difference between a fast suite and a slow one.
      */
     private static ?string $passwordHash = null;
-
-    public const string PASSWORD = 'password-for-testing-only';
 
     /**
      * @return array<string, mixed>

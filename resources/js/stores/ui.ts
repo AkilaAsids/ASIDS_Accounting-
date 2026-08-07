@@ -16,7 +16,9 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 export const useUiStore = defineStore('ui', () => {
   const theme = ref<Theme>(readThemeCookie())
   const sidebarCollapsed = ref(readBoolean('asids_sidebar_collapsed'))
-  const notices = ref<Array<{ id: number; kind: 'success' | 'error' | 'info'; message: string }>>([])
+  const notices = ref<Array<{ id: number; kind: 'success' | 'error' | 'info'; message: string }>>(
+    [],
+  )
 
   let nextNoticeId = 1
 
@@ -24,7 +26,9 @@ export const useUiStore = defineStore('ui', () => {
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
 
-  const isDark = computed(() => theme.value === 'dark' || (theme.value === 'system' && prefersDark.value))
+  const isDark = computed(
+    () => theme.value === 'dark' || (theme.value === 'system' && prefersDark.value),
+  )
 
   if (typeof window !== 'undefined') {
     // Kept live so a user who changes their OS appearance while the tab is open follows it,

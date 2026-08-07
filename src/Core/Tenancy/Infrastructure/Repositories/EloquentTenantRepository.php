@@ -11,6 +11,7 @@ use Asids\Core\Tenancy\Domain\Models\Domain;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 
 /**
  * @extends EloquentRepository<Tenant>
@@ -28,6 +29,15 @@ final class EloquentTenantRepository extends EloquentRepository implements Tenan
             ->with('domains')
             ->whereRaw('lower(slug) = ?', [strtolower($slug)])
             ->first();
+    }
+
+    public function findByIdOrSlug(string $identifier): ?Tenant
+    {
+        // Branches on the shape of the identifier rather than querying both columns: `id` is a uuid,
+        // and comparing it against a slug is a cast error rather than a non-match.
+        return Str::isUuid($identifier)
+            ? $this->find($identifier)
+            : $this->findBySlug($identifier);
     }
 
     public function findByDomain(string $domain): ?Tenant
@@ -72,7 +82,7 @@ final class EloquentTenantRepository extends EloquentRepository implements Tenan
      */
     public function create(array $attributes): Tenant
     {
-        $tenant = new Tenant();
+        $tenant = new Tenant;
         $tenant->fill($attributes);
         $tenant->save();
 

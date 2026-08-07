@@ -49,7 +49,14 @@ async function select(companyId: string): Promise<void> {
       <span class="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-xs text-content-muted">
         {{ auth.activeCompany?.code }}
       </span>
-      <svg class="h-4 w-4 text-content-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <svg
+        class="h-4 w-4 text-content-subtle"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        aria-hidden="true"
+      >
         <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
       </svg>
     </button>

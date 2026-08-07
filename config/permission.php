@@ -51,6 +51,27 @@ return [
     // capability must exist as an explicit row.
     'enable_wildcard_permission' => false,
 
+    /*
+     * FALSE, AND THIS IS LOAD-BEARING.
+     *
+     * The package's default is true, which registers its permission check as a `Gate::before`
+     * callback from `callAfterResolving(Gate::class)`. That fires while the Gate is being resolved
+     * — which is to say, before anything in `AuthServiceProvider::boot()` can append its own — so
+     * the package's callback always lands at index 0.
+     *
+     * Laravel returns the first non-null result from a before callback. So with the default, a user
+     * holding a permission through a role is granted it before our deny-first check runs, and
+     * `AuthServiceProvider`'s "a suspended or deactivated account holds no capability at all" rule
+     * is silently skipped on exactly the checks where it matters. A suspended employee kept every
+     * capability their roles granted, and an unexpired personal access token kept working.
+     *
+     * With this false, the package registers nothing on the gate and `AuthServiceProvider` performs
+     * the permission check itself, in the right order, after the account-status check. The package
+     * documents this flag for precisely this purpose: "Set this to false if you want to implement
+     * custom logic for checking permissions."
+     */
+    'register_permission_check_method' => false,
+
     'cache' => [
         // Permission lookups happen on nearly every request, so they are cached
         // aggressively and invalidated on write by the package.

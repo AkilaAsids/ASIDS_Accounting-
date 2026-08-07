@@ -6,6 +6,7 @@ use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Tenancy\Application\Services\TenantContext;
 use Asids\Core\Tenancy\Domain\Scopes\TenantScope;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -24,10 +25,14 @@ use Illuminate\Support\Str;
  *   1. `TENANCY_ENFORCE_RLS=true`, so the tenant is published to the session.
  *   2. The connecting role is either not the table owner, or the tables are FORCED.
  *
- * `phpunit.xml` sets enforcement off by default, because most tests build fixtures across
- * several workspaces before any context exists. This file therefore turns it on explicitly and
- * — critically — **skips loudly** rather than passing when the conditions are not met. A green
- * tick from a test that could not possibly fail is worse than a red one.
+ * `phpunit.xml` sets enforcement on, matching the test database, which has the RLS migration
+ * applied. The two must agree: with policies present but enforcement off, nothing publishes
+ * `asids.tenant_id`, every policy evaluates against NULL and the entire suite reads empty result
+ * sets with no error anywhere. Fixtures spanning workspaces are built under
+ * `RowLevelSecurity::bypass()`, which is what lets enforcement stay on for every test.
+ *
+ * This file still asserts the conditions itself and **skips loudly** rather than passing when
+ * they are not met. A green tick from a test that could not possibly fail is worse than a red one.
  */
 beforeEach(function (): void {
     config(['asids.tenancy.enforce_rls' => true]);
@@ -103,7 +108,7 @@ it('refuses a raw insert for another workspace', function (): void {
             'status' => 'active',
             'created_at' => now(),
             'updated_at' => now(),
-        ]))->toThrow(Illuminate\Database\QueryException::class);
+        ]))->toThrow(QueryException::class);
     });
 });
 

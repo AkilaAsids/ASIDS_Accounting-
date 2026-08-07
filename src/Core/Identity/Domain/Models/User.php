@@ -5,15 +5,17 @@ declare(strict_types=1);
 namespace Asids\Core\Identity\Domain\Models;
 
 use Asids\Core\Authorization\Domain\Concerns\HasTenantRoles;
+use Asids\Core\Authorization\Domain\Models\Role;
 use Asids\Core\Identity\Domain\Enums\UserStatus;
-use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Organization\Domain\Models\CompanyMembership;
 use Asids\Core\Tenancy\Domain\Concerns\BelongsToTenant;
+use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -36,27 +38,49 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string $first_name
  * @property string|null $last_name
  * @property string $email
+ * @property CarbonImmutable|null $email_verified_at
+ * @property string|null $phone
+ * @property string|null $job_title
+ * @property string|null $employee_number
+ * @property string|null $avatar_path
  * @property string|null $password
  * @property UserStatus $status
  * @property bool $is_platform_admin
  * @property bool $must_change_password
+ * @property string|null $remember_token
  * @property string|null $two_factor_secret
+ * @property CarbonImmutable|null $two_factor_enrolled_at
  * @property CarbonImmutable|null $two_factor_confirmed_at
  * @property CarbonImmutable|null $password_changed_at
+ * @property string|null $invited_by_id
+ * @property CarbonImmutable|null $invited_at
+ * @property CarbonImmutable|null $invitation_accepted_at
+ * @property CarbonImmutable|null $deactivated_at
+ * @property string|null $deactivation_reason
  * @property CarbonImmutable|null $locked_until
  * @property int $failed_login_attempts
  * @property string|null $default_company_id
  * @property string|null $timezone
  * @property string|null $locale
  * @property string $theme
+ * @property CarbonImmutable|null $last_login_at
+ * @property string|null $last_login_ip
+ * @property CarbonImmutable|null $last_activity_at
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
+ * @property CarbonImmutable|null $deleted_at
+ *
+ * spatie's `HasRoles` types this relation against its own contract, which erases the concrete
+ * model and makes every read of a role's `level` or `is_owner` unresolvable.
+ * @property-read EloquentCollection<int, Role> $roles
  */
 final class User extends Authenticatable implements MustVerifyEmail
 {
+    use BelongsToTenant;
+
+    use HasApiTokens;
     /** @use HasFactory<UserFactory> */
     use HasFactory;
-
-    use BelongsToTenant;
-    use HasApiTokens;
     use HasTenantRoles;
     use HasUuids;
     use Notifiable;
@@ -178,9 +202,24 @@ final class User extends Authenticatable implements MustVerifyEmail
         return $this->status === UserStatus::Active;
     }
 
+    /**
+     * When the current lockout expires, or null when the account is not locked.
+     *
+     * Callers that need to tell the user how long to wait use this rather than reading
+     * `locked_until` after an `isLocked()` check: the column holds the expiry of the *last*
+     * lockout whether or not it is still in force, so reading it directly reports a lockout that
+     * has already elapsed.
+     */
+    public function lockoutExpiry(): ?CarbonImmutable
+    {
+        return ($this->locked_until !== null && $this->locked_until->isFuture())
+            ? $this->locked_until
+            : null;
+    }
+
     public function isLocked(): bool
     {
-        return $this->locked_until !== null && $this->locked_until->isFuture();
+        return $this->lockoutExpiry() !== null;
     }
 
     public function hasTwoFactorEnabled(): bool
@@ -218,29 +257,15 @@ final class User extends Authenticatable implements MustVerifyEmail
     public function effectiveTimezone(): string
     {
         return $this->timezone
-            ?? $this->loadedTenant()?->timezone
+            ?? $this->loadedTenant()->timezone
             ?? (string) config('asids.regional.default_timezone');
     }
 
     public function effectiveLocale(): string
     {
         return $this->locale
-            ?? $this->loadedTenant()?->locale
+            ?? $this->loadedTenant()->locale
             ?? (string) config('asids.regional.default_locale');
-    }
-
-    /**
-     * The workspace, but only if it is already loaded.
-     *
-     * These accessors are called once per row by UserResource, so touching the relation
-     * unconditionally is an N+1 across the whole user list — and with strict mode on it throws
-     * outright rather than merely being slow. Callers that want workspace defaults eager load
-     * `tenant`; everyone else falls back to the platform default, which is what an unloaded
-     * relation should mean.
-     */
-    private function loadedTenant(): ?\Asids\Core\Tenancy\Domain\Models\Tenant
-    {
-        return $this->relationLoaded('tenant') ? $this->getRelation('tenant') : null;
     }
 
     /**
@@ -342,7 +367,7 @@ final class User extends Authenticatable implements MustVerifyEmail
     {
         // Normalised on the way in so the unique index on lower(email), the login
         // lookup and the invitation link all agree on one canonical form.
-        static::saving(static function (self $user): void {
+        self::saving(static function (self $user): void {
             $user->email = strtolower(trim($user->email));
             $user->first_name = trim($user->first_name);
 
@@ -350,5 +375,19 @@ final class User extends Authenticatable implements MustVerifyEmail
                 $user->last_name = trim($user->last_name);
             }
         });
+    }
+
+    /**
+     * The workspace, but only if it is already loaded.
+     *
+     * These accessors are called once per row by UserResource, so touching the relation
+     * unconditionally is an N+1 across the whole user list — and with strict mode on it throws
+     * outright rather than merely being slow. Callers that want workspace defaults eager load
+     * `tenant`; everyone else falls back to the platform default, which is what an unloaded
+     * relation should mean.
+     */
+    private function loadedTenant(): ?Tenant
+    {
+        return $this->relationLoaded('tenant') ? $this->getRelation('tenant') : null;
     }
 }

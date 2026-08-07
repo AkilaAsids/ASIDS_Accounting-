@@ -44,13 +44,13 @@ async function submit(): Promise<void> {
   >
     <div v-if="sent" class="space-y-4">
       <AlertBanner kind="success" title="Check your inbox">
-        If an account exists for that address, a reset link is on its way. It expires in an
-        hour and can only be used once.
+        If an account exists for that address, a reset link is on its way. It expires in an hour and
+        can only be used once.
       </AlertBanner>
 
       <p class="text-sm text-content-muted">
-        Nothing arrived? Check your spam folder, or ask an administrator in your workspace to
-        send you one.
+        Nothing arrived? Check your spam folder, or ask an administrator in your workspace to send
+        you one.
       </p>
 
       <RouterLink :to="{ name: 'sign-in' }" class="block">
@@ -72,7 +72,10 @@ async function submit(): Promise<void> {
 
       <BaseButton type="submit" block :loading="submitting">Send reset link</BaseButton>
 
-      <RouterLink :to="{ name: 'sign-in' }" class="block text-center text-sm text-primary-700 hover:underline dark:text-primary-400">
+      <RouterLink
+        :to="{ name: 'sign-in' }"
+        class="block text-center text-sm text-primary-700 hover:underline dark:text-primary-400"
+      >
         Back to sign in
       </RouterLink>
     </form>

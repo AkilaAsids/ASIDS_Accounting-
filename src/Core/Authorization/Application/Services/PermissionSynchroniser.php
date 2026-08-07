@@ -8,7 +8,6 @@ use Asids\Core\Authorization\Domain\Catalogue\PermissionCatalogue;
 use Asids\Core\Authorization\Domain\Models\Permission;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
 use Spatie\Permission\PermissionRegistrar;
 
 /**

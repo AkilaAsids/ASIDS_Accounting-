@@ -6,6 +6,7 @@ namespace Asids\Core\Identity\Domain\Contracts;
 
 use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Platform\Domain\Query\QueryCriteria;
+use DateTimeInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 
@@ -50,5 +51,5 @@ interface UserRepositoryContract
      *
      * @return Collection<int, User>
      */
-    public function idleSince(\DateTimeInterface $threshold): Collection;
+    public function idleSince(DateTimeInterface $threshold): Collection;
 }

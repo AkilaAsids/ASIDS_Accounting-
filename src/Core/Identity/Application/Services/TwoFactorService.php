@@ -60,11 +60,11 @@ final readonly class TwoFactorService
     public function confirmEnrolment(User $user, string $code): array
     {
         if ($user->two_factor_secret === null) {
-            throw new InvalidTwoFactorCode();
+            throw new InvalidTwoFactorCode;
         }
 
         if (! $this->verifyTotp($user, $code)) {
-            throw new InvalidTwoFactorCode();
+            throw new InvalidTwoFactorCode;
         }
 
         return DB::transaction(function () use ($user): array {
@@ -105,7 +105,7 @@ final readonly class TwoFactorService
             return 'recovery_code';
         }
 
-        throw new InvalidTwoFactorCode();
+        throw new InvalidTwoFactorCode;
     }
 
     public function verifyTotp(User $user, string $code): bool
@@ -152,14 +152,19 @@ final readonly class TwoFactorService
         /** @var array{recovery_code_count:int, recovery_code_bytes:int} $config */
         $config = config('asids.auth.two_factor');
 
-        return DB::transaction(function () use ($user, $config): array {
+        // Clamped, not trusted: `random_bytes(0)` throws and a negative length is a fatal error,
+        // so a mistyped environment variable would take out recovery-code generation entirely.
+        $bytes = max(1, $config['recovery_code_bytes']);
+        $count = max(1, $config['recovery_code_count']);
+
+        return DB::transaction(function () use ($user, $bytes, $count): array {
             TwoFactorRecoveryCode::query()->where('user_id', $user->getKey())->delete();
 
             $plaintext = [];
             $rows = [];
 
-            for ($i = 0; $i < $config['recovery_code_count']; $i++) {
-                $raw = strtolower(bin2hex(random_bytes($config['recovery_code_bytes'])));
+            for ($i = 0; $i < $count; $i++) {
+                $raw = strtolower(bin2hex(random_bytes($bytes)));
                 // Hyphenated for legibility when written down; the hash is computed
                 // over the normalised form so either presentation verifies.
                 $display = implode('-', str_split($raw, 5));
@@ -216,7 +221,7 @@ final readonly class TwoFactorService
         // The label carries the workspace as well as the address, so a user who is
         // a member of several ASIDS workspaces can tell the entries apart in their
         // authenticator app.
-        $label = ($user->tenant?->slug ?? 'platform').':'.$user->email;
+        $label = ($user->tenant->slug ?? 'platform').':'.$user->email;
 
         return sprintf(
             'otpauth://totp/%s?secret=%s&issuer=%s&algorithm=%s&digits=%d&period=%d',
@@ -233,7 +238,7 @@ final readonly class TwoFactorService
     {
         $writer = new Writer(new ImageRenderer(
             new RendererStyle(size: 256, margin: 1),
-            new SvgImageBackEnd(),
+            new SvgImageBackEnd,
         ));
 
         return $writer->writeString($uri);

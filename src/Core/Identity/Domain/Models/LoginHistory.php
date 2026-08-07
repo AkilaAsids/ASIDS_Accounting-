@@ -21,8 +21,22 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $id
  * @property string|null $user_id
  * @property string $email_attempted
+ * @property string|null $device_id
  * @property LoginOutcome $outcome
+ * @property string|null $failure_reason
+ * @property string $guard
+ * @property string $channel
  * @property string $ip_address
+ * @property string|null $user_agent
+ * @property string|null $device_type
+ * @property string|null $platform
+ * @property string|null $browser
+ * @property string|null $country_code
+ * @property string|null $city
+ * @property bool $two_factor_used
+ * @property string|null $two_factor_method
+ * @property string|null $session_id
+ * @property CarbonImmutable|null $logged_out_at
  * @property CarbonImmutable $created_at
  */
 final class LoginHistory extends Model
@@ -30,13 +44,13 @@ final class LoginHistory extends Model
     use BelongsToTenant;
     use HasUuids;
 
-    protected $table = 'login_histories';
-
     /**
      * The table records the moment of the attempt and nothing else; there is no
      * `updated_at` because an attempt is never modified.
      */
     public const UPDATED_AT = null;
+
+    protected $table = 'login_histories';
 
     /** @var list<string> */
     protected $fillable = [

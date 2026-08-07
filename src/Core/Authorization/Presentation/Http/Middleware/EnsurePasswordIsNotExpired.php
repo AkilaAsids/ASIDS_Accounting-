@@ -26,7 +26,7 @@ final class EnsurePasswordIsNotExpired
         $user = $request->user();
 
         if ($user instanceof User && $user->passwordHasExpired()) {
-            throw new PasswordExpired();
+            throw new PasswordExpired;
         }
 
         return $next($request);

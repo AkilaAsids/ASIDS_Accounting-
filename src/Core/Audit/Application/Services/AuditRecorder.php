@@ -7,7 +7,10 @@ namespace Asids\Core\Audit\Application\Services;
 use Asids\Core\Audit\Domain\Enums\ActorType;
 use Asids\Core\Audit\Domain\Enums\AuditEvent;
 use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Platform\Support\ModelAttributes;
 use Asids\Core\Platform\Support\RequestContext;
+use BackedEnum;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -62,7 +65,7 @@ final readonly class AuditRecorder
             $new = $newValues === null ? null : $this->sanitise($newValues);
 
             $changed = ($old !== null && $new !== null)
-                ? array_values(array_keys(array_diff_key($new, array_intersect_assoc($new, $old))))
+                ? array_keys(array_diff_key($new, array_intersect_assoc($new, $old)))
                 : ($new === null ? [] : array_keys($new));
 
             // Nothing of substance changed — an `updated_at` touch, or a save that set a column
@@ -179,8 +182,8 @@ final readonly class AuditRecorder
             // Enums and dates are flattened to scalars so the JSONB stays queryable rather than
             // holding an object shape that depends on a PHP class.
             $result[$key] = match (true) {
-                $value instanceof \BackedEnum => $value->value,
-                $value instanceof \DateTimeInterface => $value->format(DATE_ATOM),
+                $value instanceof BackedEnum => $value->value,
+                $value instanceof DateTimeInterface => $value->format(DATE_ATOM),
                 default => $value,
             };
         }
@@ -234,7 +237,7 @@ final readonly class AuditRecorder
      */
     private function resolveTenantId(Model $subject): ?string
     {
-        $fromSubject = $subject->getAttribute('tenant_id');
+        $fromSubject = ModelAttributes::peek($subject, 'tenant_id');
 
         if (is_string($fromSubject)) {
             return $fromSubject;
@@ -245,7 +248,7 @@ final readonly class AuditRecorder
 
     private function resolveCompanyId(Model $subject): ?string
     {
-        $fromSubject = $subject->getAttribute('company_id');
+        $fromSubject = ModelAttributes::peek($subject, 'company_id');
 
         return is_string($fromSubject) ? $fromSubject : $this->context->companyId();
     }

@@ -146,7 +146,7 @@ final readonly class RoleProvisioner
             return $existing;
         }
 
-        $role = new Role();
+        $role = new Role;
 
         $role->forceFill([
             'id' => (string) Str::uuid7(),

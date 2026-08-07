@@ -32,7 +32,7 @@ final readonly class BranchService
      */
     public function createPrimary(Company $company, string $name, string $code): Branch
     {
-        $branch = new Branch();
+        $branch = new Branch;
 
         $branch->fill([
             'company_id' => $company->getKey(),
@@ -80,7 +80,7 @@ final readonly class BranchService
             throw ResourceConflict::duplicate('branch', 'code', $code);
         }
 
-        $branch = new Branch();
+        $branch = new Branch;
 
         $branch->fill([
             ...$attributes,

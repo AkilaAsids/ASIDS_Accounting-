@@ -50,9 +50,10 @@ async function submit(): Promise<void> {
         requestId: thrown.requestId,
         // Surfaced so a locked-out user is told how long to wait instead of retrying into
         // the same wall and escalating to support.
-        retryAfter: typeof thrown.problem.retry_after_seconds === 'number'
-          ? thrown.problem.retry_after_seconds
-          : undefined,
+        retryAfter:
+          typeof thrown.problem.retry_after_seconds === 'number'
+            ? thrown.problem.retry_after_seconds
+            : undefined,
       }
       return
     }
@@ -95,11 +96,18 @@ async function submit(): Promise<void> {
 
       <div class="flex items-center justify-between">
         <label class="flex items-center gap-2 text-sm text-content-muted">
-          <input v-model="remember" type="checkbox" class="form-checkbox rounded border-surface-border text-primary-600 focus:ring-primary-500" />
+          <input
+            v-model="remember"
+            type="checkbox"
+            class="form-checkbox rounded border-surface-border text-primary-600 focus:ring-primary-500"
+          />
           Keep me signed in
         </label>
 
-        <RouterLink :to="{ name: 'forgot-password' }" class="text-sm text-primary-700 hover:underline dark:text-primary-400">
+        <RouterLink
+          :to="{ name: 'forgot-password' }"
+          class="text-sm text-primary-700 hover:underline dark:text-primary-400"
+        >
           Forgot password?
         </RouterLink>
       </div>
@@ -107,8 +115,6 @@ async function submit(): Promise<void> {
       <BaseButton type="submit" block :loading="submitting">Sign in</BaseButton>
     </form>
 
-    <template #below>
-      Protected by two factor authentication where enabled.
-    </template>
+    <template #below> Protected by two factor authentication where enabled. </template>
   </AuthLayout>
 </template>

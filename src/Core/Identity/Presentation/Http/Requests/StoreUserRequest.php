@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Identity\Presentation\Http\Requests;
 
 use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Platform\Support\Validation\EmailAddress;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -30,9 +31,9 @@ final class StoreUserRequest extends FormRequest
         return [
             'first_name' => ['required', 'string', 'min:1', 'max:100'],
             'last_name' => ['nullable', 'string', 'max:100'],
-            // `email:rfc,dns` here — unlike on sign-in — because a typo means the invitation
-            // never arrives and the administrator has no way to tell.
-            'email' => ['required', 'string', 'email:rfc,dns', 'max:255'],
+            // Deliverable, not merely valid — unlike on sign-in — because a typo means the
+            // invitation never arrives and the administrator has no way to tell.
+            'email' => ['required', ...EmailAddress::deliverable(), 'max:255'],
             'phone' => ['nullable', 'string', 'max:32'],
             'job_title' => ['nullable', 'string', 'max:120'],
             'employee_number' => ['nullable', 'string', 'max:64'],

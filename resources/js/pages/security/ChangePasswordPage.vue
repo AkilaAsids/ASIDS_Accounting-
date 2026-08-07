@@ -62,8 +62,8 @@ async function submit(): Promise<void> {
 <template>
   <div class="mx-auto max-w-lg space-y-4">
     <AlertBanner v-if="expired" kind="warning" title="Your password needs changing">
-      This workspace requires passwords to be changed periodically. You can carry on once you
-      have set a new one.
+      This workspace requires passwords to be changed periodically. You can carry on once you have
+      set a new one.
     </AlertBanner>
 
     <SurfaceCard

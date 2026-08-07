@@ -179,7 +179,17 @@ export interface SettingField {
   label: string
   description: string
   group: string
-  type: 'string' | 'text' | 'integer' | 'float' | 'boolean' | 'array' | 'json' | 'date' | 'datetime' | 'time'
+  type:
+    | 'string'
+    | 'text'
+    | 'integer'
+    | 'float'
+    | 'boolean'
+    | 'array'
+    | 'json'
+    | 'date'
+    | 'datetime'
+    | 'time'
   value: unknown
   default: unknown
   is_overridden: boolean

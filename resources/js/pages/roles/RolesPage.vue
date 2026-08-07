@@ -106,12 +106,19 @@ function humanise(value: string): string {
             <button
               type="button"
               class="w-full py-3 text-left transition"
-              :class="selected?.id === role.id ? 'text-primary-700 dark:text-primary-300' : 'text-content hover:text-primary-700'"
+              :class="
+                selected?.id === role.id
+                  ? 'text-primary-700 dark:text-primary-300'
+                  : 'text-content hover:text-primary-700'
+              "
               @click="select(role)"
             >
               <span class="flex items-center justify-between gap-2">
                 <span class="truncate text-sm font-medium">{{ role.label }}</span>
-                <span v-if="role.is_system" class="shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-content-subtle">
+                <span
+                  v-if="role.is_system"
+                  class="shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-content-subtle"
+                >
                   Built in
                 </span>
               </span>
@@ -189,7 +196,10 @@ function humanise(value: string): string {
           </fieldset>
         </div>
 
-        <template v-if="selected.capabilities.permissions_editable && selected.level < actorLevel" #footer>
+        <template
+          v-if="selected.capabilities.permissions_editable && selected.level < actorLevel"
+          #footer
+        >
           <div class="flex items-center justify-between">
             <p class="text-sm text-content-muted">{{ draft.size }} permission(s) selected</p>
             <BaseButton :loading="saving" @click="save">Save changes</BaseButton>

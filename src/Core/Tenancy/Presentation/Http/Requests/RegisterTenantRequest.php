@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Tenancy\Presentation\Http\Requests;
 
+use Asids\Core\Platform\Support\Validation\EmailAddress;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -48,7 +49,7 @@ final class RegisterTenantRequest extends FormRequest
 
             'owner_first_name' => ['required', 'string', 'max:100'],
             'owner_last_name' => ['nullable', 'string', 'max:100'],
-            'owner_email' => ['required', 'string', 'email:rfc,dns', 'max:255'],
+            'owner_email' => ['required', ...EmailAddress::deliverable(), 'max:255'],
             'owner_password' => ['required', 'string', 'confirmed', Password::defaults()],
 
             'company_name' => ['nullable', 'string', 'max:255'],

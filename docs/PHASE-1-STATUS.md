@@ -1,376 +1,247 @@
 # Phase 1 — Foundation & Identity Platform: build status
 
-**Last updated:** 2026-08-06 (74 of 78 feature tests green; 13 real bugs found by running them)
-**State:** The backend is structurally complete — every internal class reference resolves
-and nothing is missing. It has still never been executed: no PHP, Composer, Node or
-Docker toolchain exists on the machine it was written on. Remaining Phase 1 work is the
-Vue front end, the test suite, and the ERD/OpenAPI/deployment documents.
+**Last updated:** 2026-08-07
+**State:** **Complete and verified.** Every quality gate in `.github/workflows/ci.yml` passes on a
+real toolchain against a real PostgreSQL with row level security in force.
+
+| Gate | Result |
+| --- | --- |
+| Pint | passes |
+| PHPStan level 8 (Larastan) | **0 errors** |
+| Pest | **462 passing**, 0 skipped, 0 risky |
+| Backend coverage | **85.6 %** against a `--min=85` gate |
+| `vue-tsc --noEmit` | 0 errors |
+| ESLint (`--max-warnings 0`) | 0 problems |
+| Vitest | **149 passing** across 7 spec files |
+| Front-end coverage | passes per-layer thresholds |
+| `vite build` | succeeds |
+| `asids:security-check` | passes; RLS confirmed in force as a NOBYPASSRLS role |
 
 ---
 
 ## Phase 1 scope (agreed)
 
-Repository and container foundation, tenancy core, identity and authentication,
-authorization, organization (companies/branches), hierarchical settings, audit trail,
-API surface, Vue 3 shell, test suite, documentation.
+Repository and container foundation, tenancy core, identity and authentication, authorization,
+organization (companies/branches), hierarchical settings, audit trail, API surface, Vue 3 shell,
+test suite, documentation.
 
-**Explicitly deferred to Phase 2** (declared, not forgotten): Attachments,
-Notifications engine, Approval Workflows. Each depends on business documents that do
-not exist until the Accounting phase, and building them now would mean guessing at
-their consumers.
-
----
-
-## Complete
-
-### Repository & tooling
-- `composer.json`, `package.json` with pinned, current dependency sets
-- `artisan`, `public/index.php`, `bootstrap/app.php`, `bootstrap/providers.php`
-- Pint (strict types enforced), PHPStan level 8 via Larastan, PHPUnit/Pest config
-- Vite + TypeScript (strict, `noUncheckedIndexedAccess`) + Tailwind design tokens
-- ESLint flat config, Prettier, `.editorconfig`, `.gitattributes`
-
-### Containers & CI
-- `docker-compose.yml`: app, nginx, PostgreSQL 17, Redis 7.4, Meilisearch, Horizon,
-  scheduler, Vite, Mailpit — with healthchecks and tuned Postgres parameters
-- Five-stage `docker/php/Dockerfile` (base → development → vendor → assets → production),
-  non-root, OPcache/JIT tuned, preloading enabled only in immutable images
-- `docker/php/entrypoint.sh`: fail-fast config checks, dependency readiness waits,
-  deliberately **does not** run migrations (avoids the multi-replica race)
-- `docker/postgres/init/01-bootstrap.sh`: creates the `NOBYPASSRLS` application role,
-  extensions, grants, default privileges, and the test database
-- `.github/workflows/ci.yml`: static analysis, Pest with a real Postgres + Redis and
-  RLS provisioned to match production, front-end typecheck/lint/test/build, dependency
-  advisory audit, single required status check
-
-### Configuration
-`config/asids.php` (platform policy: tenancy, password policy, 2FA, audit, rate limits,
-regional defaults, limits), `database.php`, `tenancy.php`, `permission.php`,
-`sanctum.php`, `horizon.php`, `logging.php`, `filesystems.php`, `cors.php`.
-See ADR 0004 for why the other framework config files are intentionally absent.
-
-### Database schema — all Phase 1 migrations
-| Migration | Contents |
-| --- | --- |
-| `2026_01_01_000001` | cache, jobs, job_batches, failed_jobs, sessions, notifications (no `password_reset_tokens` — see AccountLinkService) |
-| `2026_01_02_000001/2` | tenants, domains |
-| `2026_01_03_000001–6` | users, two_factor_recovery_codes, password_histories, login_histories, user_devices, personal_access_tokens |
-| `2026_01_04_000001` | permissions, roles, model_has_permissions, model_has_roles, role_has_permissions |
-| `2026_01_05_000001–3` | companies, branches, company_memberships |
-| `2026_01_06_000001` | settings |
-| `2026_01_07_000001/2` | audit_logs (append-only trigger, seal-only UPDATE path, hash chain), activity_logs |
-| `2026_01_08_000001` | row level security policies, FORCED, on 16 tables |
-
-Schema highlights: UUID v7 keys throughout, `timestamptz` everywhere, partial and
-expression unique indexes for case-insensitive and single-row-per-parent invariants,
-trigram GIN indexes for pickers, `jsonb_path_ops` GIN for audit search, and check
-constraints for every enumerated column and every cross-column invariant
-(`(tenant_id IS NULL) = is_platform_admin`, SVAT implies VAT, archived implies
-`archived_at`, primary branch must be active, and others).
-
-### Platform kernel — `src/Core/Platform`
-`ModuleServiceProvider`, `PlatformServiceProvider` (model strictness, morph map,
-password defaults, query monitoring), `RequestContext`, `AssignRequestId`,
-`ForceJsonResponse`, `ApiResponse` envelope, `ApiExceptionRenderer` (RFC 9457 problem
-documents, no internal detail leakage), `PlatformException`/`BusinessRuleViolation`/
-`ResourceConflict`, `QueryCriteria` (allow-listed sort/filter/include),
-`EloquentRepository`, `ApiController`, `CompliancePackContract` + `NullCompliancePack`,
-`TenantContextProcessor` + `AddTenantContext` log scrubber.
-
-### App providers
-`AppServiceProvider`, `AuthServiceProvider` (owner-role `Gate::before`, inactive-account
-`Gate::after`), `EventServiceProvider`, `RouteServiceProvider` (five rate limiters keyed
-by tenant + principal, UUID route pattern).
-
-### Tenancy module — complete
-`Tenant`, `Domain`, `TenantStatus`, `TenantContext`, `TenantResolver` (hostname and
-`X-Tenant` header, cached with observer-driven invalidation), `TenantScope` (fails
-closed), `BelongsToTenant` (auto-stamp + cross-tenant write guard),
-`RowLevelSecurity` (scoped bypass + enforcement probe), four bootstrappers
-(RLS, cache, filesystem, queue), `ResolveTenant` middleware, `TenantProvisioningService`
-(atomic five-part provisioning), `TenantObserver`, repository + contract,
-`TenantProvisioned` event, four domain exceptions, sign-up controller/request/resource,
-`TenancyServiceProvider`.
-
-### Identity module — complete
-`UserStatus`, `LoginOutcome`, `User`, `UserDevice`, `LoginHistory`,
-`PasswordHistory`, `TwoFactorRecoveryCode`, `PersonalAccessToken` (with CIDR
-restriction), seven domain exceptions, `CreateUserData`, `PasswordPolicyService`,
-`TwoFactorService` (two-phase TOTP enrolment, replay-resistant verification, atomic
-recovery-code consumption), `DeviceService`, `AuthenticationService` (two-step sign-in
-with cache-backed challenge, timing equalisation, account lockout).
-
-Plus, this workstream: `UserService` (invite/accept/reset/suspend/reinstate/deactivate,
-seat accounting, last-active-owner protection), `AccountLinkService` (signed
-invitation and reset links, single-use via credential fingerprint — no token table),
-`AccessTokenService` (abilities intersected with the creator's own permissions),
-`UserRepositoryContract` + `EloquentUserRepository`, 7 domain events,
-`EnsureTwoFactorIsConfirmed` (step-up + workspace enforcement),
-`EnsureSessionIsCurrent` (epoch-based revocation + idle timeout), `UserPolicy`,
-`AccessTokenPolicy`, 8 controllers, 10 form requests, 4 resources,
-3 notifications, `IdentityServiceProvider`.
-
-### Authorization module — complete
-`Permission` and `Role` models, `HasTenantRoles` (memoised `isTenantOwner()`,
-`highestRoleLevel()`, `canGrantRole()`), `PermissionDefinition` +
-`PermissionCatalogue` (44 capabilities across 6 modules), `RoleTemplate` (5 system
-roles), `PermissionSynchroniser`, `RoleProvisioner` (provision + release-time
-refresh), `RoleService` (level ordering, owner protection, last-owner protection,
-platform-capability refusal, ownership transfer), `PermissionTeamBootstrapper`
-(the spatie teams wiring), 5 domain exceptions, 2 domain events, `RolePolicy`,
-`PermissionPolicy`, `EnsurePasswordIsNotExpired`, `RoleController`,
-`PermissionController`, 3 form requests, 2 resources,
-`asids:sync-permissions` command, `AuthorizationServiceProvider`.
-
-### Organization module — complete
-`OrganizationStatus` enum, `Company` (fiscal-calendar arithmetic, membership-scoped
-`accessibleBy`), `Branch`, `CompanyMembership`, `LedgerActivityProbe` seam +
-`NoLedgerActivity`, `CreateCompanyData`, `CompanyService` (atomic company + primary
-branch + creator membership; currency/fiscal immutability; unique code/slug
-derivation), `BranchService` (single-active-primary invariant), `MembershipService`
-(reinstate-not-duplicate, default promotion on revoke), 5 domain exceptions,
-4 domain events, `ResolveActiveCompany` middleware, `CompanyPolicy`, `BranchPolicy`,
-`CompanyMembershipPolicy`, 3 controllers, 5 form requests, 3 resources,
-`OrganizationServiceProvider`.
-
-### API surface, scheduling, seeders — complete
-`routes/api.php` (57 endpoints under `api.v1.*`; three middleware layers; step-up
-protection on the six credential-bearing routes), `routes/web.php` (SPA catch-all),
-`routes/console.php` (four scheduled sweeps, all `onOneServer`),
-`resources/views/app.blade.php` (flash-free dark mode from a cookie),
-`RevokeExpiredTokensCommand`, `SecurityCheckCommand` (six deployment assertions,
-fails the release if RLS is not actually in force), `DatabaseSeeder`,
-`PermissionSeeder`, `DemoWorkspaceSeeder` (built by calling the real provisioning
-services, so `migrate --seed` is itself an end-to-end integration check),
-`TenantFactory`, `UserFactory`, `CompanyFactory`, `BranchFactory`.
-
-### Documentation
-ADR 0001 (tenancy strategy), ADR 0002 (tenant/company/branch hierarchy),
-ADR 0003 (permissions in code, roles in data), ADR 0004 (minimal config surface),
-ADR 0005 (provisioning ownership), README, this file.
+**Explicitly deferred to Phase 2** (declared, not forgotten): Attachments, Notifications engine,
+Approval Workflows. Each depends on business documents that do not exist until the Accounting
+phase, and building them now would mean guessing at their consumers.
 
 ---
 
-## Audit module — complete
+## What running it found
 
-`AuditEvent` (17 events) and `ActorType` enums, `AuditLog` (write-closed model, canonical
-payload, hash computation), `ActivityLog`, `Auditable` trait + `AuditableObserver`
-(past-tense hooks only), `AuditRecorder` (synchronous, in-transaction, lock-free,
-credential-redacting, never fails a business operation), `AuditChainSealer` (advisory-locked
-batch sealing + two-mode verification), `ActivityLogger` (with batching),
-`RecordRequestContext` middleware, `AuditLogPolicy` (no write methods by construction),
-`ActivityLogPolicy`, 2 controllers, 2 resources, `asids:audit-seal`,
-`asids:audit-verify`, `asids:audit-prune`, `AuditServiceProvider` (11 domain-event
-listeners covering the privilege and credential changes no model observer can see).
+The code was written before any of it could be executed. Making it run surfaced eight defects that
+review had not, three of them severe. They are recorded here rather than only in the git history,
+because each one is a class of mistake this codebase can make again.
 
-## Settings module — complete
+### 1. Suspension did not revoke authority — severe
 
-`SettingScope` (4 levels + resolution order) and `SettingType` (10 types with coercion
-and validation rules) enums, `SettingDefinition`, `SettingsCatalogue` (13 settings across
-localisation, security, branding, notifications — nothing speculative), `Setting` model,
-`SettingsResolver` (four-level resolution, per-scope cache + per-request memoisation,
-targeted invalidation), `SettingsService` (scope-permission enforcement, atomic group
-writes, reset-to-inherit, orphan purge), `SettingPolicy`, `SettingsController`
-(server-driven form metadata), `UpdateSettingsRequest`, `SettingResource`,
-`SettingsServiceProvider`.
+`spatie/laravel-permission` registers its permission check as a `Gate::before` callback from
+`callAfterResolving(Gate::class)`. That fires *while the Gate is being resolved*, so it always
+landed at index 0 — ahead of anything `AuthServiceProvider::boot()` could append. Laravel returns
+the first non-null result from a before callback, so a user holding a permission through a role was
+granted it before the deny-first account-status check ever ran.
+
+The effect: **suspending or deactivating a user revoked nothing.** They kept every capability their
+roles granted, and so did any personal access token they had issued. The existing test passed
+because it used the *owner*, who is granted by our own callback and therefore reached the deny.
+
+Fixed by setting `permission.register_permission_check_method` to `false` — the flag the package
+documents for this purpose — and performing the permission check inside our own callback, after the
+account-status check. `PrivilegeEscalationTest` now asserts the behaviour for an ordinary
+role-holder and asserts structurally that exactly one before callback is registered, so the ordering
+cannot be silently reintroduced by an upgrade.
+
+### 2. Two audit writers threw outside production — severe
+
+`ActivityLogger::describe()` probed conventional attribute names (`name`, `label`, `title`, …) with
+`getAttribute()`, and `AuditRecorder` did the same for `tenant_id` and `company_id`. Under
+`Model::preventAccessingMissingAttributes()` — enabled everywhere except production — `getAttribute`
+**throws** for an attribute the model does not carry rather than returning null.
+
+The effect: role assignment and ownership transfer returned 500 in every developer, CI and staging
+environment, and worked in production only because the throw is disabled there. That asymmetry is
+worse than a plain failure, because it presents as an environment problem.
+
+Fixed with `Platform\Support\ModelAttributes::peek()`, which answers the speculative question
+honestly, and both writers now use it.
+
+### 3. The test suite was reading empty tables — severe
+
+`phpunit.xml` set `TENANCY_ENFORCE_RLS=false` while the test database had the RLS policies applied.
+With policies present but enforcement off, nothing publishes `asids.tenant_id`, every policy
+evaluates against NULL, and every tenant-scoped read returns zero rows **with no error**. 36 tests
+failed and the rest were asserting against emptiness. The two settings must agree; enforcement is
+now on in the test environment, and `asids:security-check` fails hard on the mismatch in every
+environment.
+
+### 4. PHPStan had never run
+
+`phpstan.neon` declared `checkMissingIterableValueType` and `checkGenericClassInNonGenericObjectType`,
+both removed in PHPStan 2.x. That is not an ignored setting — it aborts the run. The gate had been
+green in the sense that it had never executed. With the config repaired it reported 441 errors,
+since resolved to zero; the substantial ones were incomplete `@property` blocks on every model,
+which is why `$company->registration_number` had no type anywhere in the codebase.
+
+### 5. A formatter-induced build failure
+
+`vue-tsc` could not parse `UsersPage.vue` because of `as` assertions inside template interpolations,
+which also hid seven further type errors behind the parse failure. Separately, running Prettier for
+the first time rewrapped a two-statement inline `@click` handler onto multiple lines, and Vue's
+template compiler parses an inline handler as a single expression — so the formatter broke the
+production build. Both are fixed, and the handler is now a named method.
+
+### 6. ESLint fought Prettier
+
+385 of the 400 lint problems were `eslint-plugin-vue` formatting rules disagreeing with the
+Prettier configuration over the same files. The stylistic rules Prettier owns are now off; nothing
+that checks *behaviour* was disabled.
+
+### 7. The coverage gate would have failed CI on memory, not on coverage
+
+`pest --coverage` passes every test and then dies with a fatal error while building the report at
+PHP's default 128 MB limit. The CI step now runs with `-d memory_limit=2G`.
+
+### 8. `v-html` on the enrolment QR code
+
+Not exploitable — the SVG is generated server-side from a QR renderer that emits only paths — but
+`v-html` executes whatever it is given. It is now delivered as a `data:` URI through `<img>`, which
+cannot execute script under any circumstances, and gained an accessible name in the process.
 
 ---
 
-## Vue 3 front end — complete
+## Test suite
 
-35 files. `styles/app.css` (design tokens as RGB triplets for runtime re-theming; dark
-mode as a token swap; `prefers-reduced-motion` honoured globally), `types/api.ts` +
-`types/domain.ts` (full wire contracts, no `any`), `api/client.ts` (cookie auth, CSRF
-handshake memoised on the promise, RFC 9457 → typed `ApiError`, **automatic step-up replay**,
-419 re-handshake), `stores/auth.ts` (session, two-step sign-in, permission checks),
-`stores/ui.ts` (cookie-backed theme, notices), `router/index.ts` (13 lazy routes; guard
-ordering: auth → interstitials → permission), `app/main.ts` + `App.vue`, `AppLayout` +
-`AuthLayout`, 4 UI components (`BaseButton`, `TextField`, `AlertBanner`, `SurfaceCard`),
-4 app components (`PermissionGate`, `StepUpDialog`, `NoticeStack`, `ThemeToggle`,
-`CompanySwitcher`), 4 auth pages (sign-in, 2FA challenge with recovery-code path,
-forgot-password, account-link), dashboard, users, roles (server-driven permission matrix),
-settings (server-driven form metadata), security (2FA enrolment, devices, sign-in history),
-change-password, 403, 404, `useFormat` (company currency and timezone — never the
-browser's), `locales/en.ts`, `tests/Support/vitest.setup.ts`.
+**462 backend tests, 1,306 assertions.** No skipped tests: the two that previously skipped are now
+executed — the cache-isolation test runs against the `database` store, which honours `cache.prefix`
+exactly as Redis does, and asserts both that one workspace cannot read another's value *and* that
+the owning workspace can read its own, so it cannot pass against a cache that stores nothing.
 
-## Documentation — complete
-
-| Document | Contents |
-| --- | --- |
-| [`database/erd.md`](database/erd.md) | Five Mermaid diagrams covering every Phase 1 table, plus the RLS coverage matrix, the index strategy, and the two session variables that are the only exceptions to the audit trail's append-only trigger |
-| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI 3.1 — 54 paths, 69 operations, 24 schemas. Documents the *reasoning* a consumer needs, not just the shapes |
-| [`architecture/overview.md`](architecture/overview.md) | Module map and dependency rule, request lifecycle with the two load-bearing orderings, isolation layers, extensibility seams |
-| [`deployment/local.md`](deployment/local.md) | First run, demo accounts, quality gates, six troubleshooting entries |
-| [`deployment/aws.md`](deployment/aws.md) | Topology, **the five things that will bite you**, release sequence, backup drill, alarm priorities |
-| [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md) | OWASP Top 10 treatment with every control marked verified or **UNVERIFIED**; nine residual risks with owners; explicitly **not signed off** |
-| [`PHASE-1-CODE-REVIEW.md`](PHASE-1-CODE-REVIEW.md) | The ten bugs found while building, five strengths, seven weaknesses I judge to remain |
-| ADRs [0001](adr/0001-tenancy-strategy.md)–[0005](adr/0005-workspace-provisioning-ownership.md) | Tenancy strategy, hierarchy, permissions-in-code, config surface, provisioning ownership |
-
-## Static verification (no PHP available)
-
-A cross-reference over the whole tree, re-run after each workstream:
-
-```
-Declared classes: 221
-PSR-4: every file matches its namespace and class name.
-Route handlers: 65 checked — all resolve.
-Every Asids\ class reference resolves — nothing missing.
-Policies: 10, covering 48 authorisation methods.
-
-Front end (35 files):
-  Internal imports checked: 95 — every @/ import resolves.
-  Lazy route components: 13 — all resolve.
-
-OpenAPI (2,603 lines):
-  No tabs. 69 operations, all operationIds unique. 41 $refs, all targets declared.
-  Not validated against a real OpenAPI parser — PyYAML is not installed either.
-```
-
-This proves the tree is internally consistent and will autoload. It does **not** prove it
-runs: nothing has been type-checked against the real Laravel 12, spatie 6 or Vue 3.5 APIs,
-`vue-tsc` has never run, no migration has been applied, and no test has been executed.
-Node is absent too, so the front end has never been built or rendered.
-
----
-
-## Remaining Phase 1 work
-
-### Test suite — first tranche written
-
-| File | Cases | Covers |
+| Area | Files | Covers |
 | --- | --- | --- |
-| `tests/Pest.php` | — | `toBeProblem`, `toBeEnvelope`, `toNotLeak` expectations; `catchPlatformException` |
-| `tests/TestCase.php` | — | Permission catalogue synchronised per test via the real synchroniser; setup under an RLS bypass |
-| `tests/Support/InteractsWithTenants.php` | — | Workspaces built through the real provisioning services, not fabricated rows |
-| `Feature/Tenancy/TenantIsolationTest` | 19 | Read scoping, fail-closed behaviour, write guarding, escape hatches, cache isolation |
-| `Feature/Tenancy/RowLevelSecurityTest` | 11 | Raw SQL, `withoutGlobalScopes()`, raw insert/update/delete — **skips loudly** if policies are not in force |
-| `Feature/Authorization/PrivilegeEscalationTest` | 16 | Owner-role refusal, level ordering, last-owner protection, clamping, the owner short circuit |
-| `Feature/Identity/AuthenticationTest` | 16 | Identical answers for unknown vs wrong password, cross-workspace credential refusal, lockout, challenge issuance |
-| `Feature/Audit/AuditChainIntegrityTest` | 15 | Append-only trigger incl. TRUNCATE, sealing, idempotency, hash-mismatch vs broken-link detection, redaction |
+| Tenancy | `TenantIsolationTest`, `RowLevelSecurityTest`, `WorkspaceRegistrationTest`, `TenantCustomColumnsTest` | Scoping, fail-closed reads, write guarding, RLS against raw SQL as a NOBYPASSRLS role, public sign-up as one transaction, hostname resolution, the `data`-column overflow |
+| Identity | `AuthenticationTest`, `UserAdministrationTest`, `SelfServiceTest`, `TwoFactorLifecycleTest`, `AccountLinkTest`, `PasswordPolicyTest` | Enumeration defences, lockout, the administration HTTP surface, seat accounting, 2FA enrolment and step-up, single-use links, password reuse and expiry |
+| Authorization | `PrivilegeEscalationTest`, `RoleManagementTest` | Owner-role refusal, level ordering, last-owner protection, clamping, the suspension regression, role CRUD and assignment over HTTP |
+| Organization | `CompanyLifecycleTest`, `BranchAndMembershipTest`, `OrganizationApiTest`, `ActiveCompanyResolutionTest` | Accounting-configuration immutability, the single-default and single-primary invariants, membership reinstatement, company scoping |
+| Settings | `SettingsResolutionTest`, `SettingsApiTest` | Four-level resolution, scope refusal, coercion, cache invalidation, the public subset |
+| Audit | `AuditChainIntegrityTest`, `AuditableTraitTest`, `AuditApiAndCommandsTest` | Append-only trigger including TRUNCATE, sealing and tamper detection, the `Auditable` trait, the console commands |
+| Platform | `PlatformHardeningTest`, `QueryCriteriaTest` | Response envelope, problem documents, rate limiting, the sort/filter/include allow-list |
 
-**77 test cases.** Still to write: Organization (company/branch invariants, membership),
-Settings (four-level resolution, scope refusal), the Identity HTTP surface end to end, unit
-tests for the services, and the Vitest suite for the front end.
+**149 front-end tests** across the API client (step-up replay, RFC 9457 mapping, the CSRF handshake
+and its `withXSRFToken` requirement), both stores, router guard ordering, and every UI and app
+component.
 
-## Test suite status
+### The `Auditable` trait is now exercised
 
-| Tranche | Result |
-| --- | --- |
-| `Feature/Tenancy` (32) | **all pass** — verified against real FORCED RLS as a NOBYPASSRLS role |
-| `Feature/Authorization` (16) | **all pass** |
-| `Feature/Audit` (14) | **all pass** — append-only trigger, seal path and tamper detection all verified |
-| `Feature/Identity` (16) | 12 pass, **4 fail** |
-
-The four Identity failures are diagnosed and are test-side, not application-side:
-
-1. `toNotLeak('password')` matches the *key* `requires.password_change`, not a leaked value.
-   The assertion needs to target the hash and secret values, not the word.
-2. + 3. Two lockout tests: the account is not locked after `max_attempts` failures. Needs
-   confirming whether `registerFailure` is reached on every attempt, or whether the route
-   limiter absorbs some. **This is the one that could still be an application bug** and should
-   be settled before the suite is called green.
-4. `LoginHistory::value('outcome')` returns a cast enum, not the raw string the test compares
-   against.
-
-## Sessions: fixed at the root. Nothing quarantined.
-
-The whole authenticated API surface returns 200, with `session.current` **enabled**:
-
-```
-login | /auth/session | /companies | /users | /roles | /permissions
-/settings/bootstrap | /audit | /activity | /me/devices | /me/login-history | /tokens
-POST /roles -> 403 (correctly refused for an accountant)
-```
-
-The 401s were never an authentication or middleware-logic problem. Instrumenting
-`EnsureSessionIsCurrent` showed `idle = true` with an activity timestamp written seconds
-earlier — because **the PostgreSQL session time zone was not UTC**.
-
-Laravel binds a Carbon as `'Y-m-d H:i:s'` with no offset — UTC wall time — and PostgreSQL
-interprets an offset-less literal in the *session* zone. On a server set to `Asia/Colombo`
-every `timestamptz` written through the query builder was stored **5h30m early**: audit
-`created_at`, `login_histories`, `last_activity_at`, all of it. Measured drift was 19,800
-seconds; it is now 1.
-
-Fixed by pinning `'timezone' => 'UTC'` on both connections in `config/database.php`, so
-correctness no longer depends on how the server was provisioned. `docker/postgres/init/01-bootstrap.sh`
-already set this on the role, which is exactly why a containerised environment never showed it —
-and why running outside Docker was worth doing.
-
-This also fixed **two of the four failing Identity tests** (the lockout pair), with no change
-to the test code: they were failing on the same skew.
-
-Also fixed: `GET /roles` returned 500 from `withCount('users')`. spatie resolves that relation's
-model from the role's `guard_name`, which is null on a query builder rather than a hydrated
-instance. Replaced with a direct subquery on `model_has_roles`, which is also more accurate.
-
-## Operational hazard found by running the suite
-
-`TENANCY_ENFORCE_RLS=false` against a database whose policies **do** exist is far worse than
-either state alone: the policies constrain every query, nothing publishes a tenant for them to
-match, and the application reads **empty result sets everywhere with no error**. It presents as
-"all my data has vanished".
-
-`asids:security-check` now fails hard on this mismatch in every environment. The two settings
-must agree: enforcement on, or the RLS migration rolled back.
-
-## First things to check once PHP exists
-
-These are the specific places where I could not verify an external API by reading:
-
-1. `PermissionTeamBootstrapper` — `setPermissionsTeamId()` and `forgetInstance()` against
-   the installed spatie/laravel-permission 6.x.
-2. `Builder::macro('applyFilter')` under PHPStan level 8 — six controllers depend on it.
-3. `TwoFactorService::verifyTotp` — `verifyKeyNewer()` named arguments against
-   pragmarx/google2fa 8.x.
-4. The `audit_logs` seal trigger — that a legitimate seal UPDATE passes and any other
-   UPDATE is refused. This is the one piece of PL/pgSQL in the platform.
-5. `Tenant::getCustomColumns()` — that stancl/tenancy's data-column overflow does not
-   swallow a real column.
-6. `useId()` in `TextField.vue` — Vue 3.5+ only. If the installed Vue is older, swap for a
-   module-scoped counter.
-7. `withXSRFToken: true` in `api/client.ts` — axios 1.7+ only; without it the Sanctum
-   cookie flow silently fails CSRF on every write.
+No Phase 1 model applies it — this phase's security-relevant changes are captured by the eleven
+domain-event listeners instead, and the trait is for the business documents Accounting brings. That
+left it shipped but unexercised, and PHPStan does not analyse a trait no class uses, so it was not
+type-checked either. `tests/Support/Fixtures/AuditedRecord.php` is a real model on a real table that
+applies it, closing both gaps.
 
 ---
 
-## Blocker: no toolchain on this machine
+## Coverage
 
-`php`, `composer`, `node`, `npm` and `docker` are all absent, and Homebrew is not
-installed. **No command in this repository has been run** — not `composer install`, not
-`php artisan migrate`, not `pest`. The code is written against Laravel 12 / PHP 8.4
-APIs and reviewed by reading, but it is unverified.
+**85.6 %** of `app/` and `src/`, against a gate of 85. The uncovered remainder is concentrated in
+the places where a test would assert the framework rather than the application: service-provider
+registration bodies, enum label methods, and exception factories reached only on paths a test cannot
+provoke without fabricating an impossible state.
 
-To make it runnable:
+Front-end thresholds are **per layer** rather than one average, deliberately. A single global number
+lets thirteen page components' worth of markup dominate the figure and hide a regression in
+`api/client.ts`. The logic layers hold at 90–100 %; `pages/` and `app/` are declared at zero, stated
+openly in `vite.config.ts` rather than excluded from the report, with the reasoning recorded there.
+
+---
+
+## Findings that are not defects
+
+Two guards turn out to be unreachable through any current path. Both are cheap, both are correct,
+and both are now documented by the tests that probe them rather than left to look like live
+behaviour:
+
+- **`CannotArchive::lastActiveCompany`.** `create()` makes the first company of a workspace the
+  default whether or not the caller asked, `makeDefault()` keeps exactly one, and `archive()`
+  refuses the default — so the only company that could ever be the sole active one is always the
+  default, and the check above it fires first.
+- **`UserService::assertNotLastActiveOwner`.** The policy requires an actor to *outrank* the target
+  strictly, and nobody outranks an owner, so no HTTP caller reaches it. It is exercised directly, as
+  the backstop it is for console commands and future endpoints.
+
+A third is a deliberate trade-off worth stating plainly: **step-up authentication protects only
+users who have enrolled a second factor.** The middleware cannot demand a code from someone who has
+never set one up, and refusing outright would make ownership transfer unreachable for exactly the
+workspaces most likely to need it. Without workspace-level enforcement, the permission check is the
+only control on those routes.
+
+---
+
+## Settled assumptions
+
+The seven items previously listed as unverified are closed:
+
+1. `PermissionTeamBootstrapper` against spatie 6.25 — exercised by every tenant-scoped role test.
+2. `Builder::macro('applyFilter')` under PHPStan level 8 — analysed, typed `Builder<Model>`.
+3. `TwoFactorService::verifyTotp` against google2fa 8.0.3 — the named arguments match the installed
+   signature, and enrolment, verification and replay resistance are covered end to end.
+4. The `audit_logs` seal trigger — a legitimate seal UPDATE passes and every other UPDATE is
+   refused, verified against real PL/pgSQL.
+5. `Tenant::getCustomColumns()` — `TenantCustomColumnsTest` asserts the list matches the table
+   exactly, and that routing to the column and to `data` both work. This one was genuinely
+   unverified until now: a real column missing from the list is written into `data` instead, reads
+   back correctly through the model, and silently disappears from every query that filters on it.
+6. `useId()` in `TextField.vue` — Vue 3.5 is installed; the component renders and is covered.
+7. `withXSRFToken` in `api/client.ts` — asserted in `client.spec.ts`, and the whole cookie flow was
+   driven through a real browser against the running application.
+
+---
+
+## Running it
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew services start postgresql@17 && brew services start redis
 ```
 
 ```bash
-brew install php@8.4 composer node@22 && brew install --cask docker
-```
-
-Then, once the remaining classes above exist:
-
-```bash
-cp .env.example .env && composer install && npm ci && php artisan key:generate
+composer install && npm ci && cp .env.example .env && php artisan key:generate
 ```
 
 ```bash
-docker compose up -d postgres redis && php artisan migrate --seed
+php artisan migrate --seed && php artisan asids:security-check
 ```
 
-## Suggested order for the next session
+Quality gates, in the order CI runs them:
 
-1. ~~`Authorization` module~~ — done.
-2. ~~`Organization` models + `CompanyService`~~ — done.
-3. ~~`UserService` + Identity HTTP layer~~ — done. All five core modules are now
-   internally consistent; the remaining gaps are the two leaf modules and the
-   routes that expose everything.
-4. ~~Routes, seeders, factories~~ — done.
-5. ~~`Audit` + `Settings`~~ — done. The backend is structurally complete.
-6. **Install the toolchain and run it.** `composer install`, `migrate --seed`,
-   `asids:security-check`. Fix whatever the five items above turn up.
-7. Test suite, then the Vue front end.
-8. ERD, OpenAPI, deployment runbook, code review record.
+```bash
+vendor/bin/pint --test && vendor/bin/phpstan analyse && php -d memory_limit=2G vendor/bin/pest --coverage --min=85
+```
+
+```bash
+npm run typecheck && npm run lint && npm run test:coverage && npm run build
+```
+
+`pcov` is required for the coverage gate. On this machine it needed the pcre2 headers:
+
+```bash
+CPPFLAGS="-I/opt/homebrew/include" pecl install pcov
+```
+
+---
+
+## Phase 2 readiness
+
+Phase 1 is complete. The seams Accounting will need are in place and tested: `LedgerActivityProbe`
+for the immutability rules, the `Auditable` trait with a working fixture, `CompliancePackContract`
+for the Sri Lankan tax module, and a permission catalogue that new modules extend by declaration
+rather than by migration.
+
+Two things to carry forward. `TenantProvisioningService` still does five things in one transaction
+and is the one class depending outward on three modules — ADR 0005 predicts its extraction point,
+and Accounting is where that pressure will show. And the repositories remain inconsistently used:
+`EloquentUserRepository` and `EloquentTenantRepository` exist while several controllers query models
+directly. That is defensible for a phase with little intricate query construction, but Accounting
+should establish the pattern properly rather than let the inconsistency spread.

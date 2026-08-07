@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use PragmaRX\Google2FA\Google2FA;
+use RuntimeException;
 
 final class IdentityServiceProvider extends ServiceProvider
 {
@@ -33,7 +34,22 @@ final class IdentityServiceProvider extends ServiceProvider
         // AuthenticationService depends on the *stateful* guard contract, because it regenerates
         // the session and issues remember tokens. Binding it explicitly keeps that requirement
         // visible rather than resolving whatever `auth()` happens to return.
-        $this->app->bind(StatefulGuard::class, static fn (): StatefulGuard => auth()->guard('web'));
+        $this->app->bind(StatefulGuard::class, static function (): StatefulGuard {
+            $guard = auth()->guard('web');
+
+            // `guard()` is typed as returning the base contract, and a `web` guard reconfigured
+            // to a stateless driver would satisfy it while breaking session regeneration. Failing
+            // here names the misconfiguration; failing later would surface as a sign-in that
+            // appears to succeed and leaves no session.
+            if (! $guard instanceof StatefulGuard) {
+                throw new RuntimeException(
+                    'The `web` guard must be stateful: AuthenticationService regenerates the '
+                    .'session and issues remember tokens through it.'
+                );
+            }
+
+            return $guard;
+        });
     }
 
     public function boot(): void

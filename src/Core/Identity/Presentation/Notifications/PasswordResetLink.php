@@ -37,10 +37,10 @@ final class PasswordResetLink extends Notification implements ShouldQueue
     {
         $minutes = 60;
 
-        return (new MailMessage())
+        return (new MailMessage)
             ->subject('Reset your '.config('app.name').' password')
             ->greeting('Hello '.$notifiable->first_name.',')
-            ->line('We received a request to reset the password for your '.($notifiable->tenant?->name ?? config('app.name')).' account.')
+            ->line('We received a request to reset the password for your '.($notifiable->tenant->name ?? config('app.name')).' account.')
             ->action('Choose a new password', $this->url)
             ->line("This link expires in {$minutes} minutes and can only be used once.")
             // Told plainly, because the alternative is a support ticket from someone who did not

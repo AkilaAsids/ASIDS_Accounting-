@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Audit\Domain\Concerns;
 
 use Asids\Core\Audit\Infrastructure\Observers\AuditableObserver;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Applied to a model to have every change recorded.
@@ -14,7 +15,7 @@ use Asids\Core\Audit\Infrastructure\Observers\AuditableObserver;
  * cannot find the invoice approval in the noise. A model earns the trait when its history is
  * something someone would ask about.
  *
- * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ * @phpstan-require-extends Model
  */
 trait Auditable
 {

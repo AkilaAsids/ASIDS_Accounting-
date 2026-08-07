@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Asids\Core\Identity\Application\Services;
 
-use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Identity\Domain\Exceptions\AccountLinkInvalid;
+use Asids\Core\Identity\Domain\Models\User;
 use Illuminate\Support\Facades\URL;
 
 /**

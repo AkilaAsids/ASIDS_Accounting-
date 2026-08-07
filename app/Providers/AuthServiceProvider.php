@@ -23,7 +23,10 @@ final class AuthServiceProvider extends ServiceProvider
 
     private function registerGlobalGates(): void
     {
-        Gate::before(function (User $user, string $ability): ?bool {
+        /**
+         * @param  array<int, mixed>  $arguments
+         */
+        Gate::before(function (User $user, string $ability, array $arguments = []): ?bool {
             // DENY FIRST. A suspended or deactivated account holds no capability at all.
             //
             // This must live in `before`, not `after`. Laravel's after callbacks combine with
@@ -50,7 +53,28 @@ final class AuthServiceProvider extends ServiceProvider
                 return true;
             }
 
-            return null;
+            // The permission check itself, performed here rather than by spatie's own gate hook.
+            //
+            // That hook is disabled in `config/permission.php` — see the comment there. It
+            // registers itself while the Gate is being resolved, so it always sits ahead of this
+            // callback, and because Laravel takes the first non-null result it granted permissions
+            // *before* the account-status check above could deny them. Doing it here is what makes
+            // "suspended holds nothing" true rather than aspirational.
+            //
+            // `checkPermissionTo` returns false for an unknown permission rather than throwing, and
+            // `?: null` converts a false into "no opinion" so a policy still gets its say — an
+            // ability may be granted by a policy without existing in the catalogue at all.
+            // Unconditional, unlike the package's own version of this: it guards with
+            // `method_exists` because its callback receives any `Authorizable`, whereas this closure
+            // is typed to `User`, which carries `HasRoles`. The guard would be dead code.
+            //
+            // Mirrors the package's argument handling: `can('ability', 'guard')` passes the guard
+            // positionally, and it must not be mistaken for a policy's model argument.
+            $guard = is_string($arguments[0] ?? null) && ! class_exists($arguments[0])
+                ? $arguments[0]
+                : null;
+
+            return $user->checkPermissionTo($ability, $guard) ?: null;
         });
     }
 }

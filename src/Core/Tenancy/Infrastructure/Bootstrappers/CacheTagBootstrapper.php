@@ -6,8 +6,8 @@ namespace Asids\Core\Tenancy\Infrastructure\Bootstrappers;
 
 use Illuminate\Cache\CacheManager;
 use Illuminate\Contracts\Foundation\Application;
-use Stancl\Tenancy\Contracts\Tenant;
 use Stancl\Tenancy\Contracts\TenancyBootstrapper;
+use Stancl\Tenancy\Contracts\Tenant;
 
 /**
  * Namespaces the cache per tenant.

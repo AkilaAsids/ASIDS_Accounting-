@@ -7,6 +7,7 @@ use Asids\Core\Audit\Application\Services\AuditRecorder;
 use Asids\Core\Audit\Domain\Enums\AuditEvent;
 use Asids\Core\Audit\Domain\Models\AuditLog;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -41,14 +42,14 @@ describe('append-only enforcement', function (): void {
         expect(fn () => DB::table('audit_logs')
             ->where('id', $entry->getKey())
             ->update(['event' => 'created']))
-            ->toThrow(Illuminate\Database\QueryException::class);
+            ->toThrow(QueryException::class);
     });
 
     it('refuses to delete an entry without the pruning declaration', function (): void {
         ($this->recordSome)(1);
 
         expect(fn () => DB::table('audit_logs')->delete())
-            ->toThrow(Illuminate\Database\QueryException::class);
+            ->toThrow(QueryException::class);
     });
 
     it('refuses to truncate the table', function (): void {
@@ -57,7 +58,7 @@ describe('append-only enforcement', function (): void {
         // TRUNCATE bypasses row triggers entirely, so it needs its own statement trigger. This
         // is the gap a determined operator would find first.
         expect(fn () => DB::statement('TRUNCATE audit_logs'))
-            ->toThrow(Illuminate\Database\QueryException::class);
+            ->toThrow(QueryException::class);
     });
 
     it('permits deletion when pruning declares itself', function (): void {

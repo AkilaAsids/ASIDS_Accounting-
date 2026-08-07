@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
@@ -75,7 +77,7 @@ final class AppServiceProvider extends ServiceProvider
         // CarbonImmutable removes a whole class of bug where a date is mutated in
         // place by a helper and the caller's value silently changes — which in an
         // accounting system means a transaction landing in the wrong period.
-        Date::use(\Carbon\CarbonImmutable::class);
+        Date::use(CarbonImmutable::class);
     }
 
     private function configureVite(): void
@@ -93,7 +95,7 @@ final class AppServiceProvider extends ServiceProvider
         // the call site than a nest of if statements, and keeps the "is this
         // filter present" decision in one place.
         Builder::macro('applyFilter', function (mixed $value, callable $callback): Builder {
-            /** @var Builder $this */
+            /** @var Builder<Model> $this */
             return ($value === null || $value === '') ? $this : $callback($this, $value);
         });
     }

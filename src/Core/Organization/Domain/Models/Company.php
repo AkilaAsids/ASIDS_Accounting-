@@ -34,6 +34,13 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $legal_name
  * @property string $code
  * @property string $slug
+ * @property string|null $registration_number
+ * @property string|null $tax_identification_number
+ * @property string|null $vat_registration_number
+ * @property string|null $svat_registration_number
+ * @property string|null $business_type
+ * @property string|null $industry
+ * @property CarbonImmutable|null $established_on
  * @property string $base_currency_code
  * @property int $fiscal_year_start_month
  * @property int $fiscal_year_start_day
@@ -41,18 +48,31 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $country_code
  * @property string $timezone
  * @property string $locale
+ * @property string|null $email
+ * @property string|null $phone
+ * @property string|null $website
+ * @property string|null $address_line_1
+ * @property string|null $address_line_2
+ * @property string|null $city
+ * @property string|null $district
+ * @property string|null $postal_code
+ * @property string|null $logo_path
  * @property bool $is_vat_registered
  * @property bool $is_svat_registered
  * @property OrganizationStatus $status
  * @property bool $is_default
  * @property CarbonImmutable|null $archived_at
+ * @property string|null $created_by_id
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
+ * @property CarbonImmutable|null $deleted_at
  */
 final class Company extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<CompanyFactory> */
     use HasFactory;
-
-    use BelongsToTenant;
     use HasUuids;
     use SoftDeletes;
 
@@ -247,7 +267,7 @@ final class Company extends Model
 
     protected static function booted(): void
     {
-        static::saving(static function (self $company): void {
+        self::saving(static function (self $company): void {
             // The database enforces uniqueness on `upper(code)` and `lower(slug)`, so the
             // stored form is normalised here rather than leaving two representations of
             // the same value in the table.

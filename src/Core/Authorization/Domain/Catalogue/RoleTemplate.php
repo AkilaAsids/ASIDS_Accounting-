@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Asids\Core\Authorization\Domain\Catalogue;
 
+use LogicException;
+
 /**
  * The system roles every workspace is provisioned with.
  *
@@ -118,7 +120,7 @@ final readonly class RoleTemplate
         // Unreachable while `all()` contains the owner template; asserted rather than
         // silently returning a role with no permissions, which would lock a new
         // customer out of their own workspace.
-        throw new \LogicException('The role template catalogue must define exactly one owner role.');
+        throw new LogicException('The role template catalogue must define exactly one owner role.');
     }
 
     public function grantsEverything(): bool

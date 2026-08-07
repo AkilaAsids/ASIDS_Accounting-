@@ -57,6 +57,24 @@ final readonly class TenantResolver
         return null;
     }
 
+    /**
+     * Forget every cached path to a tenant. Called by TenantObserver.
+     */
+    public function forget(Tenant $tenant): void
+    {
+        $this->cache->forget('tenant:slug:'.strtolower($tenant->slug));
+
+        // Queried rather than read from the relation: this runs inside a model
+        // observer where the relation is usually not loaded, and lazy loading is
+        // prohibited in production.
+        /** @var list<string> $domains */
+        $domains = $tenant->domains()->pluck('domain')->all();
+
+        foreach ($domains as $domain) {
+            $this->cache->forget('tenant:domain:'.strtolower($domain));
+        }
+    }
+
     private function fromHeader(Request $request): ?Tenant
     {
         $header = (string) config('asids.tenancy.header', 'X-Tenant');
@@ -184,26 +202,8 @@ final readonly class TenantResolver
 
         // `newFromBuilder` hydrates from raw database values without marking the
         // model dirty, which is exactly what a cached row is.
-        $tenant = (new Tenant())->newFromBuilder($attributes);
+        $tenant = (new Tenant)->newFromBuilder($attributes);
 
         return $tenant instanceof Tenant ? $tenant : null;
-    }
-
-    /**
-     * Forget every cached path to a tenant. Called by TenantObserver.
-     */
-    public function forget(Tenant $tenant): void
-    {
-        $this->cache->forget('tenant:slug:'.strtolower($tenant->slug));
-
-        // Queried rather than read from the relation: this runs inside a model
-        // observer where the relation is usually not loaded, and lazy loading is
-        // prohibited in production.
-        /** @var list<string> $domains */
-        $domains = $tenant->domains()->pluck('domain')->all();
-
-        foreach ($domains as $domain) {
-            $this->cache->forget('tenant:domain:'.strtolower($domain));
-        }
     }
 }

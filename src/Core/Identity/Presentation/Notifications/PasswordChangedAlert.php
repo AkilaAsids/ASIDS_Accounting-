@@ -44,7 +44,7 @@ final class PasswordChangedAlert extends Notification implements ShouldQueue
             default => 'Your password was changed.',
         };
 
-        return (new MailMessage())
+        return (new MailMessage)
             ->subject('Your '.config('app.name').' password was changed')
             ->greeting('Hello '.$notifiable->first_name.',')
             ->line($context)

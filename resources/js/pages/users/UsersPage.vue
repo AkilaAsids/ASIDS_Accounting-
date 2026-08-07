@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '@/api/client'
-import AlertBanner from '@/components/ui/AlertBanner.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import SurfaceCard from '@/components/ui/SurfaceCard.vue'
 import TextField from '@/components/ui/TextField.vue'
 import PermissionGate from '@/components/app/PermissionGate.vue'
 import { useFormat } from '@/composables/useFormat'
 import { useUiStore } from '@/stores/ui'
-import type { ApiMeta } from '@/types/api'
+import type { ApiMeta, SeatUsage } from '@/types/api'
 import type { Role, User } from '@/types/domain'
 
 /**
@@ -30,9 +29,32 @@ const search = ref('')
 const statusFilter = ref('')
 
 const inviting = ref(false)
-const inviteForm = ref({ first_name: '', last_name: '', email: '', job_title: '', role_ids: [] as string[] })
+const inviteForm = ref({
+  first_name: '',
+  last_name: '',
+  email: '',
+  job_title: '',
+  role_ids: [] as string[],
+})
 const inviteErrors = ref<Record<string, string>>({})
 const inviteBusy = ref(false)
+
+// Derived here rather than cast inline in the template: `meta` is an open record, so reading
+// `seats` from it there needs an assertion on every interpolation, and an assertion is exactly
+// what hid the fact that `limit` is nullable for a caller with no workspace.
+const seats = computed<SeatUsage | null>(() => meta.value?.seats ?? null)
+
+const seatSummary = computed<string>(() => {
+  const current = seats.value
+
+  if (current === null) {
+    return ''
+  }
+
+  return current.limit === null
+    ? `${current.consumed} seats in use`
+    : `${current.consumed} of ${current.limit} seats used`
+})
 
 let searchTimer: number | undefined
 
@@ -126,7 +148,10 @@ async function act(user: User, action: 'suspend' | 'reinstate' | 'deactivate'): 
     await load(meta.value?.pagination?.current_page ?? 1)
     ui.notify('success', 'Done.')
   } catch (thrown) {
-    ui.notify('error', thrown instanceof ApiError ? thrown.problem.detail : 'Could not complete that.')
+    ui.notify(
+      'error',
+      thrown instanceof ApiError ? thrown.problem.detail : 'Could not complete that.',
+    )
   }
 }
 
@@ -135,7 +160,10 @@ async function sendReset(user: User): Promise<void> {
     await api.post(`/users/${user.id}/send-password-reset`)
     ui.notify('success', `Reset link sent to ${user.email}.`)
   } catch (thrown) {
-    ui.notify('error', thrown instanceof ApiError ? thrown.problem.detail : 'Could not send the link.')
+    ui.notify(
+      'error',
+      thrown instanceof ApiError ? thrown.problem.detail : 'Could not send the link.',
+    )
   }
 }
 
@@ -152,10 +180,7 @@ const statusStyles: Record<string, string> = {
     <header class="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold text-content">Users</h1>
-        <p v-if="meta?.seats" class="mt-1 text-sm text-content-muted">
-          {{ (meta.seats as { consumed: number; limit: number }).consumed }} of
-          {{ (meta.seats as { consumed: number; limit: number }).limit }} seats used
-        </p>
+        <p v-if="seats" class="mt-1 text-sm text-content-muted">{{ seatSummary }}</p>
       </div>
 
       <PermissionGate permission="identity.users.invite">
@@ -171,8 +196,17 @@ const statusStyles: Record<string, string> = {
       description="They will choose their own password from a link we e-mail them."
     >
       <form class="grid gap-4 sm:grid-cols-2" novalidate @submit.prevent="invite">
-        <TextField v-model="inviteForm.first_name" label="First name" :error="inviteErrors.first_name" required />
-        <TextField v-model="inviteForm.last_name" label="Last name" :error="inviteErrors.last_name" />
+        <TextField
+          v-model="inviteForm.first_name"
+          label="First name"
+          :error="inviteErrors.first_name"
+          required
+        />
+        <TextField
+          v-model="inviteForm.last_name"
+          label="Last name"
+          :error="inviteErrors.last_name"
+        />
         <TextField
           v-model="inviteForm.email"
           label="E-mail address"
@@ -181,7 +215,11 @@ const statusStyles: Record<string, string> = {
           :error="inviteErrors.email"
           required
         />
-        <TextField v-model="inviteForm.job_title" label="Job title" :error="inviteErrors.job_title" />
+        <TextField
+          v-model="inviteForm.job_title"
+          label="Job title"
+          :error="inviteErrors.job_title"
+        />
 
         <div class="sm:col-span-2">
           <span class="field-label">Roles</span>
@@ -235,7 +273,9 @@ const statusStyles: Record<string, string> = {
     <SurfaceCard>
       <div class="-mx-5 -my-4 overflow-x-auto">
         <table class="w-full text-left text-sm">
-          <thead class="border-b border-surface-border text-xs uppercase tracking-wide text-content-subtle">
+          <thead
+            class="border-b border-surface-border text-xs uppercase tracking-wide text-content-subtle"
+          >
             <tr>
               <th scope="col" class="px-5 py-3">Name</th>
               <th scope="col" class="px-5 py-3">Roles</th>
@@ -251,19 +291,26 @@ const statusStyles: Record<string, string> = {
             </tr>
 
             <tr v-else-if="users.length === 0">
-              <td colspan="5" class="px-5 py-8 text-center text-content-muted">No users match that.</td>
+              <td colspan="5" class="px-5 py-8 text-center text-content-muted">
+                No users match that.
+              </td>
             </tr>
 
             <tr v-for="user in users" v-else :key="user.id" class="hover:bg-surface-sunken">
               <td class="px-5 py-3">
                 <div class="flex items-center gap-3">
-                  <span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-600/10 text-xs font-semibold text-primary-700 dark:text-primary-300">
+                  <span
+                    class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-600/10 text-xs font-semibold text-primary-700 dark:text-primary-300"
+                  >
                     {{ user.initials }}
                   </span>
                   <div class="min-w-0">
                     <p class="truncate text-content">
                       {{ user.full_name }}
-                      <span v-if="user.is_owner" class="ml-1 rounded bg-primary-600/10 px-1.5 py-0.5 text-xs text-primary-700 dark:text-primary-300">
+                      <span
+                        v-if="user.is_owner"
+                        class="ml-1 rounded bg-primary-600/10 px-1.5 py-0.5 text-xs text-primary-700 dark:text-primary-300"
+                      >
                         Owner
                       </span>
                     </p>
@@ -277,12 +324,17 @@ const statusStyles: Record<string, string> = {
               </td>
 
               <td class="px-5 py-3">
-                <span :class="['rounded px-2 py-0.5 text-xs font-medium', statusStyles[user.status]]">
+                <span
+                  :class="['rounded px-2 py-0.5 text-xs font-medium', statusStyles[user.status]]"
+                >
                   {{ user.status_label }}
                 </span>
                 <!-- Lockout is transient and self-clearing, so it is shown as a note rather
                      than a status: the account is still active. -->
-                <span v-if="user.security?.is_locked" class="ml-1 rounded bg-danger/10 px-2 py-0.5 text-xs text-danger">
+                <span
+                  v-if="user.security?.is_locked"
+                  class="ml-1 rounded bg-danger/10 px-2 py-0.5 text-xs text-danger"
+                >
                   Locked
                 </span>
               </td>
@@ -294,7 +346,9 @@ const statusStyles: Record<string, string> = {
               <td class="px-5 py-3">
                 <div class="flex justify-end gap-1">
                   <PermissionGate permission="identity.credentials.reset_password">
-                    <BaseButton variant="ghost" size="sm" @click="sendReset(user)">Reset password</BaseButton>
+                    <BaseButton variant="ghost" size="sm" @click="sendReset(user)"
+                      >Reset password</BaseButton
+                    >
                   </PermissionGate>
 
                   <PermissionGate permission="identity.users.suspend">

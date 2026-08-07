@@ -25,6 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class ApiResponse
 {
     /**
+     * @param  JsonResource|array<array-key, mixed>|null  $data
      * @param  array<string, mixed>  $meta
      */
     public static function item(
@@ -36,6 +37,7 @@ final class ApiResponse
     }
 
     /**
+     * @param  JsonResource|array<array-key, mixed>  $data
      * @param  array<string, mixed>  $meta
      */
     public static function created(JsonResource|array $data, array $meta = []): JsonResponse
@@ -48,6 +50,7 @@ final class ApiResponse
      * at the top level, so the envelope shape never changes between a paginated
      * and an unpaginated endpoint.
      *
+     * @param  ResourceCollection|LengthAwarePaginator<int, mixed>|CursorPaginator<int, mixed>  $collection
      * @param  array<string, mixed>  $meta
      */
     public static function collection(

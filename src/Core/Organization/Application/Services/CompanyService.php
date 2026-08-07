@@ -39,13 +39,15 @@ final readonly class CompanyService
 
     public function create(CreateCompanyData $data, User $creator): Company
     {
-        $tenant = $this->tenantContext->require();
+        // Called for the guard, not the value: it throws when no workspace is active, and a
+        // company written with a NULL tenant_id would be visible to every tenant at once.
+        $this->tenantContext->require();
 
         $this->assertWithinCompanyLimit();
         $this->assertRegistrationsValid($data);
 
-        $company = DB::transaction(function () use ($data, $creator, $tenant): Company {
-            $company = new Company();
+        $company = DB::transaction(function () use ($data, $creator): Company {
+            $company = new Company;
 
             $company->fill([
                 'name' => $data->name,

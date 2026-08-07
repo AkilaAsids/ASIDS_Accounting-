@@ -65,7 +65,7 @@ final readonly class MembershipService
                 ->first();
 
             if ($membership === null) {
-                $membership = new CompanyMembership();
+                $membership = new CompanyMembership;
                 $membership->fill([
                     'company_id' => $company->getKey(),
                     'user_id' => $user->getKey(),

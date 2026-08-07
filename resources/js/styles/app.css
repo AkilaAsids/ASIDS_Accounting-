@@ -75,8 +75,12 @@
   /* Respected globally: an accounting system is used all day, and motion sensitivity is
      common enough that this is an accessibility requirement, not a nicety. */
   @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    *, *::before, *::after {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
@@ -90,7 +94,9 @@
 
   /* Tabular figures everywhere a number is money. Proportional digits make a column of
      amounts impossible to scan, which matters more here than in most products. */
-  .tabular, td.numeric, .amount {
+  .tabular,
+  td.numeric,
+  .amount {
     font-variant-numeric: tabular-nums;
   }
 

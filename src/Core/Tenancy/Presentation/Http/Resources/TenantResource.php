@@ -67,7 +67,7 @@ final class TenantResource extends JsonResource
         // tenants in the back office, and touching an unloaded relation there is
         // the classic N+1.
         $host = $this->relationLoaded('domains')
-            ? ($this->primaryDomain()?->domain ?? $this->fallbackHost())
+            ? ($this->primaryDomain()->domain ?? $this->fallbackHost())
             : $this->fallbackHost();
 
         return $scheme.'://'.$host;

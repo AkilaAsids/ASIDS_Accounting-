@@ -9,19 +9,23 @@ parameters:
         - src
         - database
         - routes
-        - tests
+        # The test *support* classes are ordinary PHP and are analysed like everything else.
+        #
+        # The Pest specs themselves are not, and cannot usefully be. Pest binds every `it()` and
+        # `beforeEach()` closure to the TestCase at runtime; PHPStan sees an unbound closure, so
+        # `$this` is undefined, every helper call is an unknown method, and every shared fixture is
+        # an undeclared property. That produced 246 errors, all of the same non-finding. Analysing
+        # them would mean either suppressing that count wholesale or reshaping the specs to suit a
+        # limitation of the analyser. The specs are verified by being executed instead.
+        - tests/TestCase.php
+        - tests/Support
 
-    excludePaths:
-        - database/migrations/*_create_extensions_and_roles.php
-
-    checkMissingIterableValueType: true
-    checkGenericClassInNonGenericObjectType: true
+    # `checkMissingIterableValueType` and `checkGenericClassInNonGenericObjectType` are not set:
+    # PHPStan 2.x removed both as toggles and folded them into level 6, so they are already on at
+    # level 8. Leaving them declared is not a no-op — it aborts the run with "Unexpected item",
+    # which is how this gate came to never execute at all.
     treatPhpDocTypesAsCertain: false
     reportUnmatchedIgnoredErrors: true
 
-    ignoreErrors:
-        # Eloquent's static builder proxies are modelled loosely by Larastan for
-        # traits that add global scopes at runtime.
-        -
-            identifier: staticMethod.notFound
-            path: src/*/Domain/Models/*.php
+    # No ignoreErrors. The Eloquent static-proxy entry that used to live here matched nothing once
+    # the models carried complete `@property` blocks, which is what it was really working around.

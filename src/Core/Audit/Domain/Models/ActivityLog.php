@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Audit\Domain\Models;
 
 use Asids\Core\Tenancy\Domain\Concerns\BelongsToTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -17,9 +18,22 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * separate tables.
  *
  * @property string $id
+ * @property string|null $tenant_id
+ * @property string|null $company_id
  * @property string $log_name
+ * @property string|null $event
  * @property string $description
+ * @property string|null $subject_type
+ * @property string|null $subject_id
+ * @property string|null $subject_label
+ * @property string|null $causer_type
+ * @property string|null $causer_id
+ * @property string|null $causer_label
  * @property array<string, mixed>|null $properties
+ * @property string|null $batch_id
+ * @property string|null $request_id
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
  */
 final class ActivityLog extends Model
 {

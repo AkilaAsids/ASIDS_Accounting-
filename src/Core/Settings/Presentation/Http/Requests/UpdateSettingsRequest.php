@@ -9,6 +9,7 @@ use Asids\Core\Settings\Domain\Enums\SettingScope;
 use Asids\Core\Settings\Domain\Models\Setting;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Update a group of settings at one scope.
@@ -54,9 +55,9 @@ final class UpdateSettingsRequest extends FormRequest
         ];
     }
 
-    public function withValidator(\Illuminate\Validation\Validator $validator): void
+    public function withValidator(Validator $validator): void
     {
-        $validator->after(function (\Illuminate\Validation\Validator $validator): void {
+        $validator->after(function (Validator $validator): void {
             /** @var array<string, mixed> $settings */
             $settings = $this->input('settings', []);
             $known = SettingsCatalogue::keyed();

@@ -10,7 +10,19 @@ export interface ApiMeta {
   request_id: string
   api_version: string
   pagination?: Pagination
+  seats?: SeatUsage
   [key: string]: unknown
+}
+
+/**
+ * Seat consumption, returned alongside the user list.
+ *
+ * `limit` is nullable: the server resolves it through the workspace, and platform staff have no
+ * workspace to resolve it from. A caller that assumes a number renders "3 of  seats used".
+ */
+export interface SeatUsage {
+  consumed: number
+  limit: number | null
 }
 
 export interface ApiEnvelope<T> {

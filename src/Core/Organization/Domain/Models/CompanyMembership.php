@@ -25,7 +25,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $branch_id
  * @property bool $is_default
  * @property CarbonImmutable $joined_at
+ * @property string|null $granted_by_id
  * @property CarbonImmutable|null $revoked_at
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
+ *
+ * `user_id` and `company_id` are non-nullable foreign keys, so those relations always resolve;
+ * `granted_by_id` is nullable — a membership created by provisioning has no granting actor — and
+ * every reader of `grantedBy` must handle that.
+ * @property-read User $user
+ * @property-read Company $company
+ * @property-read User|null $grantedBy
  */
 final class CompanyMembership extends Model
 {

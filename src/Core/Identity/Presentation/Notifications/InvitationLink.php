@@ -37,9 +37,9 @@ final class InvitationLink extends Notification implements ShouldQueue
 
     public function toMail(User $notifiable): MailMessage
     {
-        $workspace = $notifiable->tenant?->name ?? config('app.name');
+        $workspace = $notifiable->tenant->name ?? config('app.name');
 
-        return (new MailMessage())
+        return (new MailMessage)
             ->subject($this->invitedByName.' has invited you to '.$workspace.' on '.config('app.name'))
             ->greeting('Hello '.$notifiable->first_name.',')
             ->line($this->invitedByName.' has invited you to join '.$workspace.' on '.config('app.name').', an accounting and ERP platform.')

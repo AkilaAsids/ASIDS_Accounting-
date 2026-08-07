@@ -1,23 +1,51 @@
 # Phase 1 security review
 
-Reviewed by reading. **Nothing in this repository has been executed**, so no control below has
-been demonstrated — this records what was designed and where the residual risk sits, not what
-was proven. Items marked **UNVERIFIED** need a test before anyone relies on them.
+**Revised 2026-08-07, after the code was run.** The original review was conducted by reading, on a
+machine where nothing could be executed, and marked five rows UNVERIFIED. Those five are now
+exercised by the test suite — 462 backend tests against a real PostgreSQL with row level security in
+force as a NOBYPASSRLS role.
+
+"Verified" below means a test executes the control and fails if it is removed. It does not mean the
+design is beyond criticism, and it is not a substitute for the external penetration test named at the
+end of this document.
+
+**One control failed when it was finally executed**, and it is the reason this section is worth
+reading rather than skipping: suspension revoked no permissions at all. The details are under A01.
 
 ## OWASP Top 10 (2021)
 
 | | Risk | Treatment | State |
 | --- | --- | --- | --- |
-| A01 | Broken access control | Three isolation layers (Eloquent scope, FORCED RLS, per-tenant prefixing); permission + membership both required; role levels prevent escalation; policies on every model | **UNVERIFIED** |
+| A01 | Broken access control | Three isolation layers (Eloquent scope, FORCED RLS, per-tenant prefixing); permission + membership both required; role levels prevent escalation; policies on every model | **Verified — one control had failed; see below** |
 | A02 | Cryptographic failures | 2FA secrets encrypted at the application layer; recovery codes individually SHA-256'd; tokens stored as SHA-256; S3 SSE-KMS; TLS 1.3; `SESSION_ENCRYPT=true` | Designed |
 | A03 | Injection | Eloquent and bound parameters throughout; `set_config()` with bound values, never string-interpolated `SET`; `QueryCriteria` allow-lists sortable and filterable columns | Designed |
 | A04 | Insecure design | Documented threat reasoning in 5 ADRs; append-only audit trail; step-up on credential-bearing routes; seams for compliance and ledger rules | Designed |
-| A05 | Security misconfiguration | `asids:security-check` asserts six deployment assumptions and fails the release; `APP_DEBUG` guarded in the entrypoint; no public storage disk | **UNVERIFIED** |
+| A05 | Security misconfiguration | `asids:security-check` asserts six deployment assumptions and fails the release; `APP_DEBUG` guarded in the entrypoint; no public storage disk | **Verified** — the check runs green against a real deployment and fails on an RLS mismatch |
 | A06 | Vulnerable components | `composer audit` and `npm audit --audit-level=high` in CI; pinned major versions | Designed |
-| A07 | Identification & authentication | NIST SP 800-63B password policy with breach checking; per-account lockout plus per-IP/per-identity limits; TOTP with replay resistance; session fixation defence; epoch-based revocation | **UNVERIFIED** |
-| A08 | Software & data integrity | Hash-chained audit trail with database-enforced append-only; signed account links bound to credential state; `insertOrIgnore` idempotency in provisioning | **UNVERIFIED** |
+| A07 | Identification & authentication | NIST SP 800-63B password policy with breach checking; per-account lockout plus per-IP/per-identity limits; TOTP with replay resistance; session fixation defence; epoch-based revocation | **Verified** — enumeration defences, lockout, reuse, expiry and 2FA replay all covered |
+| A08 | Software & data integrity | Hash-chained audit trail with database-enforced append-only; signed account links bound to credential state; `insertOrIgnore` idempotency in provisioning | **Verified** — append-only trigger including TRUNCATE, seal path, and both tamper modes |
 | A09 | Logging & monitoring | Separate `security` and `audit` log channels; credential scrubber on every channel; `login_histories` records failures against unknown addresses; request-id correlation end to end | Designed |
 | A10 | SSRF | No user-supplied URL is fetched anywhere in Phase 1 | N/A |
+
+## A01: the control that had failed
+
+`spatie/laravel-permission` registers its permission check as a `Gate::before` callback during Gate
+resolution, so it always preceded the deny-first account-status check in `AuthServiceProvider`.
+Laravel returns the first non-null result from a before callback.
+
+**Effect: suspending or deactivating a user revoked nothing.** Every capability their roles granted
+survived, and so did any personal access token they held. Suspension only worked for the workspace
+owner, whose authority comes from our own callback and therefore reached the deny.
+
+It is worth being precise about why the original review missed it. The design was correct and is
+described correctly elsewhere in this document; what was wrong was the *order two registrations
+happened in at boot*, which is not visible in either file. The test that should have caught it
+existed and passed, because it used an owner.
+
+Fixed by disabling the package's gate hook and performing the permission check inside our own
+callback, after the status check. Three tests now cover it, including one that asserts structurally
+that exactly one before callback is registered — so a package upgrade restoring the default fails
+loudly rather than silently reopening this.
 
 ## Controls, and what each actually defends against
 
@@ -115,7 +143,20 @@ statutory assessment year; and `ap-southeast-1` as the primary region for data-r
 
 ## Sign-off
 
-**Not signed off.** This is a design review of unexecuted code. A security sign-off requires the
-test suite, a run of `asids:security-check` against a real deployment, and — for a product
-handling third-party financial data — an external penetration test before the first paying
-customer.
+**Not signed off**, and deliberately still not.
+
+Two of the three conditions the original review set are now met: the test suite exists and executes
+these controls, and `asids:security-check` runs green against a real deployment. The third is not,
+and it is the one that matters most for a product holding third-party financial data:
+
+> an external penetration test before the first paying customer.
+
+That is not something this codebase can perform on itself, and no amount of internal coverage
+substitutes for it. The A01 failure above is the argument: 100 % of the isolation *design* was
+sound, the tests for it passed, and a user could still be suspended while keeping every permission
+they had. An adversarial reader outside this work is the control that catches that class of thing.
+
+**Recommended before the first paying customer**, in order: an external penetration test with
+particular attention to cross-tenant access and the step-up boundary; a review of the Sri Lankan
+compliance rules by a chartered accountant when those modules land; and an accessibility audit
+against assistive technology, which component tests approximate but do not replace.

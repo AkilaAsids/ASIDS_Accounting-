@@ -108,7 +108,7 @@ final class DemoWorkspaceSeeder extends Seeder
                 roleIds: [$roleId],
                 // Every demo user is a member of the company the owner already has, so the
                 // company switcher and the membership boundary are both exercised.
-                companyIds: $owner->accessibleCompanyIds()->all(),
+                companyIds: array_values($owner->accessibleCompanyIds()->all()),
                 jobTitle: $jobTitle,
                 // Activated directly: an invitation flow needs a mail server, and a seeder that
                 // leaves four accounts unable to sign in is not a useful demo.

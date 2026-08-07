@@ -50,7 +50,9 @@ final class LoginHistoryController extends ApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $this->authorize('viewLoginHistory', $this->currentUser());
+        // The class, not the caller: `viewLoginHistory` is target-relative and returns true for
+        // yourself, so passing the caller here authorised everybody for the whole workspace's log.
+        $this->authorize('viewAnyLoginHistory', User::class);
 
         $criteria = QueryCriteria::fromRequest(
             request: $request,

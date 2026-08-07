@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Asids\Core\Settings\Application\Services;
 
-use Asids\Core\Settings\Domain\Catalogue\SettingDefinition;
 use Asids\Core\Settings\Domain\Catalogue\SettingsCatalogue;
 use Asids\Core\Settings\Domain\Enums\SettingScope;
 use Asids\Core\Settings\Domain\Models\Setting;
 use Asids\Core\Tenancy\Application\Services\TenantContext;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use InvalidArgumentException;
 
 /**
  * Reads settings, resolving user → company → tenant → system → code default.
@@ -49,7 +49,7 @@ final class SettingsResolver
             // An unknown key is a programming error, not user input — every read goes through a
             // string literal in code. Returning null would hide it until someone noticed a
             // feature quietly using a falsy default.
-            throw new \InvalidArgumentException("Unknown setting key: {$key}");
+            throw new InvalidArgumentException("Unknown setting key: {$key}");
         }
 
         foreach ($definition->resolutionScopes() as $scope) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { RouterLink } from 'vue-router'
 import { api, ApiError } from '@/api/client'
@@ -34,6 +34,16 @@ const devices = ref<UserDevice[]>([])
 const history = ref<LoginHistoryEntry[]>([])
 
 const enrolment = ref<TwoFactorEnrolment | null>(null)
+
+// `encodeURIComponent` rather than base64: the SVG is ASCII today, but `btoa` throws outright on
+// any multi-byte character, and a QR renderer that starts emitting a UTF-8 title would break
+// enrolment rather than degrade.
+const qrDataUri = computed<string | null>(() => {
+  const svg = enrolment.value?.qr_code_svg
+
+  return svg === undefined ? null : `data:image/svg+xml,${encodeURIComponent(svg)}`
+})
+
 const recoveryCodes = ref<string[] | null>(null)
 const confirmCode = ref('')
 const busy = ref(false)
@@ -130,9 +140,7 @@ async function signOutEverywhere(): Promise<void> {
   <div class="mx-auto max-w-3xl space-y-6">
     <header>
       <h1 class="text-2xl font-semibold text-content">Security</h1>
-      <p class="mt-1 text-sm text-content-muted">
-        How you sign in, and where you are signed in.
-      </p>
+      <p class="mt-1 text-sm text-content-muted">How you sign in, and where you are signed in.</p>
     </header>
 
     <AlertBanner v-if="error" kind="error">{{ error }}</AlertBanner>
@@ -141,12 +149,16 @@ async function signOutEverywhere(): Promise<void> {
          by accident and says plainly that they will not be shown again. -->
     <SurfaceCard v-if="recoveryCodes" title="Save your recovery codes">
       <AlertBanner kind="warning" title="These are shown only once">
-        Each code works a single time. Keep them somewhere safe and offline — they are the only
-        way back in if you lose your authenticator.
+        Each code works a single time. Keep them somewhere safe and offline — they are the only way
+        back in if you lose your authenticator.
       </AlertBanner>
 
       <ul class="mt-4 grid grid-cols-2 gap-2 font-mono text-sm">
-        <li v-for="code in recoveryCodes" :key="code" class="rounded bg-surface-sunken px-3 py-2 text-content">
+        <li
+          v-for="code in recoveryCodes"
+          :key="code"
+          class="rounded bg-surface-sunken px-3 py-2 text-content"
+        >
           {{ code }}
         </li>
       </ul>
@@ -178,15 +190,27 @@ async function signOutEverywhere(): Promise<void> {
         </p>
 
         <div class="flex flex-col items-start gap-4 sm:flex-row">
-          <!-- Rendered server-side as SVG, so no QR library ships to the browser. -->
-          <div class="rounded-md bg-white p-3" v-html="enrolment.qr_code_svg" />
+          <!-- Rendered server-side as SVG, so no QR library ships to the browser. Delivered as a
+               data URI through `<img>` rather than `v-html`: markup injected with `v-html` executes,
+               and an SVG loaded through `<img>` cannot run script even if the response is ever
+               tampered with. It also gives the image an accessible name, which a bare div had not. -->
+          <img
+            v-if="qrDataUri"
+            :src="qrDataUri"
+            alt="QR code for enrolling your authenticator app"
+            class="rounded-md bg-white p-3"
+            width="200"
+            height="200"
+          />
 
           <div class="min-w-0 flex-1 space-y-3">
             <div>
               <p class="text-xs uppercase tracking-wide text-content-subtle">
                 Or enter this key by hand
               </p>
-              <code class="mt-1 block break-all rounded bg-surface-sunken px-2 py-1 font-mono text-xs text-content">
+              <code
+                class="mt-1 block break-all rounded bg-surface-sunken px-2 py-1 font-mono text-xs text-content"
+              >
                 {{ enrolment.secret }}
               </code>
             </div>
@@ -240,10 +264,16 @@ async function signOutEverywhere(): Promise<void> {
           <div class="min-w-0">
             <p class="truncate text-sm text-content">
               {{ device.name }}
-              <span v-if="device.is_current_device" class="ml-1 rounded bg-primary-600/10 px-1.5 py-0.5 text-xs text-primary-700 dark:text-primary-300">
+              <span
+                v-if="device.is_current_device"
+                class="ml-1 rounded bg-primary-600/10 px-1.5 py-0.5 text-xs text-primary-700 dark:text-primary-300"
+              >
                 This device
               </span>
-              <span v-if="device.is_trusted" class="ml-1 rounded bg-success/10 px-1.5 py-0.5 text-xs text-success">
+              <span
+                v-if="device.is_trusted"
+                class="ml-1 rounded bg-success/10 px-1.5 py-0.5 text-xs text-success"
+              >
                 Trusted
               </span>
             </p>
@@ -254,7 +284,9 @@ async function signOutEverywhere(): Promise<void> {
 
           <BaseButton variant="ghost" size="sm" @click="revokeDevice(device)">Revoke</BaseButton>
         </li>
-        <li v-if="devices.length === 0" class="py-3 text-sm text-content-muted">No devices recorded.</li>
+        <li v-if="devices.length === 0" class="py-3 text-sm text-content-muted">
+          No devices recorded.
+        </li>
       </ul>
 
       <template #footer>
@@ -267,7 +299,11 @@ async function signOutEverywhere(): Promise<void> {
     <!-- ── Sign-in history ─────────────────────────────────────────────── -->
     <SurfaceCard title="Recent sign-ins" description="Failed attempts are shown too.">
       <ul class="divide-y divide-surface-border">
-        <li v-for="entry in history" :key="entry.id" class="flex items-center justify-between gap-3 py-2.5 first:pt-0">
+        <li
+          v-for="entry in history"
+          :key="entry.id"
+          class="flex items-center justify-between gap-3 py-2.5 first:pt-0"
+        >
           <div class="min-w-0">
             <p class="flex items-center gap-2 text-sm text-content">
               <span
@@ -279,7 +315,8 @@ async function signOutEverywhere(): Promise<void> {
               <span v-if="entry.two_factor_used" class="text-xs text-content-subtle">· 2FA</span>
             </p>
             <p class="text-xs text-content-muted">
-              {{ entry.browser ?? 'Unknown' }} on {{ entry.platform ?? 'unknown' }} · {{ entry.ip_address }}
+              {{ entry.browser ?? 'Unknown' }} on {{ entry.platform ?? 'unknown' }} ·
+              {{ entry.ip_address }}
             </p>
           </div>
           <time class="shrink-0 text-xs text-content-subtle" :title="dateTime(entry.created_at)">
@@ -290,7 +327,10 @@ async function signOutEverywhere(): Promise<void> {
     </SurfaceCard>
 
     <div class="text-center">
-      <RouterLink :to="{ name: 'change-password' }" class="text-sm text-primary-700 hover:underline dark:text-primary-400">
+      <RouterLink
+        :to="{ name: 'change-password' }"
+        class="text-sm text-primary-700 hover:underline dark:text-primary-400"
+      >
         Change your password
       </RouterLink>
     </div>

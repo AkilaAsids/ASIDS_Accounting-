@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Asids\Core\Tenancy\Domain\Models;
 
+use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Tenancy\Domain\Enums\TenantStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\TenantFactory;
@@ -36,11 +38,21 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property string $currency_code
  * @property string $timezone
  * @property string $locale
+ * @property string|null $registration_number
+ * @property string|null $tax_identification_number
  * @property CarbonImmutable|null $trial_ends_at
+ * @property CarbonImmutable|null $subscription_ends_at
  * @property CarbonImmutable|null $suspended_at
+ * @property string|null $suspension_reason
  * @property CarbonImmutable|null $provisioned_at
+ * @property string|null $contact_name
+ * @property string|null $contact_email
+ * @property string|null $contact_phone
  * @property int|null $max_companies
  * @property int|null $max_users
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
+ * @property CarbonImmutable|null $deleted_at
  */
 final class Tenant extends BaseTenant
 {
@@ -121,19 +133,19 @@ final class Tenant extends BaseTenant
     }
 
     /**
-     * @return HasMany<\Asids\Core\Organization\Domain\Models\Company, $this>
+     * @return HasMany<Company, $this>
      */
     public function companies(): HasMany
     {
-        return $this->hasMany(\Asids\Core\Organization\Domain\Models\Company::class);
+        return $this->hasMany(Company::class);
     }
 
     /**
-     * @return HasMany<\Asids\Core\Identity\Domain\Models\User, $this>
+     * @return HasMany<User, $this>
      */
     public function users(): HasMany
     {
-        return $this->hasMany(\Asids\Core\Identity\Domain\Models\User::class);
+        return $this->hasMany(User::class);
     }
 
     public function primaryDomain(): ?Domain

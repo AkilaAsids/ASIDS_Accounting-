@@ -12,6 +12,7 @@ use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Identity\Presentation\Http\Requests\ChangePasswordRequest;
 use Asids\Core\Identity\Presentation\Http\Requests\ConsumeAccountLinkRequest;
 use Asids\Core\Identity\Presentation\Http\Requests\ForgotPasswordRequest;
+use Asids\Core\Identity\Presentation\Notifications\PasswordResetLink;
 use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
 use Asids\Core\Platform\Http\Responses\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -57,7 +58,7 @@ final class PasswordController extends Controller
                 'ip' => $request->ip(),
             ]);
 
-            $user->notify(new \Asids\Core\Identity\Presentation\Notifications\PasswordResetLink($url));
+            $user->notify(new PasswordResetLink($url));
         }
 
         return ApiResponse::accepted(

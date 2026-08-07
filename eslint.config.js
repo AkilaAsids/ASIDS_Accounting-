@@ -20,6 +20,20 @@ export default [
       'vue/no-undef-components': 'off',
       eqeqeq: ['error', 'always'],
       'no-console': ['error', { allow: ['warn', 'error'] }],
+
+      // Template *formatting* belongs to Prettier, which runs over the same files with a
+      // printWidth of 100. `eslint-plugin-vue`'s recommended set also has opinions about attribute
+      // wrapping, tag-content line breaks and self-closing tags, and they disagree with Prettier's
+      // — so every file Prettier had formatted produced warnings, 385 of them, and `npm run lint`
+      // failed on `--max-warnings 0` while the code was correctly formatted. Turning these off
+      // makes the two tools agree on who owns what; nothing here changes what is *checked*, only
+      // which tool checks it.
+      'vue/max-attributes-per-line': 'off',
+      'vue/singleline-html-element-content-newline': 'off',
+      'vue/multiline-html-element-content-newline': 'off',
+      'vue/html-self-closing': 'off',
+      'vue/html-closing-bracket-newline': 'off',
+      'vue/html-indent': 'off',
     },
   },
 ]

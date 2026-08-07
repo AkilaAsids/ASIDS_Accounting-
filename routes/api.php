@@ -285,7 +285,22 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 // Choosing which company *you* land in is a preference, not a privilege.
                 Route::post('{company}/select', [CompanyMembershipController::class, 'setOwnDefault'])->name('select');
 
-                Route::prefix('{company}/branches')->name('branches.')->group(function (): void {
+                /*
+                 * The `company` middleware belongs on these two groups and not on the workspace-level
+                 * routes above.
+                 *
+                 * It verifies that the caller is a member of the company in the path and publishes it
+                 * to `RequestContext`, which is what puts `company_id` on every audit entry the
+                 * request writes. Until it was applied here it was registered as an alias and used by
+                 * no route at all: `ResolveActiveCompany` was the only caller of
+                 * `RequestContext::setCompanyId()`, so company attribution was absent from the whole
+                 * audit trail and the SPA's `X-Company` header was silently ignored.
+                 *
+                 * Not applied to `companies` itself, `{company}/select`, or anything workspace-level:
+                 * a user who has been invited but not yet granted access to any company must still be
+                 * able to read their profile, list the companies they might be given, and sign out.
+                 */
+                Route::prefix('{company}/branches')->name('branches.')->middleware('company')->group(function (): void {
                     Route::get('/', [BranchController::class, 'index'])->name('index');
                     Route::post('/', [BranchController::class, 'store'])->name('store');
                     Route::get('{branch}', [BranchController::class, 'show'])->name('show');
@@ -295,7 +310,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                     Route::post('{branch}/make-primary', [BranchController::class, 'makePrimary'])->name('make-primary');
                 });
 
-                Route::prefix('{company}/members')->name('members.')->group(function (): void {
+                Route::prefix('{company}/members')->name('members.')->middleware('company')->group(function (): void {
                     Route::get('/', [CompanyMembershipController::class, 'index'])->name('index');
                     Route::post('/', [CompanyMembershipController::class, 'store'])->name('store');
                     Route::delete('{membership}', [CompanyMembershipController::class, 'destroy'])->name('destroy');

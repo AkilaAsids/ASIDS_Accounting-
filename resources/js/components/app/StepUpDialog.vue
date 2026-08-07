@@ -62,7 +62,9 @@ function cancel(): void {
       aria-labelledby="step-up-title"
       @keydown.esc="cancel"
     >
-      <div class="w-full max-w-sm rounded-card bg-surface-raised p-6 shadow-overlay animate-slide-up">
+      <div
+        class="w-full max-w-sm rounded-card bg-surface-raised p-6 shadow-overlay animate-slide-up"
+      >
         <h2 id="step-up-title" class="text-base font-semibold text-content">Confirm it's you</h2>
         <p class="mt-1 text-sm text-content-muted">
           This action changes security settings, so we need your authenticator code.

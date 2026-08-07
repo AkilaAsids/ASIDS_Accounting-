@@ -6,6 +6,7 @@ namespace Asids\Core\Organization\Domain\Contracts;
 
 use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Organization\Domain\Models\Company;
+use DateTimeImmutable;
 
 /**
  * Answers "has anything been posted against this entity?".
@@ -35,5 +36,5 @@ interface LedgerActivityProbe
      * The earliest posted transaction date, used to reject a fiscal calendar change that
      * would move an existing transaction into a different period.
      */
-    public function earliestActivityDate(Company $company): ?\DateTimeImmutable;
+    public function earliestActivityDate(Company $company): ?DateTimeImmutable;
 }

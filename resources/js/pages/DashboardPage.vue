@@ -40,9 +40,7 @@ const outstanding = computed(() => {
 <template>
   <div class="mx-auto max-w-5xl space-y-6">
     <header>
-      <h1 class="text-2xl font-semibold text-content">
-        Good day, {{ auth.user?.first_name }}
-      </h1>
+      <h1 class="text-2xl font-semibold text-content">Good day, {{ auth.user?.first_name }}</h1>
       <p class="mt-1 text-sm text-content-muted">
         {{ auth.activeCompany?.name }}
         <span v-if="auth.activeCompany" class="text-content-subtle">
@@ -52,13 +50,21 @@ const outstanding = computed(() => {
     </header>
 
     <AlertBanner v-if="auth.workspace?.on_trial" kind="info" title="You are on a trial">
-      Your trial ends on {{ date(auth.workspace.trial_ends_at) }}. Everything you enter now is
-      kept when you subscribe.
+      Your trial ends on {{ date(auth.workspace.trial_ends_at) }}. Everything you enter now is kept
+      when you subscribe.
     </AlertBanner>
 
-    <SurfaceCard v-if="outstanding.length > 0" title="Worth doing" description="A few things to finish setting up.">
+    <SurfaceCard
+      v-if="outstanding.length > 0"
+      title="Worth doing"
+      description="A few things to finish setting up."
+    >
       <ul class="divide-y divide-surface-border">
-        <li v-for="item in outstanding" :key="item.label" class="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+        <li
+          v-for="item in outstanding"
+          :key="item.label"
+          class="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+        >
           <span class="flex items-center gap-2 text-sm text-content">
             <span
               class="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -67,7 +73,10 @@ const outstanding = computed(() => {
             />
             {{ item.label }}
           </span>
-          <RouterLink :to="{ name: item.to }" class="text-sm text-primary-700 hover:underline dark:text-primary-400">
+          <RouterLink
+            :to="{ name: item.to }"
+            class="text-sm text-primary-700 hover:underline dark:text-primary-400"
+          >
             Go
           </RouterLink>
         </li>
@@ -92,16 +101,14 @@ const outstanding = computed(() => {
         </div>
         <div>
           <dt class="text-xs uppercase tracking-wide text-content-subtle">Fiscal year</dt>
-          <dd class="mt-0.5 text-sm text-content tabular">
-            Starts 1 April
-          </dd>
+          <dd class="mt-0.5 text-sm text-content tabular">Starts 1 April</dd>
         </div>
       </dl>
     </SurfaceCard>
 
     <p class="text-center text-xs text-content-subtle">
-      Accounting, sales, purchasing and reporting arrive in the next phases. What you can set
-      up today is your workspace, your companies and your people.
+      Accounting, sales, purchasing and reporting arrive in the next phases. What you can set up
+      today is your workspace, your companies and your people.
     </p>
   </div>
 </template>

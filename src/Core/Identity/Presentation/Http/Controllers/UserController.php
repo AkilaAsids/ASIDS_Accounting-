@@ -11,6 +11,7 @@ use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Identity\Presentation\Http\Requests\StoreUserRequest;
 use Asids\Core\Identity\Presentation\Http\Requests\UpdateUserRequest;
 use Asids\Core\Identity\Presentation\Http\Resources\UserResource;
+use Asids\Core\Identity\Presentation\Notifications\PasswordResetLink;
 use Asids\Core\Platform\Domain\Query\QueryCriteria;
 use Asids\Core\Platform\Http\Controllers\ApiController;
 use Asids\Core\Platform\Http\Responses\ApiResponse;
@@ -164,7 +165,7 @@ final class UserController extends ApiController
 
         $url = $this->users->sendPasswordResetLink($user);
 
-        $user->notify(new \Asids\Core\Identity\Presentation\Notifications\PasswordResetLink($url));
+        $user->notify(new PasswordResetLink($url));
 
         return ApiResponse::accepted('A password reset link has been sent to the user.');
     }

@@ -8,6 +8,8 @@ use Asids\Core\Identity\Domain\Models\LoginHistory;
 use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
 use Database\Factories\UserFactory;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 
 /**
  * Authentication, lockout, and the enumeration defences.
@@ -34,7 +36,7 @@ beforeEach(function (): void {
  * not weaken the test — it makes every sign-in fail with "incorrect credentials", which is the
  * application behaving properly and the test asserting nothing.
  */
-function signIn(array $payload, string $workspace = 'acme'): Illuminate\Testing\TestResponse
+function signIn(array $payload, string $workspace = 'acme'): TestResponse
 {
     return test()->withHeader('X-Tenant', $workspace)->postJson('/api/v1/auth/login', $payload);
 }
@@ -52,9 +54,41 @@ describe('successful sign-in', function (): void {
     });
 
     it('never returns the password hash or the two factor secret', function (): void {
+        // Every credential column populated, so the search has something to find — an unenrolled
+        // user would make the two-factor half of this assertion vacuous. Enrolled but *not*
+        // confirmed on purpose: confirming it would turn this into a two-factor challenge and the
+        // test would no longer be examining a successful sign-in's response.
+        $stored = RowLevelSecurity::bypass(function (): object {
+            User::query()->whereKey($this->user->getKey())->update([
+                'two_factor_secret' => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
+                'two_factor_enrolled_at' => now(),
+                'remember_token' => 'remember-token-for-testing-only',
+            ]);
+
+            /** @var object{password: string, two_factor_secret: string, remember_token: string} $row */
+            $row = DB::table('users')->where('id', $this->user->getKey())
+                ->first(['password', 'two_factor_secret', 'remember_token']);
+
+            return $row;
+        });
+
         $response = signIn(['email' => 'kumari@acme.test', 'password' => UserFactory::PASSWORD]);
 
-        expect($response)->toNotLeak('password', 'two_factor_secret', 'remember_token');
+        // The stored values, not the words naming them: `requires.password_change` is a legitimate
+        // key and a substring search for "password" flags it as a leak.
+        expect($response)->toNotLeak(
+            $stored->password,
+            $stored->two_factor_secret,
+            $stored->remember_token,
+        );
+
+        // And no field carrying a credential is serialised at all, populated or not.
+        expect($response)->toNotExposeFields(
+            'password',
+            'two_factor_secret',
+            'two_factor_recovery_codes',
+            'remember_token',
+        );
     });
 
     it('records the sign-in with provenance', function (): void {
@@ -195,8 +229,10 @@ describe('two factor challenge', function (): void {
 
         signIn(['email' => 'twofa@acme.test', 'password' => UserFactory::PASSWORD]);
 
+        // `value()` returns the cast enum, not the raw column, because `outcome` is cast on the
+        // model. Comparing against the backing string would fail on a correct application.
         expect(LoginHistory::query()->where('user_id', $user->getKey())->value('outcome'))
-            ->toBe(LoginOutcome::TwoFactorRequired->value);
+            ->toBe(LoginOutcome::TwoFactorRequired);
     });
 
     it('rejects an expired or unknown challenge', function (): void {

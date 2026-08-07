@@ -4,10 +4,20 @@ declare(strict_types=1);
 
 namespace Asids\Core\Platform\Providers;
 
+use Asids\Core\Authorization\Domain\Models\Permission;
+use Asids\Core\Authorization\Domain\Models\Role;
+use Asids\Core\Identity\Domain\Models\PersonalAccessToken;
+use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Identity\Domain\Models\UserDevice;
+use Asids\Core\Organization\Domain\Models\Branch;
+use Asids\Core\Organization\Domain\Models\Company;
+use Asids\Core\Organization\Domain\Models\CompanyMembership;
 use Asids\Core\Platform\Console\SecurityCheckCommand;
 use Asids\Core\Platform\Domain\Contracts\CompliancePackContract;
 use Asids\Core\Platform\Support\NullCompliancePack;
 use Asids\Core\Platform\Support\RequestContext;
+use Asids\Core\Settings\Domain\Models\Setting;
+use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
@@ -28,7 +38,7 @@ final class PlatformServiceProvider extends ServiceProvider
     {
         // One request context object per request, shared by the audit trail, the
         // logger and the exception renderer so all three agree on the request id.
-        $this->app->scoped(RequestContext::class, static fn (): RequestContext => new RequestContext());
+        $this->app->scoped(RequestContext::class, static fn (): RequestContext => new RequestContext);
 
         $this->app->bind(CompliancePackContract::class, function (): CompliancePackContract {
             $country = (string) config('asids.regional.default_country', 'LK');
@@ -92,7 +102,19 @@ final class PlatformServiceProvider extends ServiceProvider
     private function configureFactoryResolution(): void
     {
         Factory::guessFactoryNamesUsing(
-            static fn (string $modelName): string => 'Database\\Factories\\'.class_basename($modelName).'Factory',
+            /**
+             * Upstream declares both ends of this callback narrowly — a model class-string in, a
+             * factory class-string out — so both are restated rather than left as plain strings.
+             *
+             * @param  class-string<Model>  $modelName
+             * @return class-string<Factory<Model>>
+             */
+            static function (string $modelName): string {
+                /** @var class-string<Factory<Model>> $factory */
+                $factory = 'Database\\Factories\\'.class_basename($modelName).'Factory';
+
+                return $factory;
+            },
         );
     }
 
@@ -104,16 +126,16 @@ final class PlatformServiceProvider extends ServiceProvider
     private function configureMorphMap(): void
     {
         Relation::enforceMorphMap([
-            'user' => \Asids\Core\Identity\Domain\Models\User::class,
-            'access_token' => \Asids\Core\Identity\Domain\Models\PersonalAccessToken::class,
-            'user_device' => \Asids\Core\Identity\Domain\Models\UserDevice::class,
-            'tenant' => \Asids\Core\Tenancy\Domain\Models\Tenant::class,
-            'company' => \Asids\Core\Organization\Domain\Models\Company::class,
-            'branch' => \Asids\Core\Organization\Domain\Models\Branch::class,
-            'company_membership' => \Asids\Core\Organization\Domain\Models\CompanyMembership::class,
-            'role' => \Asids\Core\Authorization\Domain\Models\Role::class,
-            'permission' => \Asids\Core\Authorization\Domain\Models\Permission::class,
-            'setting' => \Asids\Core\Settings\Domain\Models\Setting::class,
+            'user' => User::class,
+            'access_token' => PersonalAccessToken::class,
+            'user_device' => UserDevice::class,
+            'tenant' => Tenant::class,
+            'company' => Company::class,
+            'branch' => Branch::class,
+            'company_membership' => CompanyMembership::class,
+            'role' => Role::class,
+            'permission' => Permission::class,
+            'setting' => Setting::class,
         ]);
     }
 

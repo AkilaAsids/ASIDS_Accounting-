@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Asids\Core\Platform\Support\NullCompliancePack;
 
 /*
 |--------------------------------------------------------------------------
@@ -159,6 +160,27 @@ return [
             'card_number', 'cvv', 'nic', 'tin', 'bank_account_number',
         ],
         'redaction_marker' => '[redacted]',
+        // Where a failed nightly chain verification is reported. Resolved here rather than with
+        // `env()` at the scheduler, which returns null once the config is cached — the one
+        // condition under which the alert is silently lost is also the production one.
+        'alert_email' => env('SECURITY_ALERT_EMAIL', env('MAIL_FROM_ADDRESS')),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Validation
+    |--------------------------------------------------------------------------
+    */
+    'validation' => [
+        // Whether an address on a "we will e-mail you a link" path — an invitation, a workspace
+        // sign-up, an e-mail change — is checked for a resolvable mail domain, not merely valid
+        // syntax. On in every real environment: a typo in an invited address means the invitation
+        // silently never arrives and the administrator has no way to tell.
+        //
+        // Off under `phpunit`, because the check is a blocking DNS lookup. Leaving it on would make
+        // the test suite depend on egress and on a third party's DNS records, so a CI runner without
+        // outbound network would fail tests that have nothing to do with networking.
+        'verify_email_domain' => (bool) env('VALIDATE_EMAIL_DNS', true),
     ],
 
     /*
@@ -199,7 +221,7 @@ return [
         'supported_locales' => ['en', 'si', 'ta'],
         // Registered compliance packs, keyed by ISO 3166-1 alpha-2.
         'compliance_packs' => [
-            'LK' => \Asids\Core\Platform\Support\NullCompliancePack::class,
+            'LK' => NullCompliancePack::class,
         ],
     ],
 

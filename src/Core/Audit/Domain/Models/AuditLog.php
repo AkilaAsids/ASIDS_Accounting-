@@ -25,11 +25,26 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property string $id
  * @property int $sequence
  * @property string|null $tenant_id
+ * @property string|null $company_id
+ * @property string $auditable_type
+ * @property string $auditable_id
  * @property AuditEvent $event
  * @property array<string, mixed>|null $old_values
  * @property array<string, mixed>|null $new_values
  * @property list<string>|null $changed_attributes
  * @property ActorType $actor_type
+ * @property string|null $actor_id
+ * @property string|null $actor_label
+ * @property string|null $impersonator_id
+ * @property string|null $access_token_id
+ * @property string|null $ip_address
+ * @property string|null $user_agent
+ * @property string|null $request_method
+ * @property string|null $request_url
+ * @property string|null $request_id
+ * @property string $channel
+ * @property array<int, string>|null $tags
+ * @property string|null $reason
  * @property string|null $hash
  * @property string|null $previous_hash
  * @property CarbonImmutable|null $sealed_at

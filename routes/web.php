@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -22,6 +23,6 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::get('/{any}', static fn (): \Illuminate\Contracts\View\View => view('app'))
+Route::get('/{any}', static fn (): View => view('app'))
     ->where('any', '^(?!api|ops|storage|build|up).*$')
     ->name('spa');

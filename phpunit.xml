@@ -45,7 +45,16 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="SCOUT_DRIVER" value="null"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
-        <env name="TENANCY_ENFORCE_RLS" value="false"/>
+        <!-- Must agree with the state of the test database. The RLS migration runs there, so
+             enforcement stays ON: with policies present but enforcement off, nothing publishes
+             `asids.tenant_id`, every policy evaluates against NULL, and the whole suite reads
+             empty result sets with no error. Fixtures that span workspaces are built under
+             `RowLevelSecurity::bypass()`, which is what makes this safe. -->
+        <env name="TENANCY_ENFORCE_RLS" value="true"/>
         <env name="AUTH_TWO_FACTOR_ENFORCED" value="false"/>
+        <!-- Keeps the suite hermetic: `email:rfc,dns` performs a live DNS lookup, so leaving it on
+             would make invitation and sign-up tests depend on egress and on a third party's MX
+             records. Syntax validation still applies. -->
+        <env name="VALIDATE_EMAIL_DNS" value="false"/>
     </php>
 </phpunit>

@@ -28,16 +28,34 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $company_id
  * @property string $name
  * @property string $code
+ * @property string|null $manager_id
+ * @property string|null $email
+ * @property string|null $phone
+ * @property string|null $address_line_1
+ * @property string|null $address_line_2
+ * @property string|null $city
+ * @property string|null $district
+ * @property string|null $postal_code
+ * @property string|null $country_code
+ * @property string|null $timezone
  * @property bool $is_primary
  * @property OrganizationStatus $status
  * @property CarbonImmutable|null $archived_at
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
+ * @property CarbonImmutable|null $deleted_at
+ *
+ * `company_id` is a non-nullable foreign key with a database constraint behind it, so the
+ * relation is always present. Typing it nullable would force a null check at every call site
+ * that could not be reached.
+ * @property-read Company $company
  */
 final class Branch extends Model
 {
+    use BelongsToTenant;
+
     /** @use HasFactory<BranchFactory> */
     use HasFactory;
-
-    use BelongsToTenant;
     use HasUuids;
     use SoftDeletes;
 
@@ -128,7 +146,7 @@ final class Branch extends Model
 
     protected static function booted(): void
     {
-        static::saving(static function (self $branch): void {
+        self::saving(static function (self $branch): void {
             // Matches the unique index on `upper(code)` per company.
             $branch->code = strtoupper(trim($branch->code));
 

@@ -127,7 +127,9 @@ async function submit(): Promise<void> {
     :title="isInvitation ? 'Welcome to ASIDS' : 'Choose a new password'"
     :subtitle="details ? `for ${details.email}` : undefined"
   >
-    <div v-if="loading" class="py-6 text-center text-sm text-content-muted">Checking your link…</div>
+    <div v-if="loading" class="py-6 text-center text-sm text-content-muted">
+      Checking your link…
+    </div>
 
     <div v-else-if="invalid" class="space-y-4">
       <AlertBanner kind="error" title="This link is no longer valid">{{ invalid }}</AlertBanner>
@@ -143,8 +145,8 @@ async function submit(): Promise<void> {
 
     <form v-else class="space-y-4" novalidate @submit.prevent="submit">
       <p v-if="isInvitation && details?.workspace" class="text-sm text-content-muted">
-        You have been invited to <strong class="text-content">{{ details.workspace }}</strong>.
-        Choose a password to finish setting up your account.
+        You have been invited to <strong class="text-content">{{ details.workspace }}</strong
+        >. Choose a password to finish setting up your account.
       </p>
 
       <AlertBanner v-if="error" kind="error">{{ error }}</AlertBanner>

@@ -21,7 +21,20 @@ const props = withDefaults(
     placeholder?: string
     inputmode?: 'text' | 'numeric' | 'email' | 'tel'
   }>(),
-  { type: 'text', required: false, disabled: false },
+  // Every optional prop gets an explicit default. Vue's own default for an unpassed prop is
+  // `undefined`, which renders as the attribute being absent — the behaviour wanted here — but
+  // stating it means a reader does not have to know that, and `vue/require-default-prop` is
+  // otherwise 7 warnings of nothing.
+  {
+    type: 'text',
+    hint: undefined,
+    error: undefined,
+    required: false,
+    disabled: false,
+    autocomplete: undefined,
+    placeholder: undefined,
+    inputmode: undefined,
+  },
 )
 
 defineEmits<{ 'update:modelValue': [value: string] }>()
@@ -54,9 +67,7 @@ const describedBy = computed(() => {
       :inputmode="inputmode"
       :aria-invalid="error ? 'true' : undefined"
       :aria-describedby="describedBy"
-      class="form-input mt-1 block w-full rounded-md border-surface-border bg-surface-raised text-content
-             shadow-sm placeholder:text-content-subtle focus:border-primary-500 focus:ring-primary-500
-             disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm"
+      class="form-input mt-1 block w-full rounded-md border-surface-border bg-surface-raised text-content shadow-sm placeholder:text-content-subtle focus:border-primary-500 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm"
       :class="error && 'border-danger focus:border-danger focus:ring-danger'"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     />

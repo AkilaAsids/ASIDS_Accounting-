@@ -6,6 +6,7 @@ namespace Asids\Core\Audit\Presentation\Console;
 
 use Asids\Core\Audit\Application\Services\AuditChainSealer;
 use Asids\Core\Tenancy\Application\Services\TenantContext;
+use Asids\Core\Tenancy\Domain\Contracts\TenantRepositoryContract;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Illuminate\Console\Command;
 use Throwable;
@@ -62,10 +63,10 @@ final class SealAuditChainCommand extends Command
 
     private function sealOne(AuditChainSealer $sealer, string $identifier, int $batch): int
     {
-        $tenant = Tenant::query()
-            ->where('id', $identifier)
-            ->orWhere('slug', $identifier)
-            ->first();
+        // Through the repository, which knows that `id` is a uuid and a slug is not — see
+        // `findByIdOrSlug`. The obvious `where('id', $x)->orWhere('slug', $x)` that used to be here
+        // raised a PostgreSQL cast error for every slug, which is the usage this option documents.
+        $tenant = app(TenantRepositoryContract::class)->findByIdOrSlug($identifier);
 
         if ($tenant === null) {
             $this->components->error("No workspace matches \"{$identifier}\".");

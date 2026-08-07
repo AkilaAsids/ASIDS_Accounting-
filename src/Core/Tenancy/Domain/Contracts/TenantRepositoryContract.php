@@ -23,6 +23,17 @@ interface TenantRepositoryContract
     public function findBySlug(string $slug): ?Tenant;
 
     /**
+     * Resolve a workspace the way an operator refers to it on a command line — by id or by slug.
+     *
+     * A single method rather than "try one, then the other" at each call site, because the naive
+     * form is `where('id', $x)->orWhere('slug', $x)` and that is a latent crash: `id` is a uuid
+     * column, so a slug does not simply fail to match — PostgreSQL refuses the cast and raises
+     * 22P02. Two console commands had exactly that, which meant `--tenant=acme`, the usage their
+     * own help text documents, produced a raw SQL error.
+     */
+    public function findByIdOrSlug(string $identifier): ?Tenant;
+
+    /**
      * Resolve by hostname. Only usable hostnames match: an unverified
      * customer-owned hostname must not route traffic.
      */

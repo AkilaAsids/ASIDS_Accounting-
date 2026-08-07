@@ -23,9 +23,9 @@ final class PasswordHistory extends Model
     use BelongsToTenant;
     use HasUuids;
 
-    protected $table = 'password_histories';
-
     public const UPDATED_AT = null;
+
+    protected $table = 'password_histories';
 
     /** @var list<string> */
     protected $fillable = ['user_id', 'password_hash'];

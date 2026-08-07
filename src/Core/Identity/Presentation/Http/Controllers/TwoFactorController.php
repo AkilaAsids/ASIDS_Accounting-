@@ -100,7 +100,7 @@ final class TwoFactorController extends ApiController
         // someone who has lost their device, and accepting it here would let a single
         // intercepted code authorise an ownership transfer.
         if (! $this->twoFactor->verifyTotp($user, (string) $request->validated('code'))) {
-            throw new InvalidTwoFactorCode();
+            throw new InvalidTwoFactorCode;
         }
 
         $this->markSessionConfirmed($request);
@@ -127,7 +127,7 @@ final class TwoFactorController extends ApiController
         }
 
         if (! $this->twoFactor->verifyTotp($user, (string) $request->validated('code'))) {
-            throw new InvalidTwoFactorCode();
+            throw new InvalidTwoFactorCode;
         }
 
         $this->twoFactor->disable($user);
@@ -145,7 +145,7 @@ final class TwoFactorController extends ApiController
         $user = $this->currentUser();
 
         if (! $this->twoFactor->verifyTotp($user, (string) $request->validated('code'))) {
-            throw new InvalidTwoFactorCode();
+            throw new InvalidTwoFactorCode;
         }
 
         return ApiResponse::item([

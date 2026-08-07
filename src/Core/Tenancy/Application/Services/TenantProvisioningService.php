@@ -154,7 +154,7 @@ final readonly class TenantProvisioningService
 
     private function createTenant(ProvisionTenantData $data): Tenant
     {
-        $tenant = new Tenant();
+        $tenant = new Tenant;
 
         $tenant->fill([
             'name' => $data->tenantName,
@@ -182,7 +182,7 @@ final readonly class TenantProvisioningService
 
     private function createPrimaryDomain(Tenant $tenant): Domain
     {
-        $domain = new Domain();
+        $domain = new Domain;
 
         $domain->fill([
             'tenant_id' => $tenant->getKey(),

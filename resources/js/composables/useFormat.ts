@@ -18,10 +18,19 @@ export function useFormat() {
   const locale = computed(() => auth.user?.preferences.locale ?? 'en')
 
   /**
-   * `en-LK` for LKR, so grouping follows the lakh convention (12,34,567) that the market
-   * expects rather than the western one.
+   * `en-IN` for LKR, because it is the locale whose *grouping* is the lakh/crore convention
+   * (12,34,567) that this market reads.
+   *
+   * `en-LK` was the obvious choice and is the wrong one: CLDR gives it western grouping
+   * (1,234,567), so the intent went unmet with nothing to show it. Nothing else about the locale is
+   * used here — the currency and its precision come from the company, and the symbol from the
+   * currency code — so this selects a grouping rule rather than a country.
+   *
+   * The workspace can already express this: `localisation.number_format` defaults to `lakh` and is
+   * a public setting. Reading it here, rather than inferring from the currency, is the remaining
+   * refinement — it would let an exporter reporting in LKR choose western grouping.
    */
-  const numberLocale = computed(() => (currency.value === 'LKR' ? 'en-LK' : locale.value))
+  const numberLocale = computed(() => (currency.value === 'LKR' ? 'en-IN' : locale.value))
 
   function money(amount: number | string | null | undefined): string {
     if (amount === null || amount === undefined || amount === '') {

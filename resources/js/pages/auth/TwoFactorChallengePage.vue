@@ -25,6 +25,22 @@ onMounted(async () => {
   }
 })
 
+/**
+ * Switches between the authenticator code and a recovery code.
+ *
+ * A named handler rather than two statements inline: Vue's template compiler parses an inline
+ * handler as a single expression, so a two-statement one only survives while it stays on one line —
+ * the formatter wrapping it is enough to break the build.
+ *
+ * Clearing the field matters beyond tidiness. The two credentials have different shapes, and
+ * leaving six digits in the box when the user has just said "I can't use my authenticator" invites
+ * them to submit it again and consume a failed attempt against the lockout counter.
+ */
+function toggleRecoveryCode(): void {
+  usingRecoveryCode.value = !usingRecoveryCode.value
+  code.value = ''
+}
+
 async function submit(): Promise<void> {
   submitting.value = true
   error.value = null
@@ -77,7 +93,11 @@ async function submit(): Promise<void> {
       />
 
       <label v-if="!usingRecoveryCode" class="flex items-start gap-2 text-sm text-content-muted">
-        <input v-model="trustDevice" type="checkbox" class="form-checkbox mt-0.5 rounded border-surface-border text-primary-600 focus:ring-primary-500" />
+        <input
+          v-model="trustDevice"
+          type="checkbox"
+          class="form-checkbox mt-0.5 rounded border-surface-border text-primary-600 focus:ring-primary-500"
+        />
         <span>
           Trust this device for 30 days
           <span class="block text-xs text-content-subtle">Only on a device you control.</span>
@@ -89,15 +109,19 @@ async function submit(): Promise<void> {
       <button
         type="button"
         class="w-full text-center text-sm text-primary-700 hover:underline dark:text-primary-400"
-        @click="usingRecoveryCode = !usingRecoveryCode; code = ''"
+        @click="toggleRecoveryCode"
       >
-        {{ usingRecoveryCode ? 'Use my authenticator app instead' : "I can't use my authenticator app" }}
+        {{
+          usingRecoveryCode
+            ? 'Use my authenticator app instead'
+            : "I can't use my authenticator app"
+        }}
       </button>
     </form>
 
     <template #below>
-      Each recovery code works once. If you have run out, ask an administrator to reset your
-      two factor authentication.
+      Each recovery code works once. If you have run out, ask an administrator to reset your two
+      factor authentication.
     </template>
   </AuthLayout>
 </template>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Authorization\Presentation\Http\Requests;
 
+use Asids\Core\Authorization\Domain\Models\Role;
 use Asids\Core\Identity\Domain\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -14,7 +15,7 @@ final class AssignRolesRequest extends FormRequest
         $target = $this->route('user');
 
         return $target instanceof User
-            && ($this->user()?->can('assign', [\Asids\Core\Authorization\Domain\Models\Role::class, $target]) ?? false);
+            && ($this->user()?->can('assign', [Role::class, $target]) ?? false);
     }
 
     /**

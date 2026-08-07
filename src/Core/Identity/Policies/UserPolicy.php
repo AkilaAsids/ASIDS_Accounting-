@@ -97,6 +97,20 @@ final class UserPolicy
         return $this->isSelf($actor, $target) || $actor->can('identity.login_history.view');
     }
 
+    /**
+     * The workspace-wide sign-in log, which is a different question from "my own history".
+     *
+     * Separate from `viewLoginHistory` because that method is target-relative and answers true for
+     * `isSelf`. Authorising a workspace-wide listing against the *caller* — the only target a
+     * listing endpoint has to hand — makes the check `isSelf($actor, $actor)`, which is
+     * unconditionally true. Every authenticated user could then read when each of their colleagues
+     * signs in and from which address.
+     */
+    public function viewAnyLoginHistory(User $actor): bool
+    {
+        return $actor->can('identity.login_history.view');
+    }
+
     public function viewDevices(User $actor, User $target): bool
     {
         return $this->isSelf($actor, $target) || $actor->can('identity.devices.view');

@@ -82,7 +82,7 @@ final readonly class SettingsService
                 ->where('tenant_id', $scope === SettingScope::System ? null : $this->tenantContext->id())
                 ->atScope($scope, $scopeId)
                 ->where('key', $definition->key)
-                ->first() ?? new Setting();
+                ->first() ?? new Setting;
 
             $setting->fill([
                 'tenant_id' => $scope === SettingScope::System ? null : $this->tenantContext->require()->getKey(),

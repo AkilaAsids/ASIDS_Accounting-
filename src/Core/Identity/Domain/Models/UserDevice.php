@@ -17,10 +17,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $user_id
  * @property string $fingerprint_hash
  * @property string $name
+ * @property string|null $device_type
+ * @property string|null $platform
+ * @property string|null $browser
  * @property CarbonImmutable|null $trusted_at
  * @property CarbonImmutable|null $trust_expires_at
+ * @property string|null $last_ip_address
+ * @property string|null $last_country_code
  * @property CarbonImmutable|null $revoked_at
+ * @property string|null $revoked_by_id
  * @property CarbonImmutable|null $last_seen_at
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
  */
 final class UserDevice extends Model
 {

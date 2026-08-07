@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Asids\Core\Tenancy\Infrastructure\Bootstrappers;
 
 use Illuminate\Filesystem\FilesystemManager;
-use Stancl\Tenancy\Contracts\Tenant;
 use Stancl\Tenancy\Contracts\TenancyBootstrapper;
+use Stancl\Tenancy\Contracts\Tenant;
 
 /**
  * Roots every configured disk inside the active tenant's own prefix.

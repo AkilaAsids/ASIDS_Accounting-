@@ -15,10 +15,21 @@ use Laravel\Sanctum\PersonalAccessToken as SanctumToken;
  *
  * @property string $id
  * @property string|null $tenant_id
+ * @property string $tokenable_type
+ * @property string $tokenable_id
  * @property string $name
+ * @property string|null $description
+ * @property string|null $created_by_id
+ * @property string|null $created_ip
+ * @property CarbonImmutable|null $last_used_at
+ * @property string|null $last_used_ip
  * @property CarbonImmutable|null $expires_at
  * @property CarbonImmutable|null $revoked_at
+ * @property string|null $revoked_by_id
+ * @property string|null $revocation_reason
  * @property array<int, string>|null $allowed_ip_ranges
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
  */
 final class PersonalAccessToken extends SanctumToken
 {

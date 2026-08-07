@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Organization\Domain\Enums\OrganizationStatus;
 use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Tenancy\Application\Services\TenantContext;
@@ -11,6 +12,8 @@ use Asids\Core\Tenancy\Domain\Exceptions\NoActiveTenant;
 use Asids\Core\Tenancy\Domain\Models\Tenant;
 use Asids\Core\Tenancy\Domain\Scopes\TenantScope;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
+use Illuminate\Cache\CacheManager;
+use Illuminate\Database\Eloquent\MassAssignmentException;
 
 /**
  * Tenant isolation via the Eloquent global scope.
@@ -144,14 +147,14 @@ describe('write guarding', function (): void {
             'base_currency_code' => 'LKR',
             'country_code' => 'LK',
             'timezone' => 'Asia/Colombo',
-        ]))->toThrow(Illuminate\Database\Eloquent\MassAssignmentException::class);
+        ]))->toThrow(MassAssignmentException::class);
     });
 
     it('refuses to create a record belonging to another workspace', function (): void {
         $this->withinTenant($this->acme['tenant']);
 
         // The realistic bypass: attributes set directly, past mass assignment protection.
-        $company = new Company();
+        $company = new Company;
         $company->fill([
             'name' => 'Smuggled Ltd',
             'code' => 'SMUG',
@@ -160,7 +163,7 @@ describe('write guarding', function (): void {
             'country_code' => 'LK',
             'timezone' => 'Asia/Colombo',
         ]);
-        $company->status = Asids\Core\Organization\Domain\Enums\OrganizationStatus::Active;
+        $company->status = OrganizationStatus::Active;
         $company->tenant_id = $this->globex['tenant']->getKey();
 
         $exception = catchPlatformException(fn () => $company->save());
@@ -285,16 +288,17 @@ describe('escape hatches', function (): void {
 
 describe('cache isolation', function (): void {
     it('does not let one workspace read another’s cached value under the same key', function (): void {
-        // The `array` store ignores `cache.prefix` completely, so tenant prefixing is
-        // unobservable under it — the assertion would fail for a reason that has nothing to do
-        // with isolation. Skipped loudly rather than deleted, because the property is real and
-        // must be verified against the driver production actually uses.
-        if (config('cache.default') === 'array') {
-            test()->markTestSkipped(
-                'The array cache store does not honour cache.prefix. Run with CACHE_STORE=redis '
-                .'(or database) to exercise tenant cache isolation.'
-            );
-        }
+        // The `array` store the rest of the suite runs on ignores `cache.prefix` completely, so
+        // tenant prefixing is unobservable under it and this test would assert nothing. Rather
+        // than skip — a green tick for an unexercised property is worse than a red one — switch
+        // this one test to the `database` store, which honours the prefix exactly as Redis does.
+        // The `cache` table is already there; it is created by the framework-tables migration.
+        config(['cache.default' => 'database']);
+
+        // The manager has already resolved the array store for this request. Without dropping it,
+        // the reconfiguration above has no effect and the test silently examines the wrong driver.
+        app(CacheManager::class)->forgetDriver('database');
+        app()->forgetInstance('cache.store');
 
         app(TenantContext::class)->runFor(
             $this->acme['tenant'],
@@ -306,9 +310,18 @@ describe('cache isolation', function (): void {
             fn () => cache()->get('dashboard.totals'),
         );
 
+        $seenByAcme = app(TenantContext::class)->runFor(
+            $this->acme['tenant'],
+            fn () => cache()->get('dashboard.totals'),
+        );
+
         // Identical key, different workspace. Without CacheTagBootstrapper this returns
         // acme-figures — a leak with no database query involved, which no amount of RLS catches.
         expect($seenByGlobex)->toBeNull();
+
+        // And the owning workspace still reads its own value. Without this second half the test
+        // passes just as well against a cache that stores nothing at all.
+        expect($seenByAcme)->toBe('acme-figures');
     });
 });
 

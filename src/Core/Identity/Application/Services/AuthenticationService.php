@@ -11,6 +11,7 @@ use Asids\Core\Identity\Domain\Exceptions\AuthenticationFailed;
 use Asids\Core\Identity\Domain\Exceptions\TwoFactorChallengeExpired;
 use Asids\Core\Identity\Domain\Models\LoginHistory;
 use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Identity\Domain\Models\UserDevice;
 use Asids\Core\Platform\Support\RequestContext;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
@@ -18,6 +19,7 @@ use Illuminate\Contracts\Hashing\Hasher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * The sign-in state machine.
@@ -69,20 +71,20 @@ final readonly class AuthenticationService
             $this->hasher->check($password, self::TIMING_EQUALISER);
             $this->record($request, null, $email, LoginOutcome::Failed, 'unknown_account');
 
-            throw new AuthenticationFailed();
+            throw new AuthenticationFailed;
         }
 
-        if ($user->isLocked()) {
+        if (($lockedUntil = $user->lockoutExpiry()) !== null) {
             $this->record($request, $user, $email, LoginOutcome::LockedOut);
 
-            throw AccountLocked::until($user->locked_until);
+            throw AccountLocked::until($lockedUntil);
         }
 
         if ($user->password === null || ! $this->hasher->check($password, $user->password)) {
             $this->registerFailure($user);
             $this->record($request, $user, $email, LoginOutcome::Failed, 'invalid_password');
 
-            throw new AuthenticationFailed();
+            throw new AuthenticationFailed;
         }
 
         // Status is checked only after the password is verified: doing it first
@@ -123,7 +125,7 @@ final readonly class AuthenticationService
         $payload = $this->cache->get($key);
 
         if ($payload === null) {
-            throw new TwoFactorChallengeExpired();
+            throw new TwoFactorChallengeExpired;
         }
 
         $user = User::query()->find($payload['user_id']);
@@ -131,16 +133,16 @@ final readonly class AuthenticationService
         if ($user === null || ! $user->status->canAuthenticate()) {
             $this->cache->forget($key);
 
-            throw new TwoFactorChallengeExpired();
+            throw new TwoFactorChallengeExpired;
         }
 
-        if ($user->isLocked()) {
-            throw AccountLocked::until($user->locked_until);
+        if (($lockedUntil = $user->lockoutExpiry()) !== null) {
+            throw AccountLocked::until($lockedUntil);
         }
 
         try {
             $method = $this->twoFactor->verify($user, $code);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // A wrong second factor counts towards lockout: at this point the
             // attacker already holds the password, so the second factor is the only
             // remaining control and must not be brute forceable.
@@ -211,7 +213,7 @@ final readonly class AuthenticationService
         User $user,
         bool $remember,
         ?string $twoFactorMethod,
-    ): \Asids\Core\Identity\Domain\Models\UserDevice {
+    ): UserDevice {
         // `login()` already migrates the session id (SessionGuard::updateSession calls
         // `migrate(true)`), so session fixation is handled by the framework. Calling
         // `regenerate()` again here migrated a second time and left the authenticated
@@ -278,7 +280,7 @@ final readonly class AuthenticationService
         string $email,
         LoginOutcome $outcome,
         ?string $reason = null,
-        ?\Asids\Core\Identity\Domain\Models\UserDevice $device = null,
+        ?UserDevice $device = null,
         ?string $twoFactorMethod = null,
     ): void {
         LoginHistory::query()->create([

@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Asids\Core\Settings\Presentation\Http\Controllers;
 
+use Asids\Core\Organization\Domain\Models\Company;
+use Asids\Core\Organization\Presentation\Http\Middleware\ResolveActiveCompany;
+use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
+use Asids\Core\Platform\Http\Controllers\ApiController;
+use Asids\Core\Platform\Http\Responses\ApiResponse;
 use Asids\Core\Settings\Application\Services\SettingsResolver;
 use Asids\Core\Settings\Application\Services\SettingsService;
 use Asids\Core\Settings\Domain\Catalogue\SettingDefinition;
@@ -12,9 +17,6 @@ use Asids\Core\Settings\Domain\Enums\SettingScope;
 use Asids\Core\Settings\Domain\Models\Setting;
 use Asids\Core\Settings\Presentation\Http\Requests\UpdateSettingsRequest;
 use Asids\Core\Settings\Presentation\Http\Resources\SettingResource;
-use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
-use Asids\Core\Platform\Http\Controllers\ApiController;
-use Asids\Core\Platform\Http\Responses\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -166,10 +168,10 @@ final class SettingsController extends ApiController
     private function resolveCompanyId(Request $request): string
     {
         $company = $request->attributes->get(
-            \Asids\Core\Organization\Presentation\Http\Middleware\ResolveActiveCompany::ATTRIBUTE
+            ResolveActiveCompany::ATTRIBUTE
         );
 
-        if ($company instanceof \Asids\Core\Organization\Domain\Models\Company) {
+        if ($company instanceof Company) {
             return (string) $company->getKey();
         }
 

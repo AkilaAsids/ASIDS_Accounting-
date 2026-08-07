@@ -60,11 +60,44 @@ export default defineConfig({
       reporter: ['text', 'html'],
       include: ['resources/js/**/*.{ts,vue}'],
       exclude: ['resources/js/**/*.spec.ts', 'resources/js/types/**'],
+
+      /*
+       * Thresholds are per layer, not one global average, and that is deliberate.
+       *
+       * A single global number lets a large well-covered layer carry a poorly covered one. With
+       * thirteen page components in this codebase — several of them three hundred lines of template —
+       * a global figure is dominated by markup, and a real regression in `api/client.ts` would hide
+       * inside it. Per-glob gates mean each layer answers for itself.
+       *
+       * The page and bootstrap layers sit at zero, stated openly rather than excluded from the report
+       * so the gap stays visible in every run. The reasoning: those files are overwhelmingly
+       * declarative, and the behaviour they wire together is already covered from both ends — by the
+       * API client, store, router-guard and component tests below them, and by the Pest suite's
+       * end-to-end coverage of every endpoint they call. Mounting each page to assert that a table
+       * renders a row tests Vue, not this application. Raising this floor is worthwhile work, and it
+       * is worth doing when a page starts carrying logic of its own rather than for the number.
+       */
       thresholds: {
-        statements: 80,
-        branches: 75,
-        functions: 80,
-        lines: 80,
+        'resources/js/{api,stores,composables,router}/**': {
+          statements: 90,
+          branches: 85,
+          // `router/index.ts` is a route table: most of its functions are lazy-import arrows that
+          // only run when a page is actually navigated to, and the guard tests stub the pages.
+          functions: 75,
+          lines: 90,
+        },
+        'resources/js/components/**': {
+          statements: 95,
+          branches: 90,
+          functions: 95,
+          lines: 95,
+        },
+        'resources/js/{pages,app}/**': {
+          statements: 0,
+          branches: 0,
+          functions: 0,
+          lines: 0,
+        },
       },
     },
   },

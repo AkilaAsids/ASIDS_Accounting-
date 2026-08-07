@@ -5,11 +5,16 @@ declare(strict_types=1);
 use Asids\Core\Authorization\Application\DTOs\RoleData;
 use Asids\Core\Authorization\Application\Services\RoleService;
 use Asids\Core\Authorization\Domain\Catalogue\PermissionCatalogue;
+use Asids\Core\Authorization\Domain\Catalogue\RoleTemplate;
 use Asids\Core\Authorization\Domain\Exceptions\LastOwnerCannotBeRemoved;
 use Asids\Core\Authorization\Domain\Exceptions\PermissionNotGrantable;
 use Asids\Core\Authorization\Domain\Exceptions\RoleNotGrantable;
 use Asids\Core\Authorization\Domain\Exceptions\SystemRoleIsProtected;
 use Asids\Core\Authorization\Domain\Models\Role;
+use Asids\Core\Identity\Domain\Enums\UserStatus;
+use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 
 /**
@@ -186,18 +191,76 @@ describe('the owner short circuit', function (): void {
     it('does not grant a suspended owner anything', function (): void {
         $this->withinTenant($this->tenant);
 
-        $this->owner->status = Asids\Core\Identity\Domain\Enums\UserStatus::Suspended;
+        $this->owner->status = UserStatus::Suspended;
         $this->owner->save();
         $this->actingAs($this->owner);
 
-        // Gate::after denies an inactive account even where Gate::before allowed it. Without
-        // that, suspension would not take effect for the one account that matters most.
+        // The deny-first branch of `Gate::before` runs ahead of the owner short circuit. Without
+        // that ordering, suspension would not take effect for the one account that matters most.
         expect($this->owner->can('audit.logs.export'))->toBeFalse();
     });
 
+    it('does not grant a suspended user the permissions their roles carry', function (): void {
+        $this->withinTenant($this->tenant);
+
+        $administrator = $this->createUserWithRole($this->tenant, 'administrator');
+
+        expect($administrator->can('identity.users.view'))->toBeTrue();
+
+        $administrator->status = UserStatus::Suspended;
+        $administrator->save();
+        $administrator->forgetAuthorizationState();
+
+        // REGRESSION. This is not the same test as the one above, and it failed while that one
+        // passed. The owner is granted by our own `Gate::before` callback, so the deny above it was
+        // reached; an ordinary user's permissions were granted by *spatie's* callback, which
+        // registers itself during Gate resolution and therefore always sat at index 0 — ahead of
+        // any deny we could append. Laravel takes the first non-null result, so suspension revoked
+        // nothing for anyone whose authority came from a role.
+        //
+        // Which is every user except the owner. A suspended employee kept every capability their
+        // roles granted, and so did any personal access token they had issued.
+        //
+        // Fixed by turning off `permission.register_permission_check_method` and performing the
+        // permission check inside our own callback, after the account-status check.
+        expect($administrator->can('identity.users.view'))->toBeFalse();
+
+        // They still *hold* the role — suspension removes authority, not membership, so reinstating
+        // them restores exactly what they had.
+        expect($administrator->hasPermissionTo('identity.users.view'))->toBeTrue();
+    });
+
+    it('does not grant a deactivated user the permissions their roles carry', function (): void {
+        $this->withinTenant($this->tenant);
+
+        $administrator = $this->createUserWithRole($this->tenant, 'administrator');
+
+        $administrator->status = UserStatus::Deactivated;
+        $administrator->save();
+        $administrator->forgetAuthorizationState();
+
+        expect($administrator->can('identity.users.view'))->toBeFalse();
+    });
+
+    it('registers exactly one gate before callback, so ordering cannot be reintroduced', function (): void {
+        $gate = Gate::getFacadeRoot();
+
+        $callbacks = (new ReflectionProperty($gate, 'beforeCallbacks'))->getValue($gate);
+
+        // Asserted structurally, because the bug was invisible in behaviour for the owner — the one
+        // account the original test happened to use. If a future change re-enables the package's
+        // gate hook, or an upgrade changes its default back, this fails immediately and names the
+        // reason rather than leaving suspension quietly ineffective.
+        expect($callbacks)->toHaveCount(1);
+
+        $registered = new ReflectionFunction($callbacks[0]);
+
+        expect($registered->getFileName())->toEndWith('app/Providers/AuthServiceProvider.php');
+    });
+
     it('does not let platform staff read customer books by virtue of being staff', function (): void {
-        $staff = Asids\Core\Tenancy\Infrastructure\RowLevelSecurity::bypass(
-            fn () => Asids\Core\Identity\Domain\Models\User::factory()->platformAdmin()->create(),
+        $staff = RowLevelSecurity::bypass(
+            fn () => User::factory()->platformAdmin()->create(),
         );
 
         $this->withinTenant($this->tenant);
@@ -229,7 +292,7 @@ describe('the permission catalogue', function (): void {
     });
 
     it('gives the owner template every grantable capability', function (): void {
-        $template = Asids\Core\Authorization\Domain\Catalogue\RoleTemplate::owner();
+        $template = RoleTemplate::owner();
 
         expect($template->resolvedPermissions())
             ->toEqualCanonicalizing(PermissionCatalogue::tenantGrantableNames());

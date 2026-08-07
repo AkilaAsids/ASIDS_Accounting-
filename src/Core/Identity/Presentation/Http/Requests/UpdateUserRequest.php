@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Identity\Presentation\Http\Requests;
 
 use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Platform\Support\Validation\EmailAddress;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -34,7 +35,9 @@ final class UpdateUserRequest extends FormRequest
         return [
             'first_name' => ['sometimes', 'string', 'min:1', 'max:100'],
             'last_name' => ['nullable', 'string', 'max:100'],
-            'email' => ['sometimes', 'string', 'email:rfc,dns', 'max:255'],
+            // Deliverable: changing an address to an unroutable one would lock the user out of
+            // every link-based recovery path.
+            'email' => ['sometimes', ...EmailAddress::deliverable(), 'max:255'],
             'phone' => ['nullable', 'string', 'max:32'],
             'job_title' => ['nullable', 'string', 'max:120'],
             'employee_number' => ['nullable', 'string', 'max:64'],

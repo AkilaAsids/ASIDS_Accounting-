@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Authorization\Domain\Models;
 
 use Asids\Core\Tenancy\Domain\Concerns\BelongsToTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Spatie\Permission\Models\Role as SpatieRole;
@@ -20,10 +21,14 @@ use Spatie\Permission\Models\Role as SpatieRole;
  * @property string $id
  * @property string|null $tenant_id
  * @property string $name
+ * @property string $guard_name
  * @property string $label
+ * @property string|null $description
  * @property bool $is_system
  * @property bool $is_owner
  * @property int $level
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
  */
 final class Role extends SpatieRole
 {

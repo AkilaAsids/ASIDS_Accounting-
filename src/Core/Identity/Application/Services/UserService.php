@@ -49,7 +49,7 @@ final readonly class UserService
         $this->assertSeatAvailable();
 
         return DB::transaction(function () use ($data, $createdBy): User {
-            $user = new User();
+            $user = new User;
 
             $user->fill([
                 'first_name' => $data->firstName,
@@ -102,7 +102,7 @@ final readonly class UserService
         $this->assertSeatAvailable();
 
         $user = DB::transaction(function () use ($data, $invitedBy): User {
-            $user = new User();
+            $user = new User;
 
             $user->fill([
                 'first_name' => $data->firstName,
@@ -327,6 +327,11 @@ final readonly class UserService
         User::query()->whereKey($user->getKey())->update(['last_activity_at' => now()]);
     }
 
+    public static function sessionEpochKey(User $user): string
+    {
+        return 'session-epoch:'.$user->getKey();
+    }
+
     // ── Invariants ──────────────────────────────────────────────────────────
 
     private function assertEmailAvailable(string $email, ?string $excluding = null): void
@@ -457,10 +462,5 @@ final readonly class UserService
         DB::table('sessions')->where('user_id', $user->getKey())->delete();
 
         cache()->forever(self::sessionEpochKey($user), (string) Str::uuid7());
-    }
-
-    public static function sessionEpochKey(User $user): string
-    {
-        return 'session-epoch:'.$user->getKey();
     }
 }

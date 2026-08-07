@@ -51,7 +51,7 @@ final class CompanyFactory extends Factory
     {
         return $this->state(fn (): array => [
             'is_vat_registered' => true,
-            'vat_registration_number' => fake()->numerify('#########')."-7000",
+            'vat_registration_number' => fake()->numerify('#########').'-7000',
             'tax_identification_number' => fake()->numerify('#########'),
         ]);
     }

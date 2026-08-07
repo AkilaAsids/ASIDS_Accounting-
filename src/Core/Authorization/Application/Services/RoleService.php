@@ -55,7 +55,7 @@ final readonly class RoleService
         }
 
         return DB::transaction(function () use ($tenant, $data, $name, $permissions, $actor): Role {
-            $role = new Role();
+            $role = new Role;
 
             $role->forceFill([
                 'id' => (string) Str::uuid7(),
@@ -197,7 +197,7 @@ final readonly class RoleService
             RoleAssignmentChanged::dispatch(
                 $user,
                 $previous,
-                array_map(static fn (Role $role): string => $role->name, $roles),
+                array_values(array_map(static fn (Role $role): string => $role->name, $roles)),
                 $actor,
             );
 

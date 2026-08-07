@@ -38,7 +38,7 @@ final class DeviceService
         $agent = $this->parseUserAgent((string) $request->userAgent());
 
         if ($device === null) {
-            $device = new UserDevice();
+            $device = new UserDevice;
             $device->fill([
                 'user_id' => $user->getKey(),
                 'fingerprint_hash' => hash('sha256', $token),

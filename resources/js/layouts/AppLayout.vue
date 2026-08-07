@@ -26,10 +26,28 @@ interface NavItem {
 const navigation = computed<NavItem[]>(() =>
   (
     [
-      { name: 'dashboard', label: 'Dashboard', icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
-      { name: 'users', label: 'Users', icon: 'M17 20h5v-2a3 3 0 00-5.36-1.86M17 20H7m10 0v-2c0-.66-.13-1.3-.36-1.86m0 0a5 5 0 00-9.28 0M7 20H2v-2a3 3 0 015.36-1.86M7 20v-2c0-.66.13-1.3.36-1.86m0 0a5 5 0 019.28 0M15 7a3 3 0 11-6 0 3 3 0 016 0z', permission: 'identity.users.view' },
-      { name: 'roles', label: 'Roles', icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', permission: 'authorization.roles.view' },
-      { name: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
+      {
+        name: 'dashboard',
+        label: 'Dashboard',
+        icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z',
+      },
+      {
+        name: 'users',
+        label: 'Users',
+        icon: 'M17 20h5v-2a3 3 0 00-5.36-1.86M17 20H7m10 0v-2c0-.66-.13-1.3-.36-1.86m0 0a5 5 0 00-9.28 0M7 20H2v-2a3 3 0 015.36-1.86M7 20v-2c0-.66.13-1.3.36-1.86m0 0a5 5 0 019.28 0M15 7a3 3 0 11-6 0 3 3 0 016 0z',
+        permission: 'identity.users.view',
+      },
+      {
+        name: 'roles',
+        label: 'Roles',
+        icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
+        permission: 'authorization.roles.view',
+      },
+      {
+        name: 'settings',
+        label: 'Settings',
+        icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
+      },
     ] satisfies NavItem[]
   ).filter((item) => item.permission === undefined || auth.can(item.permission)),
 )
@@ -49,7 +67,9 @@ async function signOut(): Promise<void> {
       :class="ui.sidebarCollapsed ? 'lg:w-16' : 'lg:w-60'"
     >
       <div class="flex h-14 items-center gap-2 px-4">
-        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-primary-600 text-sm font-bold text-white">
+        <span
+          class="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-primary-600 text-sm font-bold text-white"
+        >
           A
         </span>
         <span v-if="!ui.sidebarCollapsed" class="truncate text-sm font-semibold text-content">
@@ -66,7 +86,14 @@ async function signOut(): Promise<void> {
           active-class="bg-primary-600/10 text-primary-700 dark:text-primary-300"
           :title="ui.sidebarCollapsed ? item.label : undefined"
         >
-          <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <svg
+            class="h-5 w-5 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
           </svg>
           <span v-if="!ui.sidebarCollapsed">{{ item.label }}</span>
@@ -81,8 +108,21 @@ async function signOut(): Promise<void> {
           :aria-expanded="!ui.sidebarCollapsed"
           @click="ui.toggleSidebar()"
         >
-          <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" :d="ui.sidebarCollapsed ? 'M13 5l7 7-7 7M5 5l7 7-7 7' : 'M11 19l-7-7 7-7m8 14l-7-7 7-7'" />
+          <svg
+            class="h-5 w-5 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              :d="
+                ui.sidebarCollapsed ? 'M13 5l7 7-7 7M5 5l7 7-7 7' : 'M11 19l-7-7 7-7m8 14l-7-7 7-7'
+              "
+            />
           </svg>
           <span v-if="!ui.sidebarCollapsed">Collapse</span>
           <span v-else class="sr-only">Expand sidebar</span>
@@ -92,7 +132,9 @@ async function signOut(): Promise<void> {
 
     <div class="flex min-w-0 flex-1 flex-col">
       <!-- ── Top bar ───────────────────────────────────────────────────── -->
-      <header class="flex h-14 shrink-0 items-center gap-3 border-b border-surface-border bg-surface-raised px-4">
+      <header
+        class="flex h-14 shrink-0 items-center gap-3 border-b border-surface-border bg-surface-raised px-4"
+      >
         <CompanySwitcher />
 
         <div class="flex-1" />
@@ -116,10 +158,14 @@ async function signOut(): Promise<void> {
             aria-haspopup="menu"
             @click="userMenuOpen = !userMenuOpen"
           >
-            <span class="grid h-7 w-7 place-items-center rounded-full bg-primary-600 text-xs font-semibold text-white">
+            <span
+              class="grid h-7 w-7 place-items-center rounded-full bg-primary-600 text-xs font-semibold text-white"
+            >
               {{ auth.user?.initials }}
             </span>
-            <span class="hidden max-w-32 truncate text-content sm:inline">{{ auth.user?.full_name }}</span>
+            <span class="hidden max-w-32 truncate text-content sm:inline">{{
+              auth.user?.full_name
+            }}</span>
           </button>
 
           <div
@@ -141,7 +187,10 @@ async function signOut(): Promise<void> {
               Security
               <!-- A nudge rather than a nag: 2FA is the single highest-value thing a user can
                    turn on, so its absence is worth showing every time this menu opens. -->
-              <span v-if="!auth.user?.two_factor_enabled" class="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
+              <span
+                v-if="!auth.user?.two_factor_enabled"
+                class="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning"
+              >
                 2FA off
               </span>
             </RouterLink>

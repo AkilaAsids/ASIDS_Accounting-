@@ -144,7 +144,11 @@ jobs:
           DB_ADMIN_PASSWORD: secret
           REDIS_HOST: 127.0.0.1
           TENANCY_ENFORCE_RLS: 'true'
-        run: vendor/bin/pest --coverage --min=85 --ci
+        # `-d memory_limit=2G` is required, not precautionary. The suite itself runs comfortably
+        # inside the default 128M, but building the coverage report loads every covered file's line
+        # data at once and exhausts it — the run reports every test passing and then dies with a
+        # fatal error while writing the report, so the job fails with no failing test to point at.
+        run: php -d memory_limit=2G vendor/bin/pest --coverage --min=85 --ci
 
   # ── Front-end type checking, linting, unit tests and production build ───────
   frontend:
