@@ -1,6 +1,6 @@
 # Phase 2 — Accounting core: analysis and design
 
-**Status: awaiting approval. No code written.**
+**Status: approved 2026-08-07. The three open questions are ruled on in §8; implementation follows the plan in §5.**
 
 Scope agreed: the double-entry foundation every later module posts through. Chart of accounts,
 journal entries and lines, the general ledger, fiscal periods and close, opening balances, and the
@@ -260,7 +260,7 @@ src/Core/Accounting/
 ├── Listeners/           MaintainAccountPeriodBalances
 ├── Policies/            AccountPolicy, JournalEntryPolicy, FiscalPeriodPolicy
 ├── Presentation/
-│   ├── Console/         asids:ledger-verify, asids:open-fiscal-year
+│   ├── Console/         asids:ledger-verify, asids:ledger-rebuild, asids:open-fiscal-year
 │   └── Http/
 │       ├── Controllers/ AccountController, JournalEntryController, FiscalPeriodController,
 │       │                LedgerReportController
@@ -309,6 +309,7 @@ Tranche 3 is the phase. If anything slips, it slips around that.
 | **Deferred constraint trigger** behaves differently than expected | Medium | High — the central invariant | Prove it in tranche 3 against raw SQL, not only through the service. Phase 1's lesson was that the ordering and environment assumptions are what break |
 | **Gapless numbering serialises posting** | Low now, high later | Medium | Documented trade-off; per-company lock scope; revisit when a tenant's volume justifies splitting statutory from internal sequences |
 | **Period close is hard to undo** | Medium | High — a wrongly closed year blocks a customer | Close is reversible and audited; year-end close posts an ordinary reversible entry rather than mutating history |
+| **The FX columns are used before the FX phase** | Low | Medium — half-built currency handling | The phase-scoped NULL constraint makes it impossible rather than discouraged; dropping it is a deliberate, named act |
 | **Scope creep into invoicing** | High | Medium — the ledger's invariants get exercised by unfinished code | The scope boundary above is explicit; AR/AP is a separate phase |
 | **Sri Lankan statutory correctness** | High | High | Out of scope here by design. The chart template and any tax treatment must be reviewed by a Sri Lankan chartered accountant before release, as [SECURITY-REVIEW.md](SECURITY-REVIEW.md) already records |
 
@@ -335,14 +336,63 @@ environment rather than structure:
 
 ---
 
-## Decisions I need before writing code
+## 8. Decisions taken
 
-1. **Multi-currency columns on `journal_lines` now, constrained to base currency — or added in the
-   FX phase?** (§2 recommends now.)
-2. **`account_period_balances` maintained transactionally, or sum the lines on demand?** (§2.4
-   recommends maintained, with a verification command.)
-3. **Should the standard chart of accounts template ship in this phase?** It is a convenience with
-   statutory implications — a template that misclassifies an account teaches a customer to file
-   incorrectly. It can ship as a clearly-labelled starting point, or wait for accountant review.
+The three open questions were ruled on before implementation began.
 
-Everything else I will proceed on as designed above.
+### 8.1 Multi-currency columns: build the shape now, keep the phase base-currency only
+
+`journal_lines` carries `transaction_currency_code`, `transaction_amount` and `exchange_rate` from
+the first migration. All three are **nullable, and NULL is meaningful**: it means the line is in the
+company's base currency at rate 1. That is a better shape than the constrained-to-base alternative
+originally proposed — it stores no redundant rows of `LKR / 1.0000`, and it makes "is this an FX
+line?" a single `IS NOT NULL` test rather than a comparison against the company's base.
+
+Two database constraints, with different lifespans, and the difference is deliberate:
+
+- **Permanent:** the three columns are all-null or all-populated, `exchange_rate > 0`, and
+  `transaction_amount` carries the same sign convention as the base amount. This is the shape rule,
+  and it holds forever.
+- **Phase-scoped:** a check that the triple is NULL, which is what actually enforces
+  "base-currency only" rather than merely intending it. The FX phase drops this one constraint and
+  nothing else about the table changes. It is named `journal_lines_single_currency_until_fx_phase`
+  so that whoever drops it knows exactly what they are opting into.
+
+No conversion, revaluation, gain/loss recognition or rate sourcing in this phase. Those are the FX
+phase, and none of them is reachable while the second constraint stands.
+
+### 8.2 Aggregates maintained atomically, lines remain the source of truth
+
+`account_period_balances` is updated inside the same transaction that posts the entry — never
+asynchronously, never on a queue. `journal_lines` remains the only thing that is *true*; the
+aggregate is a cache with a database transaction around it.
+
+Two commands rather than one, because detection and repair are different operations with different
+risk profiles:
+
+- **`asids:ledger-verify`** recomputes from the lines and reports drift. Read-only, safe to run
+  anywhere, and belongs in CI and on a schedule — the same treatment `asids:audit-verify` gets.
+- **`asids:ledger-rebuild`** discards the aggregates for a scope and recomputes them from the lines.
+  Requires `--confirm`, is audited, and takes a company and optional period range so a repair can be
+  narrow rather than platform-wide.
+
+### 8.3 The starter chart of accounts ships, labelled and versioned
+
+A Sri Lankan SME starter template ships in this phase, on three conditions that are part of the
+implementation rather than a note in a README:
+
+1. **Labelled at every surface that exposes it.** The API returns the disclaimer alongside the
+   template, and the UI shows it at the point of selection — not buried in documentation the person
+   clicking "apply" will not read. The wording is that it is a starting point, not professional or
+   statutory advice.
+2. **Versioned.** The template carries a version identifier, and a company records which version it
+   was created from. Without that, a corrected template in six months leaves no way to identify the
+   companies built on the earlier one.
+3. **Tax mappings kept separate and configurable.** VAT and SVAT account mappings live in settings,
+   not baked into the template. The chart says "here is an account"; the tax configuration says
+   "this account collects output VAT". Fusing them would make the template statutory, which is
+   exactly what it must not claim to be.
+
+Nothing in the product claims statutory compliance until a qualified Sri Lankan accounting and tax
+professional has reviewed it — consistent with what [SECURITY-REVIEW.md](SECURITY-REVIEW.md) already
+records about the compliance modules.
