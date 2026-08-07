@@ -9,8 +9,11 @@ use Asids\Core\Accounting\Application\Services\ChartTemplateService;
 use Asids\Core\Accounting\Application\Services\DocumentNumberService;
 use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
 use Asids\Core\Accounting\Application\Services\JournalService;
+use Asids\Core\Accounting\Application\Services\LedgerBalanceService;
 use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Contracts\AccountUsageProbe;
+use Asids\Core\Accounting\Domain\Events\JournalEntryPosted;
+use Asids\Core\Accounting\Domain\Events\JournalEntryReversed;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\Models\FiscalPeriod;
 use Asids\Core\Accounting\Domain\Models\FiscalYear;
@@ -18,7 +21,11 @@ use Asids\Core\Accounting\Domain\Models\Journal;
 use Asids\Core\Accounting\Domain\Models\JournalEntry;
 use Asids\Core\Accounting\Domain\Models\JournalLine;
 use Asids\Core\Accounting\Infrastructure\Ledger\EloquentAccountUsageProbe;
+use Asids\Core\Accounting\Listeners\MaintainAccountPeriodBalances;
+use Asids\Core\Accounting\Presentation\Console\RebuildLedgerBalancesCommand;
+use Asids\Core\Accounting\Presentation\Console\VerifyLedgerCommand;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -44,6 +51,7 @@ final class AccountingServiceProvider extends ServiceProvider
         $this->app->singleton(DocumentNumberService::class);
         $this->app->singleton(JournalService::class);
         $this->app->singleton(PostingService::class);
+        $this->app->singleton(LedgerBalanceService::class);
 
         // The real probe, now that `journal_lines` exists. `NoPostings` was the truthful answer
         // until tranche 3 created the table; the rules in ChartOfAccountsService did not change when
@@ -56,6 +64,16 @@ final class AccountingServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
         $this->registerMorphAliases();
+
+        Event::listen(JournalEntryPosted::class, [MaintainAccountPeriodBalances::class, 'handlePosted']);
+        Event::listen(JournalEntryReversed::class, [MaintainAccountPeriodBalances::class, 'handleReversed']);
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                VerifyLedgerCommand::class,
+                RebuildLedgerBalancesCommand::class,
+            ]);
+        }
     }
 
     /**
