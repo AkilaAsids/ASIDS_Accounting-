@@ -42,8 +42,13 @@ jobs:
 
       - run: composer install --no-interaction --prefer-dist --no-progress
 
+      # `--cache-file` points at a path inside the runner's per-job temporary directory, which is
+      # created empty for every run and is not covered by the Composer cache above. Pint reuses a
+      # cache when it finds one and reports a cached file as clean without re-reading it, so a cache
+      # that outlived a rule or a PHP version change would let this gate pass on stale results. An
+      # always-empty path makes every run a full check.
       - name: Check formatting (Pint)
-        run: vendor/bin/pint --test
+        run: vendor/bin/pint --test --cache-file="${RUNNER_TEMP}/pint.cache"
 
       - name: Static analysis (PHPStan level 8)
         run: vendor/bin/phpstan analyse --no-progress --memory-limit=2G
@@ -134,11 +139,22 @@ jobs:
           DB_ADMIN_PASSWORD: secret
         run: php artisan migrate --force --no-interaction
 
+      # `DB_USERNAME: asids_app` — not `asids_owner` — and the distinction is the whole point of the
+      # provisioning step above. The service container's `asids_owner` is a superuser, and a
+      # superuser bypasses row level security unconditionally: `FORCE ROW LEVEL SECURITY` does not
+      # apply to it. Running the suite as the owner switched tenant isolation off for every test,
+      # which is why `RowLevelSecurityTest` skipped its 11 assertions and `asids:security-check`
+      # failed. `asids_app` is NOSUPERUSER NOBYPASSRLS, so the policies are genuinely in force and
+      # those tests execute instead of skipping.
+      #
+      # Migrations above still run as `asids_owner`: they create the policies and the triggers, and
+      # that needs ownership. Only the test run drops to the application role — which mirrors
+      # production, where the application never connects as the owner.
       - name: Run Pest with coverage gate
         env:
           DB_HOST: 127.0.0.1
           DB_DATABASE: asids_erp_testing
-          DB_USERNAME: asids_owner
+          DB_USERNAME: asids_app
           DB_PASSWORD: secret
           DB_ADMIN_USERNAME: asids_owner
           DB_ADMIN_PASSWORD: secret
@@ -211,8 +227,12 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      # `--locked` audits composer.lock directly. This job deliberately does not run
+      # `composer install` — it is a dependency-advisory check, not a runtime one, and installing
+      # would add a minute for nothing. Without the flag `composer audit` looks for an installed
+      # vendor directory, finds none, and exits 1 before auditing anything.
       - name: Composer advisory audit
-        run: composer audit --no-interaction --abandoned=report
+        run: composer audit --locked --no-interaction --abandoned=report
 
       - uses: actions/setup-node@v4
         with:

@@ -56,6 +56,7 @@ final class Branch extends Model
 
     /** @use HasFactory<BranchFactory> */
     use HasFactory;
+
     use HasUuids;
     use SoftDeletes;
 

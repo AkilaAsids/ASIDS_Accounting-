@@ -5,12 +5,33 @@ import laravel from 'laravel-vite-plugin'
 // so a single config file drives both the dev server and the unit test runner.
 import { defineConfig } from 'vitest/config'
 
+/*
+ * Vitest sets `VITEST` in the processes it spawns, and the Laravel plugin is left out when it is
+ * set.
+ *
+ * The plugin exists to serve the dev server and to build production assets: it declares the entry
+ * points, writes the hot file and watches Blade and routes for full reloads. A unit test run uses
+ * none of that — module resolution comes from `resolve.alias` below. The plugin also refuses to
+ * start when `CI` is set, on the reasoning that an HMR server has no business in a pipeline, which
+ * is correct for the dev server and fatal for `vitest run`: it aborts before collecting a single
+ * test.
+ *
+ * Dropping the plugin for test runs rather than setting `LARAVEL_BYPASS_ENV_CHECK=1` in CI keeps
+ * that guard doing its job everywhere else, and fixes the failure for anyone running the suite with
+ * `CI` set rather than only for this repository's workflow.
+ */
+const isTestRun = process.env.VITEST !== undefined
+
 export default defineConfig({
   plugins: [
-    laravel({
-      input: ['resources/js/app/main.ts', 'resources/js/styles/app.css'],
-      refresh: ['resources/views/**', 'routes/**'],
-    }),
+    ...(isTestRun
+      ? []
+      : [
+          laravel({
+            input: ['resources/js/app/main.ts', 'resources/js/styles/app.css'],
+            refresh: ['resources/views/**', 'routes/**'],
+          }),
+        ]),
     vue({
       template: {
         transformAssetUrls: {

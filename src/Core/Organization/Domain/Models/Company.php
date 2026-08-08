@@ -73,6 +73,7 @@ final class Company extends Model
 
     /** @use HasFactory<CompanyFactory> */
     use HasFactory;
+
     use HasUuids;
     use SoftDeletes;
 
