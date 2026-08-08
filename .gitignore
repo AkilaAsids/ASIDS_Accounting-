@@ -11,10 +11,11 @@
 /storage/pail
 /vendor
 .DS_Store
-.env
-.env.backup
-.env.production
-.env.*.local
+# Every environment file except the committed template. Written as "ignore all, then unignore
+# the example" rather than as a list of known suffixes: the list approach missed `.env.testing`
+# and `.env.local`, and the failure mode of a missed suffix is a committed credential.
+.env*
+!.env.example
 .phpactor.json
 .phpunit.result.cache
 auth.json
@@ -26,3 +27,17 @@ yarn-error.log
 /coverage
 /.php-cs-fixer.cache
 /.rector.cache
+
+# Per-developer tool settings. `.claude/launch.json` stays tracked — it defines how to run this
+# project's dev server and is the same for everyone. `settings.local.json` is one machine's
+# permission allowlist and has no business in a shared history.
+/.claude/settings.local.json
+
+# Private keys and certificates, wherever they land. The repository should never be the reason a
+# certificate leaks, and a developer who drops one in the project root should not have to
+# remember this rule.
+*.pem
+*.key
+*.p12
+*.pfx
+!/storage/oauth-*.key.example
