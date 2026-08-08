@@ -150,6 +150,25 @@ jobs:
         # fatal error while writing the report, so the job fails with no failing test to point at.
         run: php -d memory_limit=2G vendor/bin/pest --coverage --min=85 --ci
 
+      # Here rather than in the front-end job because the route comparison needs a booted
+      # application, and this is the job that has one. `--require-routes` turns "PHP was not
+      # available so the comparison was skipped" into a failure: a check that can quietly
+      # degrade to doing nothing is the reason the specification drifted in the first place.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Check the OpenAPI specification against the routes
+        env:
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: asids_erp_testing
+          DB_USERNAME: asids_owner
+          DB_PASSWORD: secret
+        run: node scripts/check-openapi.mjs --require-routes
+
   # ── Front-end type checking, linting, unit tests and production build ───────
   frontend:
     name: Front-end

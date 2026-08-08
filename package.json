@@ -15,7 +15,8 @@
         "typecheck": "vue-tsc --noEmit",
         "test": "vitest run",
         "test:watch": "vitest",
-        "test:coverage": "vitest run --coverage"
+        "test:coverage": "vitest run --coverage",
+        "check:api": "node scripts/check-openapi.mjs"
     },
     "dependencies": {
         "@vueuse/core": "^12.5.0",
@@ -38,6 +39,7 @@
         "eslint": "^9.19.0",
         "eslint-plugin-vue": "^9.32.0",
         "happy-dom": "^16.8.1",
+        "js-yaml": "^4.1.0",
         "laravel-vite-plugin": "^1.2.0",
         "postcss": "^8.5.1",
         "prettier": "^3.4.2",

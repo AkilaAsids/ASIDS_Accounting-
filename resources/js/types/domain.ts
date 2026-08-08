@@ -231,3 +231,176 @@ export interface TwoFactorEnrolment {
   digits: number
   period: number
 }
+
+/*
+|--------------------------------------------------------------------------
+| Accounting
+|--------------------------------------------------------------------------
+|
+| Every monetary field is a `string`, not a `number`, and that is not an
+| oversight. JSON numbers become IEEE-754 doubles in JavaScript, and an amount
+| that round-trips through one is no longer the amount the ledger stored —
+| which is the whole reason the database uses numeric(19,4). Amounts are
+| formatted for display and never arithmetic'd in the browser; the server
+| computes every total, including the trial balance's.
+*/
+
+export type AccountType = 'asset' | 'liability' | 'equity' | 'income' | 'expense'
+
+export type NormalBalance = 'debit' | 'credit'
+
+export type FinancialStatement = 'balance_sheet' | 'profit_and_loss'
+
+export interface Account {
+  id: string
+  company_id: string
+  parent_id: string | null
+  code: string
+  name: string
+  description: string | null
+  type: AccountType
+  type_label: string
+  normal_balance: NormalBalance
+  statement: FinancialStatement
+  is_permanent: boolean
+  is_postable: boolean
+  is_system: boolean
+  system_key: string | null
+  is_active: boolean
+  archived_at: string | null
+  sort_order: number
+  template_version: string | null
+  capabilities: {
+    can_update: boolean
+    can_delete: boolean
+    accepts_postings: boolean
+  }
+  children?: Account[]
+}
+
+export interface ChartTemplateOffer {
+  version: string
+  name: string
+  description: string
+  /** Shown wherever the template is offered or applied. Not optional. */
+  disclaimer: string
+  account_count: number
+  can_apply: boolean
+}
+
+export type JournalEntryStatus = 'draft' | 'posted' | 'reversed'
+
+export interface JournalLine {
+  id: string
+  line_number: number
+  account_id: string
+  branch_id: string | null
+  debit: string
+  credit: string
+  side: NormalBalance
+  description: string | null
+  transaction_currency_code: string | null
+  transaction_amount: string | null
+  exchange_rate: string | null
+  account?: {
+    id: string
+    code: string
+    name: string
+    type: AccountType
+  }
+}
+
+export interface JournalEntry {
+  id: string
+  company_id: string
+  journal_id: string
+  fiscal_period_id: string
+  number: string | null
+  document_type: string
+  document_type_label: string
+  entry_date: string
+  description: string
+  reference: string | null
+  status: JournalEntryStatus
+  status_label: string
+  posted_at: string | null
+  posted_by_id: string | null
+  reverses_entry_id: string | null
+  reversed_by_entry_id: string | null
+  reversed_at: string | null
+  reversal_reason: string | null
+  capabilities: {
+    can_update: boolean
+    can_post: boolean
+    can_reverse: boolean
+  }
+  lines?: JournalLine[]
+  period?: {
+    id: string
+    label: string
+    status: PeriodStatus
+  }
+}
+
+export type PeriodStatus = 'open' | 'closed' | 'locked'
+
+export interface FiscalPeriod {
+  id: string
+  sequence: number
+  label: string
+  starts_on: string
+  ends_on: string
+  status: PeriodStatus
+  status_label: string
+  accepts_postings: boolean
+  closed_at: string | null
+  reopened_at: string | null
+  reopen_reason: string | null
+}
+
+export interface FiscalYear {
+  id: string
+  label: string
+  starts_on: string
+  ends_on: string
+  is_closed: boolean
+  closed_at: string | null
+  closing_entry_id: string | null
+  periods: FiscalPeriod[]
+}
+
+export interface TrialBalanceRow {
+  account_id: string
+  code: string
+  name: string
+  type: AccountType
+  statement: FinancialStatement
+  normal_balance: NormalBalance
+  debit: string
+  credit: string
+  balance: string
+}
+
+export interface TrialBalanceMeta {
+  from: string
+  to: string
+  currency: string
+  totals: { debit: string; credit: string }
+  /**
+   * Whether debits equal credits. Computed by the server, because a client
+   * summing doubles would produce a figure that disagrees with the ledger and
+   * the customer would reasonably blame the accounting.
+   */
+  ties: boolean
+}
+
+export interface AccountLedgerRow {
+  entry_id: string
+  number: string | null
+  entry_date: string
+  description: string
+  status: JournalEntryStatus
+  debit: string
+  credit: string
+  running_balance: string
+}

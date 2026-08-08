@@ -3,12 +3,16 @@ openapi: 3.1.0
 info:
   title: ASIDS ERP Cloud API
   version: 1.0.0
-  summary: Multi-tenant accounting and ERP platform — Phase 1 surface.
+  summary: Multi-tenant accounting and ERP platform — platform and accounting core.
   description: |
-    Every endpoint the platform exposes as of Phase 1: workspace sign-up, authentication,
+    Every endpoint the platform exposes. Phase 1 covers workspace sign-up, authentication,
     two factor, users, roles, permissions, companies, branches, company access, settings and
-    the audit trail. Accounting, sales, purchasing, inventory and payroll arrive in later
-    phases and will extend this document rather than replace it.
+    the audit trail. Phase 2 adds the accounting core: the chart of accounts, the double-entry
+    ledger, the fiscal calendar and the trial balance. Sales, purchasing, inventory, payroll and
+    multi-currency arrive in later phases and will extend this document rather than replace it.
+
+    **Monetary amounts are decimal strings, never JSON numbers.** See the `Amount` schema — the
+    reason is that `numeric(19,4)` does not survive a round trip through an IEEE-754 double.
 
     ## Conventions
 
@@ -101,6 +105,8 @@ tags:
     description: Hierarchical typed settings.
   - name: Audit
     description: The append-only trail and the activity feed.
+  - name: Accounting
+    description: The double-entry ledger — chart of accounts, journal entries, the fiscal calendar and reports.
 
 paths:
   # ── Workspaces ────────────────────────────────────────────────────────────
@@ -304,7 +310,8 @@ paths:
         splitting them only adds latency to the most latency-sensitive screen in the product.
       responses:
         '200':
-          description: The session, or `{ "authenticated": false }` for a guest.
+          # Quoted: a plain YAML scalar may not contain ": ", and the JSON example below does.
+          description: 'The session, or `{ "authenticated": false }` for a guest.'
           content:
             application/json:
               schema:
@@ -1066,6 +1073,29 @@ paths:
                   meta: { $ref: '#/components/schemas/Meta' }
         '428': { $ref: '#/components/responses/StepUpRequired' }
 
+  /users/{userId}/devices:
+    parameters: [{ $ref: '#/components/parameters/UserId' }]
+    get:
+      tags: [Users]
+      operationId: listUserDevices
+      summary: The devices another user has signed in from
+      description: |
+        The administrative view of `GET /me/devices`. An unfamiliar device on someone else's
+        account is often the first visible sign of a compromise, so this is readable by anyone
+        who may administer users rather than being buried in the audit trail.
+      responses:
+        '200':
+          description: The user's devices.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Device' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /users/{userId}/two-factor:
     delete:
       tags: [Users]
@@ -1269,6 +1299,23 @@ paths:
         provisioning and integrations refer to `owner` and `administrator` by name. A role at
         or above your own level cannot be edited at all — otherwise you could add capabilities
         to a role you hold and self-escalate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RoleResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    patch:
+      tags: [Roles & permissions]
+      operationId: updateRolePatch
+      summary: Update a role (alias of PUT)
+      description: |
+        The same handler as `PUT`, and the same semantics: a full replacement, not a partial
+        update. Documented because the route accepts it, not because it behaves differently —
+        prefer `PUT`, which says what actually happens.
       requestBody:
         required: true
         content:
@@ -1936,6 +1983,687 @@ paths:
                   data: { type: array, items: { $ref: '#/components/schemas/ActivityEntry' } }
                   meta: { $ref: '#/components/schemas/PaginatedMeta' }
 
+  # ── Accounting: the chart of accounts ─────────────────────────────────────
+
+  /companies/{companyId}/accounts:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Accounting]
+      operationId: listAccounts
+      summary: The company's chart of accounts
+      description: |
+        Returned in chart order — by type, then by the `sort_order` and code that give a set of
+        books its familiar shape — rather than alphabetically. Archived accounts are omitted
+        unless `include_archived` is set, because a chart that shows every account ever created
+        is unusable after a few years.
+      parameters:
+        - name: include_archived
+          in: query
+          schema: { type: boolean, default: false }
+        - name: filter[type]
+          in: query
+          schema: { type: string, enum: [asset, liability, equity, income, expense] }
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: The chart.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Account' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Accounting]
+      operationId: createAccount
+      summary: Add an account
+      description: |
+        `normal_balance` and `statement` are **not** accepted — they are derived from `type` and
+        returned. A client that could set them independently could create an asset account that
+        reports a credit balance, and every figure that touched it would be inverted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Account' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/accounts/template:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Accounting]
+      operationId: previewChartTemplate
+      summary: Preview the Sri Lankan SME starter chart
+      description: |
+        The accounts the template would create, its version, and its disclaimer. Offered as a
+        preview so a customer can read what they are about to adopt.
+
+        **The template is a starting point, not statutory advice.** It carries no tax or VAT
+        mappings — those are configured separately — and a qualified Sri Lankan accounting or
+        tax professional should review it before it is relied on for a statutory filing.
+      responses:
+        '200':
+          description: The template.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      version: { type: string, example: 2026.02-lk-sme-1 }
+                      disclaimer: { type: string }
+                      accounts: { type: array, items: { $ref: '#/components/schemas/Account' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Accounting]
+      operationId: applyChartTemplate
+      summary: Adopt the starter chart
+      description: |
+        Only onto an empty chart. Refused with `422` once the company has any account, because
+        merging a template into a chart someone has already tailored produces duplicates that
+        are far harder to unpick than starting again.
+      responses:
+        '201':
+          description: Applied. `data.created` is the number of accounts written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      created: { type: integer, example: 45 }
+                      version: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The chart already has accounts.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/accounts/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [Accounting]
+      operationId: showAccount
+      summary: One account
+      responses:
+        '200': { $ref: '#/components/responses/AccountResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Accounting]
+      operationId: updateAccount
+      summary: Amend an account
+      description: |
+        Every field is optional; only what is sent changes. `type` may only be changed while the
+        account has no postings — changing it afterwards would silently restate every report
+        that has already been produced from it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/AccountResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Accounting]
+      operationId: deleteAccount
+      summary: Delete an account that was never used
+      description: |
+        Refused with `422` for any account that has ever been posted to, has children, or is a
+        system account. Archive is the ordinary path — see `POST .../archive`. Deletion exists
+        only for accounts created in error before anything was recorded against them.
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The account has history, children, or is a system account.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/accounts/{accountId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [Accounting]
+      operationId: archiveAccount
+      summary: Retire an account without losing its history
+      description: |
+        An archived account accepts no new postings but keeps every one it already has, so last
+        year's accounts still add up. This is what to do with an account that is no longer used.
+      responses:
+        '200': { $ref: '#/components/responses/AccountResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: A system account cannot be archived.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/accounts/{accountId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [Accounting]
+      operationId: restoreAccount
+      summary: Bring an archived account back into use
+      responses:
+        '200': { $ref: '#/components/responses/AccountResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /companies/{companyId}/accounts/{accountId}/ledger:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [Accounting]
+      operationId: accountLedger
+      summary: One account's transactions, with a running balance
+      description: |
+        Opening balance, every posted movement in the range, and a closing balance. The running
+        balance is computed server-side for the same reason the trial balance totals are: a
+        client adding `numeric(19,4)` values as JavaScript numbers would produce a column that
+        drifts from the ledger by cents.
+
+        Omitting `from`/`to` defaults to the company's current fiscal year, which for an
+        April-start business is not the calendar year.
+      parameters:
+        - $ref: '#/components/parameters/LedgerFrom'
+        - $ref: '#/components/parameters/LedgerTo'
+      responses:
+        '200':
+          description: The account ledger.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AccountLedgerLine' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          account:
+                            type: object
+                            properties:
+                              id: { type: string, format: uuid }
+                              code: { type: string }
+                              name: { type: string }
+                          from: { type: string, format: date }
+                          to: { type: string, format: date }
+                          currency: { type: string }
+                          opening_balance: { $ref: '#/components/schemas/Amount' }
+                          closing_balance: { $ref: '#/components/schemas/Amount' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Accounting: journal entries ───────────────────────────────────────────
+
+  /companies/{companyId}/journal-entries:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Accounting]
+      operationId: listJournalEntries
+      summary: Every double entry in the company's books
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: filter[status]
+          in: query
+          schema: { type: string, enum: [draft, posted, reversed] }
+        - name: filter[document_type]
+          in: query
+          schema: { type: string }
+        - name: filter[fiscal_period_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: include
+          in: query
+          description: Comma-separated. `lines` loads each entry's lines.
+          schema: { type: string, example: lines }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [entry_date, -entry_date, number, -number, created_at, -created_at], default: -entry_date }
+      responses:
+        '200':
+          description: Paginated entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/JournalEntry' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Accounting]
+      operationId: createJournalEntry
+      summary: Draft an entry, and post it in the same call when asked
+      description: |
+        Drafting and posting are separate capabilities held by different people — a bookkeeper
+        records what happened, an accountant decides it is part of the record — so `post: true`
+        is checked against `accounting.journals.post` and answers `403` to a caller who may
+        only draft.
+
+        **The call is atomic.** If posting is refused — because the entry does not balance,
+        because the period is closed, or because the caller may not post — nothing is written.
+        A rejected post never leaves a draft behind.
+
+        Amounts are **strings**, not numbers. `numeric(19,4)` does not survive a round trip
+        through an IEEE-754 double, and a ledger that silently loses a hundredth of a rupee is
+        worse than one that refuses the request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JournalEntryRequest' }
+      responses:
+        '201':
+          description: Drafted, and posted if asked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/JournalEntry' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403':
+          description: The caller may draft but not post. Nothing was written.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            Validation, or a business rule. An unbalanced entry names the difference:
+            `debits`, `credits` and `difference` are returned alongside the message.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: https://docs.asidstech.com/errors/unbalanced-entry
+                title: Business rule violation
+                status: 422
+                detail: This entry does not balance. Debits total 50000.0000 and credits total 40000.0000 — a difference of 10000.0000.
+                debits: '50000.0000'
+                credits: '40000.0000'
+                difference: '10000.0000'
+
+  /companies/{companyId}/journal-entries/{entryId}:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/EntryId'
+    get:
+      tags: [Accounting]
+      operationId: showJournalEntry
+      summary: One entry, with its lines
+      responses:
+        '200': { $ref: '#/components/responses/JournalEntryResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Accounting]
+      operationId: updateJournalEntry
+      summary: Amend a draft
+      description: |
+        Drafts only. A posted entry is immutable — refused here, refused by the posting service,
+        and refused by a database trigger. Correct one by reversing it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JournalEntryRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/JournalEntryResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The entry is posted, or the lines do not balance.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      tags: [Accounting]
+      operationId: deleteJournalEntry
+      summary: Discard a draft
+      responses:
+        '204': { description: Discarded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The entry is posted and cannot be deleted.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/journal-entries/{entryId}/post:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/EntryId'
+    post:
+      tags: [Accounting]
+      operationId: postJournalEntry
+      summary: Commit a draft to the ledger
+      description: |
+        Assigns the entry its gapless document number, stamps who posted it and when, and
+        updates the period aggregates in the same transaction. From here the entry is immutable.
+
+        Numbering is gapless rather than a database sequence: a sequence loses its number when a
+        transaction rolls back, and a gap in a numbered document series is exactly what a revenue
+        authority asks about.
+      responses:
+        '200': { $ref: '#/components/responses/JournalEntryResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Already posted, unbalanced, or the period is closed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/journal-entries/{entryId}/reverse:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/EntryId'
+    post:
+      tags: [Accounting]
+      operationId: reverseJournalEntry
+      summary: Undo a posted entry by writing its mirror image
+      description: |
+        The original stays in the ledger, marked reversed and pointed at its reversal. Both
+        entries remain and cancel — which is what an auditor expects to see: the mistake, and
+        the correction, each with its own date and its own author.
+
+        The reversal is dated `reversal_date`, defaulting to today, rather than the original's
+        date. Backdating a correction into a closed period is precisely what closing prevents.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 255 }
+                reversal_date: { type: string, format: date }
+      responses:
+        '201':
+          description: The reversing entry.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/JournalEntry' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The entry is a draft, or is already reversed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ── Accounting: the fiscal calendar ───────────────────────────────────────
+
+  /companies/{companyId}/fiscal-calendar:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Accounting]
+      operationId: listFiscalCalendar
+      summary: Fiscal years and their periods
+      responses:
+        '200':
+          description: Years, newest first, each with its periods in sequence.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/FiscalYear' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /companies/{companyId}/fiscal-calendar/years:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    post:
+      tags: [Accounting]
+      operationId: openFiscalYear
+      summary: Open the fiscal year containing a date
+      description: |
+        Generates the year and its periods from the company's fiscal calendar settings, so a
+        company whose year starts in April gets April-to-March rather than a calendar year.
+        Send the date the year should contain; the boundaries are derived.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contains]
+              properties:
+                contains: { type: string, format: date, example: '2026-07-15' }
+      responses:
+        '201':
+          description: Opened.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      label: { type: string }
+                      starts_on: { type: string, format: date }
+                      ends_on: { type: string, format: date }
+                      period_count: { type: integer }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: A year covering that date already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/fiscal-calendar/years/{yearId}/result:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/YearId'
+    get:
+      tags: [Accounting]
+      operationId: fiscalYearResult
+      summary: What the year-end close would transfer
+      description: |
+        Income, expenses and the resulting profit or loss, before closing. Offered separately so
+        the figure can be checked against the accounts before an irreversible step is taken.
+      responses:
+        '200':
+          description: The provisional result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      income: { $ref: '#/components/schemas/Amount' }
+                      expenses: { $ref: '#/components/schemas/Amount' }
+                      result: { $ref: '#/components/schemas/Amount' }
+                      is_profit: { type: boolean }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /companies/{companyId}/fiscal-calendar/years/{yearId}/close:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/YearId'
+    post:
+      tags: [Accounting]
+      operationId: closeFiscalYear
+      summary: Close the year and transfer the result to retained earnings
+      description: |
+        Posts the year-end closing entry, which zeroes every income and expense account into
+        retained earnings, then locks every period in the year. The closing entry is recorded on
+        the year as `closing_entry_id`; reversing it is the documented route to undoing a close.
+      responses:
+        '200':
+          description: Closed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FiscalYear' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Already closed, or a period in the year is still open.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/fiscal-calendar/periods/{periodId}/close:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/PeriodId'
+    post:
+      tags: [Accounting]
+      operationId: closeFiscalPeriod
+      summary: Stop postings into a period
+      responses:
+        '200':
+          description: Closed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FiscalPeriod' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Already closed, or the period holds a draft entry.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/fiscal-calendar/periods/{periodId}/reopen:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/PeriodId'
+    post:
+      tags: [Accounting]
+      operationId: reopenFiscalPeriod
+      summary: Reopen a closed period, on the record
+      description: |
+        A separate capability from closing, and the reason is required — reopening changes
+        figures that may already have been filed. The reason is stored on the period and the
+        database refuses a reopening without one.
+
+        A **locked** period cannot be reopened. Locking is what year-end close does, and undoing
+        that means reversing the closing entry rather than quietly reopening a period.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Reopened.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      label: { type: string }
+                      status: { type: string, enum: [open, closed, locked] }
+                      reopened_at: { type: string, format: date-time }
+                      reopen_reason: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: The period is locked, or was not closed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ── Accounting: reports ───────────────────────────────────────────────────
+
+  /companies/{companyId}/reports/trial-balance:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Accounting]
+      operationId: trialBalance
+      summary: Every account with movement, and whether the books tie
+      description: |
+        `meta.totals` and `meta.ties` are computed server-side and must be rendered as given. A
+        client that summed the column itself would produce a total that disagrees with the
+        ledger by a few cents, and the customer would have two numbers and no way to know which
+        to believe.
+
+        `meta.ties` being `false` means the ledger is broken, not that the report is wrong. It
+        should be surfaced loudly rather than rendered as an ordinary report.
+      parameters:
+        - $ref: '#/components/parameters/LedgerFrom'
+        - $ref: '#/components/parameters/LedgerTo'
+      responses:
+        '200':
+          description: The trial balance.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/TrialBalanceRow' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          from: { type: string, format: date }
+                          to: { type: string, format: date }
+                          currency: { type: string, example: LKR }
+                          ties:
+                            type: boolean
+                            description: Whether total debits equal total credits. False means the ledger needs investigating.
+                          totals:
+                            type: object
+                            properties:
+                              debit: { $ref: '#/components/schemas/Amount' }
+                              credit: { $ref: '#/components/schemas/Amount' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -1984,6 +2712,36 @@ components:
       required: true
       schema: { type: string, format: uuid }
 
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EntryId:
+      name: entryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    YearId:
+      name: yearId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PeriodId:
+      name: periodId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LedgerFrom:
+      name: from
+      in: query
+      description: Inclusive start. Omit both `from` and `to` to default to the company's current fiscal year.
+      schema: { type: string, format: date }
+    LedgerTo:
+      name: to
+      in: query
+      description: Inclusive end.
+      schema: { type: string, format: date }
   responses:
     ValidationFailed:
       description: One or more fields failed validation. `errors` maps field to messages.
@@ -2084,6 +2842,24 @@ components:
               data: { $ref: '#/components/schemas/Branch' }
               meta: { $ref: '#/components/schemas/Meta' }
 
+    AccountResponse:
+      description: An account.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/Account' }
+              meta: { $ref: '#/components/schemas/Meta' }
+    JournalEntryResponse:
+      description: A journal entry, with its lines.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/JournalEntry' }
+              meta: { $ref: '#/components/schemas/Meta' }
   schemas:
     Meta:
       type: object
@@ -2601,3 +3377,230 @@ components:
           minimum: 1
           maximum: 99
           description: Clamped to strictly below your own level, so this cannot be a route to escalation.
+
+    Amount:
+      type: string
+      pattern: '^-?\d{1,15}(\.\d{1,4})?$'
+      example: '1250000.0000'
+      description: |
+        A monetary amount as a **decimal string**, never a number. The ledger stores
+        `numeric(19,4)`; parsing that into an IEEE-754 double loses precision, and a ledger that
+        silently drops a hundredth of a rupee is worse than one that refuses the request. Format
+        it for display; do not add it up on the client.
+
+    Account:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        parent_id: { type: [string, 'null'], format: uuid }
+        code: { type: string, maxLength: 32, example: '1110' }
+        name: { type: string, example: Cash in Hand }
+        description: { type: [string, 'null'] }
+        type: { type: string, enum: [asset, liability, equity, income, expense] }
+        type_label: { type: string }
+        normal_balance:
+          type: string
+          enum: [debit, credit]
+          description: Derived from `type`, never set by the client. A client that reimplemented this mapping would be a second place for it to be wrong, and the symptom is a report with every sign inverted.
+        statement: { type: string, enum: [balance_sheet, income_statement] }
+        is_permanent:
+          type: boolean
+          description: Whether the balance carries across a year-end. False for income and expense accounts, which the closing entry zeroes.
+        is_postable:
+          type: boolean
+          description: False for headings. An entry may not name a heading, so a picker should offer only postable accounts.
+        is_system:
+          type: boolean
+          description: Created and required by the platform. Cannot be deleted or archived.
+        system_key: { type: [string, 'null'], example: retained_earnings }
+        is_active: { type: boolean }
+        archived_at: { type: [string, 'null'], format: date-time }
+        sort_order: { type: integer }
+        template_version:
+          type: [string, 'null']
+          description: Which version of the starter chart this account came from, or null if it was created by hand.
+        capabilities:
+          type: object
+          properties:
+            can_update: { type: boolean }
+            can_delete: { type: boolean }
+            accepts_postings:
+              type: boolean
+              description: Postable and active. What a client should gate an account picker on.
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/Account' }
+
+    AccountRequest:
+      type: object
+      properties:
+        code: { type: string, minLength: 1, maxLength: 32 }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: [string, 'null'], maxLength: 1000 }
+        type: { type: string, enum: [asset, liability, equity, income, expense] }
+        parent_id: { type: [string, 'null'], format: uuid }
+        is_postable: { type: boolean, default: true }
+        sort_order: { type: integer, minimum: 0, maximum: 999999 }
+      required: [code, name, type]
+      description: |
+        On `PUT` every field is optional and only what is sent changes. `normal_balance` and
+        `statement` are never accepted — they are derived from `type`.
+
+    JournalEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        journal_id: { type: string, format: uuid }
+        fiscal_period_id: { type: string, format: uuid }
+        number:
+          type: [string, 'null']
+          example: JV-2026-07-0001
+          description: Assigned at posting, gapless within its document type and period. Null while the entry is a draft.
+        document_type: { type: string, example: journal_voucher }
+        document_type_label: { type: string }
+        entry_date: { type: string, format: date }
+        description: { type: string }
+        reference: { type: [string, 'null'], maxLength: 120 }
+        status: { type: string, enum: [draft, posted, reversed] }
+        status_label: { type: string }
+        posted_at: { type: [string, 'null'], format: date-time }
+        posted_by_id: { type: [string, 'null'], format: uuid }
+        reverses_entry_id: { type: [string, 'null'], format: uuid }
+        reversed_by_entry_id: { type: [string, 'null'], format: uuid }
+        reversed_at: { type: [string, 'null'], format: date-time }
+        reversal_reason: { type: [string, 'null'] }
+        capabilities:
+          type: object
+          description: |
+            What this caller may do with this entry *right now* — authorisation **and** state. A
+            posted entry reports `can_post: false` even to a workspace owner, because posting it
+            again is not a thing that can succeed.
+          properties:
+            can_update: { type: boolean }
+            can_post: { type: boolean }
+            can_reverse: { type: boolean }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/JournalLine' }
+        period:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            label: { type: string }
+            status: { type: string, enum: [open, closed, locked] }
+
+    JournalLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        branch_id: { type: [string, 'null'], format: uuid }
+        line_number: { type: integer }
+        debit: { $ref: '#/components/schemas/Amount' }
+        credit: { $ref: '#/components/schemas/Amount' }
+        description: { type: [string, 'null'] }
+        account:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            name: { type: string }
+      description: |
+        Exactly one of `debit` and `credit` is non-zero — enforced by a database check, not by
+        convention. The multi-currency columns exist on the table but are not yet populated; they
+        arrive with the FX phase.
+
+    JournalEntryRequest:
+      type: object
+      required: [entry_date, description, lines]
+      properties:
+        entry_date: { type: string, format: date }
+        description: { type: string, minLength: 1, maxLength: 255 }
+        reference: { type: [string, 'null'], maxLength: 120 }
+        journal_id:
+          type: [string, 'null']
+          format: uuid
+          description: Defaults to the company's general journal.
+        post:
+          type: boolean
+          default: false
+          description: Post immediately. Requires `accounting.journals.post`; a caller who may only draft gets `403` and nothing is written.
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 500
+          description: At least two — a single line cannot balance against anything.
+          items:
+            type: object
+            required: [account_id]
+            properties:
+              account_id: { type: string, format: uuid }
+              branch_id: { type: [string, 'null'], format: uuid }
+              description: { type: [string, 'null'], maxLength: 255 }
+              debit: { $ref: '#/components/schemas/Amount' }
+              credit: { $ref: '#/components/schemas/Amount' }
+
+    FiscalYear:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string, example: FY2026 }
+        starts_on: { type: string, format: date }
+        ends_on: { type: string, format: date }
+        is_closed: { type: boolean }
+        closed_at: { type: [string, 'null'], format: date-time }
+        closing_entry_id:
+          type: [string, 'null']
+          format: uuid
+          description: The year-end entry. Reversing it is the documented route to undoing a close.
+        periods:
+          type: array
+          items: { $ref: '#/components/schemas/FiscalPeriod' }
+
+    FiscalPeriod:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fiscal_year_id: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1 }
+        label: { type: string, example: July 2026 }
+        starts_on: { type: string, format: date }
+        ends_on: { type: string, format: date }
+        status:
+          type: string
+          enum: [open, closed, locked]
+          description: |
+            `open` accepts postings. `closed` refuses them but can be reopened with a recorded
+            reason. `locked` is what year-end close leaves behind and cannot be reopened.
+        closed_at: { type: [string, 'null'], format: date-time }
+        reopened_at: { type: [string, 'null'], format: date-time }
+        reopen_reason: { type: [string, 'null'] }
+
+    TrialBalanceRow:
+      type: object
+      properties:
+        account_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [asset, liability, equity, income, expense] }
+        statement: { type: string, enum: [balance_sheet, income_statement] }
+        normal_balance: { type: string, enum: [debit, credit] }
+        debit: { $ref: '#/components/schemas/Amount' }
+        credit: { $ref: '#/components/schemas/Amount' }
+        balance:
+          $ref: '#/components/schemas/Amount'
+          description: Signed in the account's normal direction, so a debit account with a credit balance reports a negative.
+
+    AccountLedgerLine:
+      type: object
+      properties:
+        entry_id: { type: string, format: uuid }
+        number: { type: [string, 'null'] }
+        entry_date: { type: string, format: date }
+        description: { type: string }
+        status: { type: string, enum: [draft, posted, reversed] }
+        debit: { $ref: '#/components/schemas/Amount' }
+        credit: { $ref: '#/components/schemas/Amount' }
+        running_balance: { $ref: '#/components/schemas/Amount' }

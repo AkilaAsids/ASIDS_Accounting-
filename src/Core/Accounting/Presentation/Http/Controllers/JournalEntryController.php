@@ -17,6 +17,7 @@ use Asids\Core\Platform\Http\Responses\ApiResponse;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Journal entries.
@@ -89,6 +90,16 @@ final class JournalEntryController extends ApiController
      * intermediate draft, and making them issue two requests would leave a window where a half-made
      * entry is visible to everyone else. The `post` flag is checked against the policy, so a
      * bookkeeper sending it gets a 403 rather than a posted entry.
+     *
+     * One transaction covers both, and that is not incidental. Drafting commits an entry; posting can
+     * still refuse it — because it does not balance, because the period is closed, or because the
+     * caller may draft but not post. Left as two commits, every one of those refusals would leave the
+     * draft behind, so an accountant who mistypes an amount and is told the entry does not balance
+     * would find a half-made entry sitting in the books for each attempt. Rolling back is what makes
+     * "post" mean all of it or none of it.
+     *
+     * The authorisation check stays inside, after the draft exists, so the policy still sees a real
+     * entry and the response is still a 403 rather than a 422 — it just no longer leaves a row behind.
      */
     public function store(StoreJournalEntryRequest $request, Company $company): JsonResponse
     {
@@ -97,13 +108,17 @@ final class JournalEntryController extends ApiController
 
         $data = JournalEntryData::fromArray($request->validated(), $company->base_currency_code);
 
-        $entry = $this->journals->draft($company, $data, $this->currentUser()->getKey());
+        $entry = DB::transaction(function () use ($company, $data, $request): JournalEntry {
+            $entry = $this->journals->draft($company, $data, $this->currentUser()->getKey());
 
-        if ($request->boolean('post')) {
+            if (! $request->boolean('post')) {
+                return $entry;
+            }
+
             $this->authorize('post', $entry);
 
-            $entry = $this->posting->post($entry, $this->currentUser());
-        }
+            return $this->posting->post($entry, $this->currentUser());
+        });
 
         return ApiResponse::created(new JournalEntryResource($entry->load(['lines.account', 'fiscalPeriod'])));
     }

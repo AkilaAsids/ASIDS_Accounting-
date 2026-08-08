@@ -74,6 +74,29 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/users/UsersPage.vue'),
         meta: { permission: 'identity.users.view', title: 'Users' },
       },
+      /*
+       * Accounting. Each screen states the capability it needs, and the guard hides what a user
+       * cannot reach — presentation only, as everywhere else: the server authorises every request
+       * regardless of what the client chose to render.
+       */
+      {
+        path: 'accounting/accounts',
+        name: 'chart-of-accounts',
+        component: () => import('@/pages/accounting/ChartOfAccountsPage.vue'),
+        meta: { permission: 'accounting.accounts.view', title: 'Chart of accounts' },
+      },
+      {
+        path: 'accounting/journal-entries',
+        name: 'journal-entries',
+        component: () => import('@/pages/accounting/JournalEntriesPage.vue'),
+        meta: { permission: 'accounting.journals.view', title: 'Journal entries' },
+      },
+      {
+        path: 'accounting/trial-balance',
+        name: 'trial-balance',
+        component: () => import('@/pages/accounting/TrialBalancePage.vue'),
+        meta: { permission: 'accounting.reports.view', title: 'Trial balance' },
+      },
       {
         path: 'roles',
         name: 'roles',

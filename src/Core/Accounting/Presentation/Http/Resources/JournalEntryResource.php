@@ -43,10 +43,24 @@ final class JournalEntryResource extends JsonResource
             'reversed_at' => $this->reversed_at?->toIso8601String(),
             'reversal_reason' => $this->reversal_reason,
 
+            /*
+             * What this user can do with this entry *right now* — two questions, deliberately asked
+             * separately.
+             *
+             * The gate answers "may this person post entries in this company". The entry answers
+             * "is posting meaningful in this state". Both must hold, and the gate alone will not do
+             * it, because `Gate::before` grants a tenant owner every ability outright: the status
+             * guards inside `JournalEntryPolicy` are unreachable for an owner, so asking the gate on
+             * its own reports that an owner may post an entry that is already posted.
+             *
+             * The ledger is not at risk either way — the posting service refuses the transition and
+             * a database trigger refuses the write. This is about not offering a customer a button
+             * that can only produce an error.
+             */
             'capabilities' => [
-                'can_update' => $request->user()?->can('update', $this->resource) ?? false,
-                'can_post' => $request->user()?->can('post', $this->resource) ?? false,
-                'can_reverse' => $request->user()?->can('reverse', $this->resource) ?? false,
+                'can_update' => $this->isEditable() && ($request->user()?->can('update', $this->resource) ?? false),
+                'can_post' => $this->isEditable() && ($request->user()?->can('post', $this->resource) ?? false),
+                'can_reverse' => $this->isPosted() && ($request->user()?->can('reverse', $this->resource) ?? false),
             ],
 
             'lines' => JournalLineResource::collection($this->whenLoaded('lines')),

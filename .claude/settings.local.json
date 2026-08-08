@@ -8,7 +8,9 @@
       "Bash(docker compose *)",
       "Bash(git --version)",
       "Bash(psql --version)",
-      "Bash(ls /opt/homebrew/bin 2>/dev/null | head -30; echo \"--- usr local ---\"; ls /usr/local/bin 2>/dev/null | head -30; echo \"--- apps ---\"; ls /Applications 2>/dev/null | grep -iE \"docker|orbstack|xcode\" ; echo \"--- brew ---\"; which brew 2>&1; echo \"PATH=$PATH\")"
+      "Bash(ls /opt/homebrew/bin 2>/dev/null | head -30; echo \"--- usr local ---\"; ls /usr/local/bin 2>/dev/null | head -30; echo \"--- apps ---\"; ls /Applications 2>/dev/null | grep -iE \"docker|orbstack|xcode\" ; echo \"--- brew ---\"; which brew 2>&1; echo \"PATH=$PATH\")",
+      "Bash(php -d memory_limit=2G vendor/bin/pest --coverage --min=85)",
+      "Bash(php -d memory_limit=2G vendor/bin/pest)"
     ]
   }
 }

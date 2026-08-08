@@ -91,6 +91,19 @@ function balancedPayload(string $amount = '1000.00', bool $post = false): array
     ];
 }
 
+/**
+ * The same entry with the credit side short, for the paths that must refuse it.
+ *
+ * @return array<string, mixed>
+ */
+function unbalancedPayload(bool $post = false): array
+{
+    return [...balancedPayload(post: $post), 'lines' => [
+        ['account_id' => test()->cash->getKey(), 'debit' => '1000.00'],
+        ['account_id' => test()->sales->getKey(), 'credit' => '940.00'],
+    ]];
+}
+
 describe('the chart of accounts endpoint', function (): void {
     it('lists the chart', function (): void {
         $response = asAccounting($this->accountant, 'GET', companyUri('accounts'));
@@ -216,6 +229,53 @@ describe('the drafting and posting split', function (): void {
         // The client renders its buttons from this rather than guessing from the role name.
         expect($response->json('data.capabilities.can_update'))->toBeTrue()
             ->and($response->json('data.capabilities.can_post'))->toBeFalse();
+    });
+
+    it('leaves nothing behind when a post is refused for not balancing', function (): void {
+        $before = JournalEntry::query()->forCompany((string) $this->company->getKey())->count();
+
+        $response = asAccounting($this->accountant, 'POST', companyUri('journal-entries'), unbalancedPayload(post: true));
+
+        // Draft-then-post is one call, so it must be one transaction. Committed separately, an
+        // accountant who mistypes an amount is told the entry does not balance *and* silently gains a
+        // draft in the books for every attempt — the books collect the typos.
+        expect($response->getStatusCode())->toBe(422)
+            ->and(JournalEntry::query()->forCompany((string) $this->company->getKey())->count())->toBe($before);
+    });
+
+    it('leaves nothing behind when the caller may draft but not post', function (): void {
+        $before = JournalEntry::query()->forCompany((string) $this->company->getKey())->count();
+
+        $response = asAccounting($this->bookkeeper, 'POST', companyUri('journal-entries'), balancedPayload(post: true));
+
+        // The same rule for the authorisation refusal. A bookkeeper asking for something they may not
+        // have should get a 403 and no trace, not a 403 and a draft they never meant to leave.
+        expect($response->getStatusCode())->toBe(403)
+            ->and(JournalEntry::query()->forCompany((string) $this->company->getKey())->count())->toBe($before);
+    });
+
+    it('does not offer to post an entry that is already posted, even to the owner', function (): void {
+        $response = asAccounting($this->owner, 'POST', companyUri('journal-entries'), balancedPayload(post: true));
+
+        // A tenant owner is short-circuited through `Gate::before`, so the status guards inside
+        // `JournalEntryPolicy` never run for them. Without the entry's own state being consulted, the
+        // API reports that an owner may post — and update — an entry that is already in the ledger,
+        // and a client built from that offers buttons whose only outcome is a 422.
+        expect($response->json('data.status'))->toBe('posted')
+            ->and($response->json('data.capabilities.can_post'))->toBeFalse()
+            ->and($response->json('data.capabilities.can_update'))->toBeFalse()
+            ->and($response->json('data.capabilities.can_reverse'))->toBeTrue();
+    });
+
+    it('offers the owner both actions while the entry is still a draft', function (): void {
+        // The other side of the rule above: the state check must not swallow what an owner may
+        // genuinely do, or the buttons disappear from the one status that needs them.
+        $response = asAccounting($this->owner, 'POST', companyUri('journal-entries'), balancedPayload());
+
+        expect($response->json('data.status'))->toBe('draft')
+            ->and($response->json('data.capabilities.can_post'))->toBeTrue()
+            ->and($response->json('data.capabilities.can_update'))->toBeTrue()
+            ->and($response->json('data.capabilities.can_reverse'))->toBeFalse();
     });
 
     it('lets an accountant draft and post in one call', function (): void {
