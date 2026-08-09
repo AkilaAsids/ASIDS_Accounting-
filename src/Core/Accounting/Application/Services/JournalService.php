@@ -93,6 +93,11 @@ final readonly class JournalService
             $entry->reference = $data->reference;
             $entry->status = JournalEntryStatus::Draft;
             $entry->reverses_entry_id = $data->reversesEntryId;
+            // Written on the draft, never stamped afterwards: the immutability trigger refuses to let
+            // a posted entry's source change. A unique index over non-reversing entries means the
+            // insert itself is what refuses a document posting twice.
+            $entry->source_type = $data->source?->type;
+            $entry->source_id = $data->source?->id;
             $entry->created_by_id = $createdById;
             $entry->save();
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Accounting\Application\DTOs;
 
 use Asids\Core\Accounting\Domain\Enums\DocumentType;
+use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
 use Carbon\CarbonImmutable;
 
 /**
@@ -32,9 +33,26 @@ final readonly class JournalEntryData
          * what the entry *is*, not an annotation added later.
          */
         public ?string $reversesEntryId = null,
+        /**
+         * The document that caused this entry, when one did.
+         *
+         * On the draft for the same reason as `reversesEntryId`: the immutability trigger refuses to
+         * let a posted entry's source change, and rightly — an entry that could be reattributed to a
+         * different invoice after posting would undo the point of an append-only ledger. Null for
+         * entries made directly, which is every entry the interactive journal screen produces.
+         */
+        public ?SourceDocument $source = null,
     ) {}
 
     /**
+     * Built from a validated HTTP payload.
+     *
+     * Neither `reversesEntryId` nor `source` is read from the request, and that is deliberate. Both
+     * assert that an entry was caused by something else, and a client that could set them would be
+     * able to claim its hand-typed entry was produced by an invoice — occupying that invoice's slot
+     * in the uniqueness index and blocking the real posting. They are set by the services that
+     * genuinely know, and only there.
+     *
      * @param  array<string, mixed>  $attributes
      */
     public static function fromArray(array $attributes, string $currency): self

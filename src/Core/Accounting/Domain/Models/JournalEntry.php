@@ -7,6 +7,7 @@ namespace Asids\Core\Accounting\Domain\Models;
 use Asids\Core\Accounting\Domain\Enums\DocumentType;
 use Asids\Core\Accounting\Domain\Enums\JournalEntryStatus;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
+use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
 use Asids\Core\Audit\Domain\Concerns\Auditable;
 use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Organization\Domain\Models\Company;
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
  * A double-entry document.
@@ -34,6 +36,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $fiscal_period_id
  * @property string|null $number
  * @property DocumentType $document_type
+ * @property string|null $source_type
+ * @property string|null $source_id
  * @property CarbonImmutable $entry_date
  * @property string $description
  * @property string|null $reference
@@ -51,6 +55,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property-read Journal $journal
  * @property-read FiscalPeriod $fiscalPeriod
  * @property-read EloquentCollection<int, JournalLine> $lines
+ * @property-read Model|null $source
  */
 final class JournalEntry extends Model
 {
@@ -153,12 +158,61 @@ final class JournalEntry extends Model
     }
 
     /**
+     * The document that caused this entry, if one did.
+     *
+     * Null for entries made directly — journal vouchers, opening balances, the year-end close. The
+     * morph map is enforced platform-wide, so an unmapped alias throws here rather than returning
+     * null and letting a broken link read as "no source".
+     *
+     * @return MorphTo<Model, $this>
+     */
+    public function source(): MorphTo
+    {
+        return $this->morphTo('source');
+    }
+
+    /**
+     * The source as a value object, or null.
+     *
+     * Preferred over reading the two columns directly: it cannot represent a half-set pair, which is
+     * the shape the database CHECK also refuses.
+     */
+    public function sourceDocument(): ?SourceDocument
+    {
+        return SourceDocument::fromColumns($this->source_type, $this->source_id);
+    }
+
+    /**
      * @param  Builder<JournalEntry>  $query
      * @return Builder<JournalEntry>
      */
     public function scopeForCompany(Builder $query, string $companyId): Builder
     {
         return $query->where('company_id', $companyId);
+    }
+
+    /**
+     * Every entry a given document caused, its reversals included.
+     *
+     * Ordered oldest first, so the original posting precedes the reversal that undoes it — the order
+     * an auditor reads a document's history in.
+     *
+     * `id` breaks the tie, and it is not decoration. A document posted and reversed inside one
+     * transaction can carry the same `created_at` to the microsecond, and the two entries then come
+     * back in whatever order the planner chose — which showed up as a test that passed alone and
+     * failed in a full run. The keys are UUIDv7, so they are time-ordered: the tiebreak is
+     * chronological rather than merely stable.
+     *
+     * @param  Builder<JournalEntry>  $query
+     * @return Builder<JournalEntry>
+     */
+    public function scopeForSource(Builder $query, SourceDocument $source): Builder
+    {
+        return $query
+            ->where('source_type', $source->type)
+            ->where('source_id', $source->id)
+            ->orderBy('created_at')
+            ->orderBy('id');
     }
 
     /**

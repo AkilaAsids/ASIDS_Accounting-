@@ -155,6 +155,11 @@ final readonly class PostingService
                 journalId: $entry->journal_id,
                 documentType: $entry->document_type,
                 reversesEntryId: $entry->getKey(),
+                // The reversal cites the same document as the entry it undoes. Without this, a
+                // cancelled invoice's mirror would be the one ledger entry that could not be traced
+                // back to it. The uniqueness index deliberately ignores reversing entries, so
+                // carrying the source here does not collide with the original posting.
+                source: $entry->sourceDocument(),
             ), $actor);
 
             // The one update the immutability trigger permits on a posted entry.
