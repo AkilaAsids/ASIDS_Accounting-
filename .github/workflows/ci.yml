@@ -118,6 +118,10 @@ jobs:
             CREATE EXTENSION IF NOT EXISTS pg_trgm;
             CREATE EXTENSION IF NOT EXISTS unaccent;
             CREATE EXTENSION IF NOT EXISTS btree_gin;
+            -- btree_gist backs the exclusion constraints that stop fiscal years and periods
+            -- overlapping. Created here, as the superuser, so the migration that asks for it can
+            -- run as the unprivileged application role and find it already present.
+            CREATE EXTENSION IF NOT EXISTS btree_gist;
             DO $$ BEGIN
               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'asids_app') THEN
                 CREATE ROLE asids_app LOGIN PASSWORD 'secret';
@@ -129,11 +133,25 @@ jobs:
               GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO asids_app;
           SQL
 
+      # Migrations run as `asids_app`, so that role owns the tables it creates.
+      #
+      # That ownership is what `RefreshDatabase` needs: PostgreSQL lets only a table's owner drop
+      # it, and the suite drops and recreates the schema between tests. Run as `asids_owner`, the
+      # tables belonged to the superuser and every test died on `must be owner of table`.
+      #
+      # Ownership does not weaken the isolation this job exists to prove. The policies are declared
+      # `FORCE ROW LEVEL SECURITY`, which is precisely the clause that makes them apply to the
+      # table's owner as well, and `asids_app` remains NOSUPERUSER NOBYPASSRLS — so it cannot
+      # escape them by owning the table. A superuser could, which is why the previous arrangement
+      # silently disabled tenant isolation for the whole suite.
+      #
+      # This also matches how developers run the suite locally, where `asids_app` owns the schema
+      # and the RLS tests pass rather than skip.
       - name: Run migrations
         env:
           DB_HOST: 127.0.0.1
           DB_DATABASE: asids_erp_testing
-          DB_USERNAME: asids_owner
+          DB_USERNAME: asids_app
           DB_PASSWORD: secret
           DB_ADMIN_USERNAME: asids_owner
           DB_ADMIN_PASSWORD: secret
