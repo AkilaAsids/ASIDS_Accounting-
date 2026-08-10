@@ -92,6 +92,11 @@ final readonly class RoleTemplate
                     'accounting.periods.close',
                     'accounting.opening-balances.manage',
                     'accounting.reports.view',
+
+                    // Customers, including their credit terms. An accountant is who decides how much
+                    // a customer may owe.
+                    'sales.customers.view',
+                    'sales.customers.manage',
                 ],
             ),
 
@@ -116,6 +121,13 @@ final readonly class RoleTemplate
                     'accounting.journals.draft',
                     'accounting.periods.view',
                     'accounting.reports.view',
+
+                    // Maintains customers, because entering day-to-day sales means creating the
+                    // customer you are selling to. Managing them includes the credit limit, which is
+                    // the one part of this a business may want to withhold — a tenant that cares can
+                    // build a role granting only `view`, which is exactly why the two are separate.
+                    'sales.customers.view',
+                    'sales.customers.manage',
                 ],
             ),
 
@@ -136,6 +148,10 @@ final readonly class RoleTemplate
                     'accounting.journals.view',
                     'accounting.periods.view',
                     'accounting.reports.view',
+
+                    // Reads who the business sells to and on what terms, which an auditor reviewing
+                    // receivables needs, and changes none of it.
+                    'sales.customers.view',
                 ],
             ),
         ];

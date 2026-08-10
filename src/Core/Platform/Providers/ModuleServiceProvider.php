@@ -9,6 +9,7 @@ use Asids\Core\Audit\Providers\AuditServiceProvider;
 use Asids\Core\Authorization\Providers\AuthorizationServiceProvider;
 use Asids\Core\Identity\Providers\IdentityServiceProvider;
 use Asids\Core\Organization\Providers\OrganizationServiceProvider;
+use Asids\Core\Sales\Providers\SalesServiceProvider;
 use Asids\Core\Settings\Providers\SettingsServiceProvider;
 use Asids\Core\Tenancy\Providers\TenancyServiceProvider;
 use Illuminate\Support\ServiceProvider;
@@ -39,6 +40,9 @@ final class ModuleServiceProvider extends ServiceProvider
         // After Organization: a company must exist before it can keep books, and the fiscal
         // calendar is derived from the company's own configured year start.
         AccountingServiceProvider::class,
+        // After Accounting: a customer's receivable account is an Account, and the invoices this
+        // module posts go through Accounting's posting service. The dependency runs one way only.
+        SalesServiceProvider::class,
         SettingsServiceProvider::class,
         AuditServiceProvider::class,
     ];

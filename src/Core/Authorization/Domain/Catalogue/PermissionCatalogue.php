@@ -39,6 +39,7 @@ final class PermissionCatalogue
             ...self::settings(),
             ...self::audit(),
             ...self::accounting(),
+            ...self::sales(),
             ...self::platform(),
         ];
     }
@@ -215,6 +216,27 @@ final class PermissionCatalogue
             new PermissionDefinition('accounting', 'opening-balances', 'manage', 'Record opening balances', 'Enter the balances a business arrives with.', sensitive: true, sortOrder: 110),
 
             new PermissionDefinition('accounting', 'reports', 'view', 'View accounting reports', 'Read the trial balance and account ledgers.', sortOrder: 120),
+        ];
+    }
+
+    /**
+     * Selling: customers now, invoices as they arrive.
+     *
+     * A group of its own rather than more `accounting` capabilities, because the people differ. A sales
+     * administrator maintains customers and raises invoices without any business in the chart of
+     * accounts or the fiscal calendar, and a role template that had to grant ledger access to allow
+     * invoicing would hand out far more than it meant to.
+     *
+     * @return list<PermissionDefinition>
+     */
+    private static function sales(): array
+    {
+        return [
+            new PermissionDefinition('sales', 'customers', 'view', 'View customers', 'See the customers a company sells to and their terms.', sortOrder: 10),
+            // Sensitive because it includes the credit limit and the payment terms. Both decide how
+            // much a customer can owe before anyone is asked, which is why the audit trail records
+            // every change to them.
+            new PermissionDefinition('sales', 'customers', 'manage', 'Manage customers', 'Add, edit, archive and restore customers, including their credit terms.', sensitive: true, sortOrder: 20),
         ];
     }
 
