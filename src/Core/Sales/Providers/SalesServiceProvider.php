@@ -5,10 +5,16 @@ declare(strict_types=1);
 namespace Asids\Core\Sales\Providers;
 
 use Asids\Core\Sales\Application\Services\CustomerService;
+use Asids\Core\Sales\Application\Services\TaxCodeService;
+use Asids\Core\Sales\Application\Services\TaxRateResolver;
 use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
+use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
 use Asids\Core\Sales\Domain\Models\Customer;
+use Asids\Core\Sales\Domain\Models\TaxCode;
 use Asids\Core\Sales\Infrastructure\NoReceivables;
+use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
 use Asids\Core\Sales\Policies\CustomerPolicy;
+use Asids\Core\Sales\Policies\TaxCodePolicy;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -39,6 +45,19 @@ final class SalesServiceProvider extends ServiceProvider
          * postable table existed.
          */
         $this->app->bind(ReceivableBalanceProbe::class, NoReceivables::class);
+
+        $this->app->singleton(TaxCodeService::class);
+        $this->app->singleton(TaxRateResolver::class);
+
+        /*
+         * The rate-usage seam, same shape and same reasoning as the receivables probe above.
+         *
+         * `NoTaxRateUsage` states the truth for the current schema: tax codes exist, documents that could
+         * carry tax do not, so no rate has been applied to anything. Milestone 4 binds an implementation
+         * that queries the documents over this line, and the rate-immutability rules in `TaxCodeService`
+         * start biting without that service changing.
+         */
+        $this->app->bind(TaxRateUsageProbe::class, NoTaxRateUsage::class);
     }
 
     public function boot(): void
@@ -48,6 +67,7 @@ final class SalesServiceProvider extends ServiceProvider
         $this->registerMorphAliases();
 
         Gate::policy(Customer::class, CustomerPolicy::class);
+        Gate::policy(TaxCode::class, TaxCodePolicy::class);
     }
 
     /**
@@ -66,6 +86,7 @@ final class SalesServiceProvider extends ServiceProvider
     {
         Relation::morphMap([
             Customer::MORPH_ALIAS => Customer::class,
+            TaxCode::MORPH_ALIAS => TaxCode::class,
         ]);
     }
 }

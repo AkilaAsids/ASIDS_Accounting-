@@ -4,9 +4,11 @@ Enterprise multi-tenant Accounting & ERP platform for ASIDS Technologies Pvt Ltd
 
 Laravel 12 · PHP 8.4 · PostgreSQL 17 · Redis · Vue 3 + TypeScript · Meilisearch · Horizon
 
-> **Build state:** Phase 1 (Foundation & Identity Platform) is in progress.
-> See [docs/PHASE-1-STATUS.md](docs/PHASE-1-STATUS.md) for exactly what exists,
-> what remains, and how to bring the toolchain up. The application does not yet boot.
+> **Build state:** Phases 1 (platform foundation) and 2 (accounting core) are complete
+> and verified; Phase 3 (customers and sales invoicing) is in progress.
+> See [docs/ROADMAP.md](docs/ROADMAP.md) for what is done, what is firm and what is
+> only proposed, and the phase status documents for what each delivered:
+> [Phase 1](docs/PHASE-1-STATUS.md), [Phase 2](docs/PHASE-2-STATUS.md).
 
 ## Architecture at a glance
 
@@ -46,8 +48,10 @@ Tenant → Company → Branch have deliberately distinct meanings; see
 | --- | --- |
 | [0001](docs/adr/0001-tenancy-strategy.md) | Tenancy strategy: single database, row-scoped |
 | [0002](docs/adr/0002-tenant-company-branch-hierarchy.md) | Tenant / company / branch hierarchy |
+| [0003](docs/adr/0003-permissions-in-code-roles-in-data.md) | Permissions live in code, roles live in data |
 | [0004](docs/adr/0004-minimal-config-surface.md) | Commit only deviating config files |
 | [0005](docs/adr/0005-workspace-provisioning-ownership.md) | Where workspace provisioning lives |
+| [0006](docs/adr/0006-tax-code-modelling.md) | Tax codes: effective-dated rates behind a jurisdictional seam |
 
 ## Local development
 

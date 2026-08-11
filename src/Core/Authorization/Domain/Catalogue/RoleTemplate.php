@@ -97,6 +97,12 @@ final readonly class RoleTemplate
                     // a customer may owe.
                     'sales.customers.view',
                     'sales.customers.manage',
+
+                    // Tax codes and their rates. Deciding what a code charges is a professional
+                    // judgement with statutory consequences, which is why this is the only template
+                    // granted it.
+                    'sales.tax-codes.view',
+                    'sales.tax-codes.manage',
                 ],
             ),
 
@@ -128,6 +134,11 @@ final readonly class RoleTemplate
                     // build a role granting only `view`, which is exactly why the two are separate.
                     'sales.customers.view',
                     'sales.customers.manage',
+
+                    // Reads tax codes, never changes them. A bookkeeper raising an invoice has to know
+                    // which codes exist and what they charge; deciding what they *should* charge is the
+                    // accountant's call, and the same drafting/posting split reasoning applies.
+                    'sales.tax-codes.view',
                 ],
             ),
 
@@ -152,6 +163,10 @@ final readonly class RoleTemplate
                     // Reads who the business sells to and on what terms, which an auditor reviewing
                     // receivables needs, and changes none of it.
                     'sales.customers.view',
+
+                    // Tax codes read-only. An auditor checking a VAT return needs to see which rate
+                    // applied over which dates — that history is most of what they came for.
+                    'sales.tax-codes.view',
                 ],
             ),
         ];

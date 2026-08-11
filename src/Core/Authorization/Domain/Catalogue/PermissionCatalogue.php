@@ -237,6 +237,13 @@ final class PermissionCatalogue
             // much a customer can owe before anyone is asked, which is why the audit trail records
             // every change to them.
             new PermissionDefinition('sales', 'customers', 'manage', 'Manage customers', 'Add, edit, archive and restore customers, including their credit terms.', sensitive: true, sortOrder: 20),
+
+            new PermissionDefinition('sales', 'tax-codes', 'view', 'View tax codes', 'See the tax codes a company charges and the rates behind them.', sortOrder: 30),
+            // Sensitive, and of everything in this group this is the one that most deserves the marker. A
+            // wrong rate is not a wrong screen: it changes what every invoice under that code charges, what
+            // the ledger posts to the tax liability, and what the return reports — and it does all three
+            // while the books still balance, so nothing downstream detects it.
+            new PermissionDefinition('sales', 'tax-codes', 'manage', 'Manage tax codes', 'Add, edit, deactivate and delete tax codes and their effective-dated rates.', sensitive: true, sortOrder: 40),
         ];
     }
 
