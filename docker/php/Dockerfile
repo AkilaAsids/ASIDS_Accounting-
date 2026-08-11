@@ -69,8 +69,12 @@ CMD ["php-fpm", "--nodaemonize"]
 # ─────────────────────────────────────────────────────────────────────────────
 FROM base AS development
 
+# PHP_INI_SCAN_DIR is emptied for this one command so PEAR's OS_Guess can call
+# popen() during dependency resolution — the hardened php.ini (zz-asids.ini)
+# disables popen, which otherwise makes `pecl install` fatal. Runtime hardening
+# is unaffected; the restriction still applies once the container boots.
 RUN apk add --no-cache --virtual .xdebug-deps $PHPIZE_DEPS linux-headers \
-    && pecl install xdebug \
+    && PHP_INI_SCAN_DIR="" pecl install xdebug \
     && docker-php-ext-enable xdebug \
     && apk del .xdebug-deps \
     && rm -rf /tmp/pear
