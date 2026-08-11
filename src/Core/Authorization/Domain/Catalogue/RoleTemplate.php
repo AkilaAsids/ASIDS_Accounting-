@@ -103,6 +103,11 @@ final readonly class RoleTemplate
                     // granted it.
                     'sales.tax-codes.view',
                     'sales.tax-codes.manage',
+
+                    // Drafts invoices as well. Issuing is a separate capability arriving with Milestone 5;
+                    // preparing the document is ordinary work an accountant does daily.
+                    'sales.invoices.view',
+                    'sales.invoices.draft',
                 ],
             ),
 
@@ -139,6 +144,11 @@ final readonly class RoleTemplate
                     // which codes exist and what they charge; deciding what they *should* charge is the
                     // accountant's call, and the same drafting/posting split reasoning applies.
                     'sales.tax-codes.view',
+
+                    // Drafts invoices. This is the role the drafting/issuing split exists for: a bookkeeper
+                    // records what was sold, and someone else commits it to the ledger and the customer.
+                    'sales.invoices.view',
+                    'sales.invoices.draft',
                 ],
             ),
 
@@ -167,6 +177,10 @@ final readonly class RoleTemplate
                     // Tax codes read-only. An auditor checking a VAT return needs to see which rate
                     // applied over which dates — that history is most of what they came for.
                     'sales.tax-codes.view',
+
+                    // Reads invoices and changes none of them, which is the whole of what an auditor
+                    // reviewing revenue needs.
+                    'sales.invoices.view',
                 ],
             ),
         ];

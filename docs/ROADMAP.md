@@ -44,31 +44,37 @@ template, immutable double-entry journals enforced by database triggers, gapless
 per-period balance aggregates, opening balances, period and year close, trial balance and account
 ledger. Tagged `phase-2`. See [PHASE-2-STATUS.md](PHASE-2-STATUS.md).
 
-### Phase 3 — Milestones 1 and 2
+### Phase 3 — Milestones 1 to 3
 
 - **Milestone 1** — the source-document link on `journal_entries`, giving a ledger entry a traceable
   cause and the database-level guard against a document posting twice.
 - **Milestone 2** — the customer domain: model, migration, FORCED RLS, service, policy, permissions and
   factory, with the archive-with-balance rule live behind a probe seam.
+- **Milestone 3** — tax codes: effective-dated rates behind a GiST exclusion constraint, deterministic
+  resolution by company and date that refuses rather than guessing, percentage-to-factor conversion through
+  the existing `Money`, and the jurisdictional seam. Decisions recorded in
+  [ADR 0006](adr/0006-tax-code-modelling.md).
 
 ---
 
 ## 🔵 Current
 
-### Phase 3 — Milestone 3, tax codes
+### Phase 3 — Milestone 4, draft invoices
 
 ```
-Stage 1 complete    — migration, TaxType enum, constraints, indexes, RLS
-Stage 2 complete    — model, DTO, service, lifecycle, validation, audit, rate-usage seam
-Stage 3 complete    — TaxRateResolver and Money integration
-Stage 4 complete    — policy, permissions, role grants, provider registration, ADR 0006
-Stage 5 in progress — hardening review and final verification
+Stage 1 complete — schema, SalesInvoiceStatus enum, constraints, indexes, RLS
+Stage 2 complete — models, DTOs, service, totals, discounts, tax integration, audit
+Stage 3 complete — policy, permissions, role grants, provider registration, factories
 ```
 
-The architectural decisions governing this milestone (A1–A5) are recorded separately: the product
-catalogue is out of scope, `CompliancePackContract` is the jurisdictional seam, SVAT is a recognised
-type without its suspended-payment mechanics, rates are stored as percentages, and a rate change is a
-new effective-dated row rather than an edit.
+Draft invoices only. Issuing, ledger posting, cancellation, numbering and payments are Milestone 5, and the
+structural boundary between them is already in the database — a draft cannot carry a number, an issued
+timestamp or a ledger link, and those CHECKs refuse every partial version of the transition.
+
+The decisions governing this milestone are recorded in
+[ADR 0007](adr/0007-draft-invoice-modelling.md): the product catalogue stays out, a never-issued draft is
+hard-deleted, the issued boundary is prepared structurally but enforced by Milestone 5's trigger, a draft may
+total zero, and decision B1 was withdrawn after its premise proved false.
 
 ### Phase 3 — remaining milestones 🟢
 
@@ -76,8 +82,7 @@ Scope firm; these follow from the approved Phase 3 design.
 
 | Milestone | Scope |
 | --- | --- |
-| 4 | Invoice domain, draft only — header, lines, totals, discounts, no posting |
-| 5 | Issuing — `DocumentType::SalesInvoice`, the posting map, duplicate guards, cancellation |
+| 5 | Issuing — `DocumentType::SalesInvoice`, the posting map, duplicate guards, cancellation, the invoice immutability trigger, and the positive-total rule |
 | 6 | HTTP surface — endpoints, requests, resources, policies, OpenAPI |
 | 7 | Reports — outstanding balance, aged receivables, AR control reconciliation |
 | 8 | Front end — customer and invoice screens, routing, Vitest |

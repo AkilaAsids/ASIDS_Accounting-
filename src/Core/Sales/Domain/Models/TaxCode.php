@@ -8,6 +8,7 @@ use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Audit\Domain\Concerns\Auditable;
 use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Organization\Domain\Models\Company;
+use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
 use Asids\Core\Sales\Domain\Enums\TaxType;
 use Asids\Core\Tenancy\Domain\Concerns\BelongsToTenant;
 use Carbon\CarbonImmutable;
@@ -144,7 +145,7 @@ final class TaxCode extends Model
 
     public function chargesTax(): bool
     {
-        return bccomp($this->rate, '0', 4) > 0;
+        return bccomp($this->assertRateLoaded(), '0', 4) > 0;
     }
 
     /**
@@ -163,7 +164,7 @@ final class TaxCode extends Model
     public function rateFactor(): string
     {
         /** @var numeric-string $factor */
-        $factor = bcdiv($this->rate, '100', 10);
+        $factor = bcdiv($this->assertRateLoaded(), '100', 10);
 
         return $factor;
     }
@@ -249,5 +250,39 @@ final class TaxCode extends Model
             'effective_from' => 'immutable_date',
             'effective_to' => 'immutable_date',
         ];
+    }
+
+    /**
+     * The rate, having checked it is actually there.
+     *
+     * Without this both callers below handed `null` to `bccomp`/`bcdiv` and raised
+     * `TypeError: bcdiv(): Argument #1 must be of type string, null given` — a crash naming a C function
+     * rather than the problem. Reachable two ways: an unsaved instance, and a partial `select()` that omits
+     * the column, which is plausible the moment invoice code fetches codes in bulk.
+     *
+     * Milestone 4 is the first production consumer of `rateFactor()`, which is why the guard lands here
+     * rather than being written earlier against a hypothetical call site.
+     *
+     * @return numeric-string
+     */
+    private function assertRateLoaded(): string
+    {
+        $rate = $this->attributes['rate'] ?? null;
+
+        if ($rate === null) {
+            throw BusinessRuleViolation::make(
+                'tax-rate-not-loaded',
+                sprintf(
+                    'Tax code %s has no rate loaded, so no tax can be computed from it. It was either never '
+                    .'saved or fetched without its rate column.',
+                    $this->attributes['code'] ?? $this->getKey() ?? 'unknown',
+                ),
+            );
+        }
+
+        /** @var numeric-string $cast */
+        $cast = $this->rate;
+
+        return $cast;
     }
 }

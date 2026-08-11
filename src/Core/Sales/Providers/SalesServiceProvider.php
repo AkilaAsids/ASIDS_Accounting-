@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace Asids\Core\Sales\Providers;
 
 use Asids\Core\Sales\Application\Services\CustomerService;
+use Asids\Core\Sales\Application\Services\InvoiceTotalsCalculator;
+use Asids\Core\Sales\Application\Services\SalesInvoiceService;
 use Asids\Core\Sales\Application\Services\TaxCodeService;
 use Asids\Core\Sales\Application\Services\TaxRateResolver;
 use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
 use Asids\Core\Sales\Domain\Models\Customer;
+use Asids\Core\Sales\Domain\Models\SalesInvoice;
+use Asids\Core\Sales\Domain\Models\SalesInvoiceLine;
 use Asids\Core\Sales\Domain\Models\TaxCode;
 use Asids\Core\Sales\Infrastructure\NoReceivables;
 use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
 use Asids\Core\Sales\Policies\CustomerPolicy;
+use Asids\Core\Sales\Policies\SalesInvoicePolicy;
 use Asids\Core\Sales\Policies\TaxCodePolicy;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
@@ -48,6 +53,8 @@ final class SalesServiceProvider extends ServiceProvider
 
         $this->app->singleton(TaxCodeService::class);
         $this->app->singleton(TaxRateResolver::class);
+        $this->app->singleton(InvoiceTotalsCalculator::class);
+        $this->app->singleton(SalesInvoiceService::class);
 
         /*
          * The rate-usage seam, same shape and same reasoning as the receivables probe above.
@@ -68,6 +75,7 @@ final class SalesServiceProvider extends ServiceProvider
 
         Gate::policy(Customer::class, CustomerPolicy::class);
         Gate::policy(TaxCode::class, TaxCodePolicy::class);
+        Gate::policy(SalesInvoice::class, SalesInvoicePolicy::class);
     }
 
     /**
@@ -87,6 +95,8 @@ final class SalesServiceProvider extends ServiceProvider
         Relation::morphMap([
             Customer::MORPH_ALIAS => Customer::class,
             TaxCode::MORPH_ALIAS => TaxCode::class,
+            SalesInvoice::MORPH_ALIAS => SalesInvoice::class,
+            SalesInvoiceLine::MORPH_ALIAS => SalesInvoiceLine::class,
         ]);
     }
 }

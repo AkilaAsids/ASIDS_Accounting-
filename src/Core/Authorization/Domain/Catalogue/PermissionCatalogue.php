@@ -244,6 +244,14 @@ final class PermissionCatalogue
             // the ledger posts to the tax liability, and what the return reports — and it does all three
             // while the books still balance, so nothing downstream detects it.
             new PermissionDefinition('sales', 'tax-codes', 'manage', 'Manage tax codes', 'Add, edit, deactivate and delete tax codes and their effective-dated rates.', sensitive: true, sortOrder: 40),
+
+            new PermissionDefinition('sales', 'invoices', 'view', 'View sales invoices', 'Read invoices and their lines.', sortOrder: 50),
+            // Not sensitive, and the contrast with tax codes is the point. A draft has no number, is not in the
+            // ledger, and the customer has never seen it — it can be corrected or deleted with no trace and no
+            // consequence. What deserves the marker is *issuing*, which commits the document to the ledger and
+            // to the customer, and that capability arrives with Milestone 5 rather than being declared unused
+            // here.
+            new PermissionDefinition('sales', 'invoices', 'draft', 'Draft sales invoices', 'Prepare, change and delete draft invoices before they are issued.', sortOrder: 60),
         ];
     }
 

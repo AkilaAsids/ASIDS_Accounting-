@@ -52,6 +52,7 @@ Tenant → Company → Branch have deliberately distinct meanings; see
 | [0004](docs/adr/0004-minimal-config-surface.md) | Commit only deviating config files |
 | [0005](docs/adr/0005-workspace-provisioning-ownership.md) | Where workspace provisioning lives |
 | [0006](docs/adr/0006-tax-code-modelling.md) | Tax codes: effective-dated rates behind a jurisdictional seam |
+| [0007](docs/adr/0007-draft-invoice-modelling.md) | Draft invoices: hard-deletable, issued boundary prepared |
 
 ## Local development
 
