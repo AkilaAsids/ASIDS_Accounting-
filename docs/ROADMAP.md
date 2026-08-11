@@ -5,6 +5,10 @@
 This exists because the plan previously lived only in commit messages and conversation, so "what is
 left?" had no answer anyone could look up.
 
+Its own accuracy is the first thing to check when a stage or milestone lands — the initial version of this
+file shipped saying "Stage 3 in progress" a stage after that stopped being true, which is exactly the
+failure it was written to prevent.
+
 ## How to read the markers
 
 The distinction matters more than the list. Roughly a third of what follows is decided; the rest is a
@@ -54,11 +58,11 @@ ledger. Tagged `phase-2`. See [PHASE-2-STATUS.md](PHASE-2-STATUS.md).
 ### Phase 3 — Milestone 3, tax codes
 
 ```
-Stage 1 complete   — migration, TaxType enum, constraints, indexes, RLS
-Stage 2 complete   — model, DTO, service, lifecycle, validation, audit, rate-usage seam
-Stage 3 in progress — TaxRateResolver and Money integration
-Stage 4 pending    — policy, permissions, role grants, provider registration
-Stage 5 pending    — full verification
+Stage 1 complete    — migration, TaxType enum, constraints, indexes, RLS
+Stage 2 complete    — model, DTO, service, lifecycle, validation, audit, rate-usage seam
+Stage 3 complete    — TaxRateResolver and Money integration
+Stage 4 complete    — policy, permissions, role grants, provider registration, ADR 0006
+Stage 5 in progress — hardening review and final verification
 ```
 
 The architectural decisions governing this milestone (A1–A5) are recorded separately: the product
