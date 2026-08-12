@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Asids\Core\Sales\Providers;
 
 use Asids\Core\Sales\Application\Services\CustomerService;
+use Asids\Core\Sales\Application\Services\InvoicePostingMap;
 use Asids\Core\Sales\Application\Services\InvoiceTotalsCalculator;
 use Asids\Core\Sales\Application\Services\SalesInvoiceService;
 use Asids\Core\Sales\Application\Services\TaxCodeService;
@@ -53,6 +54,7 @@ final class SalesServiceProvider extends ServiceProvider
 
         $this->app->singleton(TaxCodeService::class);
         $this->app->singleton(TaxRateResolver::class);
+        $this->app->singleton(InvoicePostingMap::class);
         $this->app->singleton(InvoiceTotalsCalculator::class);
         $this->app->singleton(SalesInvoiceService::class);
 

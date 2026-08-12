@@ -61,6 +61,15 @@ final class Account extends Model
 
     public const string OPENING_BALANCE_EQUITY = 'opening_balance_equity';
 
+    /**
+     * Where a customer invoice's debit lands when the customer names no account of its own.
+     *
+     * The great majority name none — segmenting receivables per customer is unusual — so this is the
+     * account almost every sales posting debits. It exists as a key rather than as a code for the reason
+     * above: a company that renumbers its chart must still be invoiceable afterwards.
+     */
+    public const string TRADE_RECEIVABLES = 'trade_receivables';
+
     protected $table = 'accounts';
 
     /** @var list<string> */
