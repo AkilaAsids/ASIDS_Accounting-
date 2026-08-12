@@ -96,8 +96,6 @@ final class Customer extends Model
         'district',
         'postal_code',
         'country_code',
-        'payment_terms_days',
-        'credit_limit',
         'notes',
     ];
 

@@ -21,6 +21,8 @@ use Asids\Core\Identity\Presentation\Http\Controllers\UserController;
 use Asids\Core\Organization\Presentation\Http\Controllers\BranchController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyMembershipController;
+use Asids\Core\Sales\Presentation\Http\Controllers\CustomerController;
+use Asids\Core\Sales\Presentation\Http\Controllers\TaxCodeController;
 use Asids\Core\Settings\Presentation\Http\Controllers\SettingsController;
 use Asids\Core\Tenancy\Presentation\Http\Controllers\TenantRegistrationController;
 use Illuminate\Support\Facades\Route;
@@ -360,6 +362,56 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
                 Route::prefix('{company}/reports')->name('reports.')->middleware('company')->group(function (): void {
                     Route::get('trial-balance', [LedgerReportController::class, 'trialBalance'])->name('trial-balance');
+                });
+
+                /*
+                 * ── Sales: customers ────────────────────────────────────────
+                 *
+                 * A customer is company-owned for the same reason the chart of accounts is: the
+                 * receivable a customer's invoices post to belongs to one set of books, and a flat
+                 * route would invite a query that forgets to scope by company.
+                 */
+                Route::prefix('{company}/customers')->name('customers.')->middleware('company')->group(function (): void {
+                    Route::get('/', [CustomerController::class, 'index'])->name('index');
+                    Route::post('/', [CustomerController::class, 'store'])->name('store');
+                    Route::get('{customer}', [CustomerController::class, 'show'])->name('show');
+                    Route::put('{customer}', [CustomerController::class, 'update'])->name('update');
+                    Route::delete('{customer}', [CustomerController::class, 'destroy'])->name('destroy');
+                    Route::post('{customer}/archive', [CustomerController::class, 'archive'])->name('archive');
+                    // `withTrashed()` is route-wide, so it also lifts the soft-delete scope for the
+                    // bound `{company}` (which uses SoftDeletes) — intended only for the `{customer}`
+                    // binding, so a soft-deleted customer can still be restored. Not exploitable: the
+                    // `company` middleware's `ResolveActiveCompany` independently re-resolves the url
+                    // company with its default scopes plus `active()` and membership, so a trashed
+                    // company still fails closed with a 404 regardless of this route's binding.
+                    Route::post('{customer}/restore', [CustomerController::class, 'restore'])->name('restore')->withTrashed();
+                    Route::post('{customer}/deactivate', [CustomerController::class, 'deactivate'])->name('deactivate');
+                    Route::post('{customer}/reactivate', [CustomerController::class, 'reactivate'])->name('reactivate');
+                });
+
+                /*
+                 * ── Sales: tax codes ────────────────────────────────────────
+                 *
+                 * A company's tax configuration is company-owned for the same reason the chart of
+                 * accounts is: the rate an invoice charges belongs to one set of books, and a flat
+                 * route would invite a query that forgets to scope by company.
+                 */
+                Route::prefix('{company}/tax-codes')->name('tax-codes.')->middleware('company')->group(function (): void {
+                    Route::get('/', [TaxCodeController::class, 'index'])->name('index');
+                    Route::post('/', [TaxCodeController::class, 'store'])->name('store');
+                    Route::get('{taxCode}', [TaxCodeController::class, 'show'])->name('show');
+                    Route::put('{taxCode}', [TaxCodeController::class, 'update'])->name('update');
+                    Route::delete('{taxCode}', [TaxCodeController::class, 'destroy'])->name('destroy');
+                    Route::post('{taxCode}/end-range', [TaxCodeController::class, 'endRange'])->name('end-range');
+                    Route::post('{taxCode}/deactivate', [TaxCodeController::class, 'deactivate'])->name('deactivate');
+                    Route::post('{taxCode}/reactivate', [TaxCodeController::class, 'reactivate'])->name('reactivate');
+                    // `withTrashed()` is route-wide, so it also lifts the soft-delete scope for the
+                    // bound `{company}` (which uses SoftDeletes) — intended only for the `{taxCode}`
+                    // binding, so a soft-deleted tax code can still be restored. Not exploitable: the
+                    // `company` middleware's `ResolveActiveCompany` independently re-resolves the url
+                    // company with its default scopes plus `active()` and membership, so a trashed
+                    // company still fails closed with a 404 regardless of this route's binding.
+                    Route::post('{taxCode}/restore', [TaxCodeController::class, 'restore'])->name('restore')->withTrashed();
                 });
 
                 Route::prefix('{company}/members')->name('members.')->middleware('company')->group(function (): void {

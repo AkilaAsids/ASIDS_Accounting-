@@ -41,3 +41,6 @@ yarn-error.log
 *.p12
 *.pfx
 !/storage/oauth-*.key.example
+
+# Minions autonomous-run runtime (machine-local; keeps a colleague PR clean)
+.minions/

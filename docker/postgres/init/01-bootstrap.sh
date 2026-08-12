@@ -67,6 +67,11 @@ for db in "${MAIN_DB}" "${TEST_DB}"; do
         CREATE EXTENSION IF NOT EXISTS pg_trgm;
         CREATE EXTENSION IF NOT EXISTS unaccent;
         CREATE EXTENSION IF NOT EXISTS btree_gin;
+        -- btree_gist backs the fiscal_years no-overlap EXCLUDE constraint. It
+        -- must be provisioned here by the superuser: in local development the
+        -- migrations run as the NOBYPASSRLS application role, which has no
+        -- privilege to CREATE EXTENSION itself.
+        CREATE EXTENSION IF NOT EXISTS btree_gist;
         CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
         GRANT CONNECT ON DATABASE ${db} TO ${APP_USER};

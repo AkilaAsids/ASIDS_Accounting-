@@ -87,4 +87,17 @@ enum TaxType: string
     {
         return array_map(static fn (self $type): string => $type->regime(), self::cases());
     }
+
+    /**
+     * The machine names, for a `Rule::in()` on the HTTP boundary.
+     *
+     * Mirrors `AccountType::values()` (`AccountType.php:103-106`): the enum stays the source of
+     * truth, and a request rule never hand-lists the cases somewhere they can drift from it.
+     *
+     * @return list<string>
+     */
+    public static function values(): array
+    {
+        return array_map(static fn (self $type): string => $type->value, self::cases());
+    }
 }

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable;
@@ -95,6 +96,22 @@ final class ApiExceptionRenderer
                 'Permission denied.',
                 // Deliberately not echoing which permission was missing: that
                 // enumerates the permission catalogue to an attacker.
+                'Your account does not have permission to perform this action.',
+                [],
+            ],
+
+            // `$this->authorize()` throws AuthorizationException, but it never reaches here as one:
+            // Laravel's `Handler::prepareException()` converts every status-less AuthorizationException
+            // into a Symfony AccessDeniedHttpException (keeping the original as `getPrevious()`) before
+            // the renderer runs. Left unmatched, this fell through to the generic HttpExceptionInterface
+            // arm below and every framework/policy-thrown 403 rendered as `http-403` instead of
+            // `forbidden` — this arm must stay ahead of that one. Same shape as the explicit
+            // AuthorizationException arm above, and for the same reason: the missing permission is
+            // never echoed.
+            $e instanceof AccessDeniedHttpException => [
+                Response::HTTP_FORBIDDEN,
+                'forbidden',
+                'Permission denied.',
                 'Your account does not have permission to perform this action.',
                 [],
             ],
