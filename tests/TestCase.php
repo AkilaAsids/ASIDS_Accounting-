@@ -35,6 +35,15 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
+        // Force the in-memory cache store for every test. RefreshDatabase rolls the
+        // database back between tests but never the cache, so with a persistent store
+        // (Redis, shared with the dev container here) a tenant slug cached by one test
+        // resolves later tests to a rolled-back tenant id and every RLS-scoped lookup
+        // 404s. The `array` store is per-process and cannot leak across the rollback.
+        // Set here rather than in phpunit.xml because the container's real CACHE_STORE
+        // env var wins over PHPUnit's <env>, even with force="true".
+        config(['cache.default' => 'array']);
+
         RowLevelSecurity::bypass(function (): void {
             app(PermissionSynchroniser::class)->sync();
         });
