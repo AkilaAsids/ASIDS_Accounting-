@@ -8,6 +8,7 @@ use Asids\Core\Audit\Domain\Models\AuditLog;
 use Asids\Core\Organization\Application\DTOs\CreateCompanyData;
 use Asids\Core\Organization\Application\Services\CompanyService;
 use Asids\Core\Organization\Application\Services\MembershipService;
+use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
 use Asids\Core\Platform\Exceptions\ResourceConflict;
 use Asids\Core\Sales\Application\DTOs\CustomerData;
@@ -472,11 +473,11 @@ describe('updating', function (): void {
     it('changes details', function (): void {
         $customer = $this->service->create($this->company, new CustomerData(name: 'Silva'));
 
-        $this->service->update($customer, new CustomerData(
-            name: 'Silva Traders (Pvt) Ltd',
-            paymentTermsDays: 60,
-            creditLimit: '500000.0000',
-        ));
+        $this->service->update($customer, [
+            'name' => 'Silva Traders (Pvt) Ltd',
+            'payment_terms_days' => 60,
+            'credit_limit' => '500000.0000',
+        ]);
 
         expect($customer->name)->toBe('Silva Traders (Pvt) Ltd')
             ->and($customer->payment_terms_days)->toBe(60);
@@ -485,7 +486,7 @@ describe('updating', function (): void {
     it('changes the code while nothing has been invoiced', function (): void {
         $customer = $this->service->create($this->company, new CustomerData(name: 'Silva', code: 'OLD'));
 
-        $this->service->update($customer, new CustomerData(name: 'Silva', code: 'NEW'));
+        $this->service->update($customer, ['code' => 'NEW']);
 
         expect($customer->code)->toBe('NEW');
     });
@@ -497,7 +498,7 @@ describe('updating', function (): void {
 
         // The code appears on documents the customer already holds. Changing it would leave two
         // identifiers for one account.
-        expect(fn () => $this->service->update($customer->fresh(), new CustomerData(name: 'Silva', code: 'NEW')))
+        expect(fn () => $this->service->update($customer->fresh(), ['code' => 'NEW']))
             ->toThrow(BusinessRuleViolation::class);
     });
 
@@ -505,16 +506,187 @@ describe('updating', function (): void {
         $this->service->create($this->company, new CustomerData(name: 'A', code: 'TAKEN'));
         $second = $this->service->create($this->company, new CustomerData(name: 'B', code: 'FREE'));
 
-        expect(fn () => $this->service->update($second, new CustomerData(name: 'B', code: 'taken')))
+        expect(fn () => $this->service->update($second, ['code' => 'taken']))
             ->toThrow(ResourceConflict::class);
     });
 
     it('permits keeping its own code', function (): void {
         $customer = $this->service->create($this->company, new CustomerData(name: 'Silva', code: 'SILVA'));
 
-        $this->service->update($customer, new CustomerData(name: 'Renamed', code: 'SILVA'));
+        $this->service->update($customer, ['name' => 'Renamed', 'code' => 'SILVA']);
 
         expect($customer->name)->toBe('Renamed');
+    });
+});
+
+describe('updating — attribute-array clear-vs-omit semantics (I3)', function (): void {
+    it('clears branch_id when the key is present with null', function (): void {
+        $branch = Branch::factory()->for($this->company)->create();
+        $customer = $this->service->create($this->company, new CustomerData(name: 'Silva', branchId: $branch->getKey()));
+
+        $this->service->update($customer, ['branch_id' => null]);
+
+        expect($customer->branch_id)->toBeNull();
+    });
+
+    it('leaves branch_id untouched when the key is omitted', function (): void {
+        $branch = Branch::factory()->for($this->company)->create();
+        $customer = $this->service->create($this->company, new CustomerData(name: 'Silva', branchId: $branch->getKey()));
+
+        $this->service->update($customer, ['name' => 'Silva Renamed']);
+
+        expect($customer->branch_id)->toBe($branch->getKey());
+    });
+
+    it('clears receivable_account_id when the key is present with null', function (): void {
+        $receivables = Account::query()->forCompany($this->company->getKey())->where('code', '1130')->firstOrFail();
+        $customer = $this->service->create($this->company, new CustomerData(
+            name: 'Silva',
+            receivableAccountId: $receivables->getKey(),
+        ));
+
+        $this->service->update($customer, ['receivable_account_id' => null]);
+
+        expect($customer->receivable_account_id)->toBeNull();
+    });
+
+    it('leaves receivable_account_id untouched when the key is omitted', function (): void {
+        $receivables = Account::query()->forCompany($this->company->getKey())->where('code', '1130')->firstOrFail();
+        $customer = $this->service->create($this->company, new CustomerData(
+            name: 'Silva',
+            receivableAccountId: $receivables->getKey(),
+        ));
+
+        $this->service->update($customer, ['name' => 'Silva Renamed']);
+
+        expect($customer->receivable_account_id)->toBe($receivables->getKey());
+    });
+
+    it('clears credit_limit when the key is present with null', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(name: 'Silva', creditLimit: '500000.0000'));
+
+        $this->service->update($customer, ['credit_limit' => null]);
+
+        expect($customer->credit_limit)->toBeNull();
+    });
+
+    it('leaves credit_limit untouched when the key is omitted', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(name: 'Silva', creditLimit: '500000.0000'));
+
+        $this->service->update($customer, ['name' => 'Silva Renamed']);
+
+        expect($customer->credit_limit)->not->toBeNull()
+            ->and((string) $customer->credit_limit)->toBe('500000.0000');
+    });
+});
+
+describe('updating — the VAT cross-rule on effective values (I3)', function (): void {
+    it('refuses clearing the VAT number while the customer stays registered', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(
+            name: 'Silva',
+            isVatRegistered: true,
+            vatRegistrationNumber: '123456789',
+        ));
+
+        // `is_vat_registered` is not in this update, so its effective value is the current `true` —
+        // the cross-rule has to evaluate against that, not against the attributes actually supplied.
+        expect(fn () => $this->service->update($customer, ['vat_registration_number' => null]))
+            ->toThrow(BusinessRuleViolation::class);
+    });
+
+    it('permits clearing the VAT number in the same update that unregisters the customer', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(
+            name: 'Silva',
+            isVatRegistered: true,
+            vatRegistrationNumber: '123456789',
+        ));
+
+        $this->service->update($customer, ['is_vat_registered' => false, 'vat_registration_number' => null]);
+
+        expect($customer->is_vat_registered)->toBeFalse()
+            ->and($customer->vat_registration_number)->toBeNull();
+    });
+
+    it('refuses registering a customer that has no VAT number on file', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(name: 'Silva'));
+
+        // `vat_registration_number` is not in this update, so its effective value is the current
+        // `null` — the cross-rule still has to catch it.
+        expect(fn () => $this->service->update($customer, ['is_vat_registered' => true]))
+            ->toThrow(BusinessRuleViolation::class);
+    });
+
+    it('permits registering a customer while supplying the number in the same update', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(name: 'Silva'));
+
+        $this->service->update($customer, ['is_vat_registered' => true, 'vat_registration_number' => '999888777']);
+
+        expect($customer->is_vat_registered)->toBeTrue()
+            ->and($customer->vat_registration_number)->toBe('999888777');
+    });
+});
+
+describe('updating — I4 code-uniqueness race', function (): void {
+    it('translates a code-uniqueness collision at the database into a conflict, not a raw query exception', function (): void {
+        $this->service->create($this->company, new CustomerData(name: 'Existing', code: 'RACE'));
+
+        // Built directly rather than through the service, to bypass `assertCodeAvailable()` — the
+        // read-then-write pre-check — the same way a second, concurrent request would: both requests
+        // read "free" before either writes, and only one insert can win. This exercises the exact
+        // catch this service's private `save()` exists for, deterministically rather than by racing
+        // real database connections.
+        $racer = new Customer;
+        $racer->company_id = $this->company->getKey();
+        $racer->code = 'RACE';
+        $racer->name = 'Racer';
+
+        $save = new ReflectionMethod(CustomerService::class, 'save');
+        $save->setAccessible(true);
+
+        try {
+            $save->invoke($this->service, $racer);
+            expect()->fail('the race should have conflicted');
+        } catch (ResourceConflict $conflict) {
+            expect($conflict->problemCode())->toBe('duplicate-resource');
+        }
+    });
+
+    it('never lets the raw QueryException escape the code-uniqueness race', function (): void {
+        $this->service->create($this->company, new CustomerData(name: 'Existing', code: 'RACE2'));
+
+        $racer = new Customer;
+        $racer->company_id = $this->company->getKey();
+        $racer->code = 'RACE2';
+        $racer->name = 'Racer';
+
+        $save = new ReflectionMethod(CustomerService::class, 'save');
+        $save->setAccessible(true);
+
+        expect(fn () => $save->invoke($this->service, $racer))
+            ->not->toThrow(QueryException::class);
+    });
+});
+
+describe('updating — M8, validate before assign', function (): void {
+    it('leaves the in-memory model unchanged when the update is refused', function (): void {
+        $customer = $this->service->create($this->company, new CustomerData(
+            name: 'Silva',
+            paymentTermsDays: 30,
+        ));
+
+        $originalName = $customer->name;
+        $originalPaymentTermsDays = $customer->payment_terms_days;
+        $originalCode = $customer->code;
+
+        expect(fn () => $this->service->update($customer, [
+            'name' => 'Should Not Stick',
+            'payment_terms_days' => -5,
+        ]))->toThrow(BusinessRuleViolation::class);
+
+        expect($customer->name)->toBe($originalName)
+            ->and($customer->payment_terms_days)->toBe($originalPaymentTermsDays)
+            ->and($customer->code)->toBe($originalCode)
+            ->and($customer->isDirty())->toBeFalse();
     });
 });
 
@@ -522,7 +694,7 @@ describe('the audit trail', function (): void {
     it('records a credit limit change', function (): void {
         $customer = $this->service->create($this->company, new CustomerData(name: 'Silva'));
 
-        $this->service->update($customer, new CustomerData(name: 'Silva', creditLimit: '1000000.0000'));
+        $this->service->update($customer, ['credit_limit' => '1000000.0000']);
 
         $entries = AuditLog::query()->where('auditable_type', Customer::MORPH_ALIAS)->get();
 

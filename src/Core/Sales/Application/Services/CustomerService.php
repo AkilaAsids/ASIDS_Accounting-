@@ -15,6 +15,7 @@ use Asids\Core\Sales\Application\DTOs\CustomerData;
 use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Enums\CustomerStatus;
 use Asids\Core\Sales\Domain\Models\Customer;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -66,22 +67,42 @@ final readonly class CustomerService
 
             $this->applyAttributes($customer, $data);
 
-            $customer->save();
-
-            return $customer;
+            return $this->save($customer);
         });
     }
 
     /**
      * Change a customer's details.
      *
+     * Takes an array rather than a DTO, following `ChartOfAccountsService::update()` and
+     * `TaxCodeService::update()`, because `array_key_exists()` is what distinguishes "leave this
+     * alone" from "set this to null" — the distinction a whole-DTO signature cannot express. It
+     * matters here because `branch_id`, `receivable_account_id` and `credit_limit` are all
+     * legitimately clearable, and a caller who wants to clear one has no way to say so through a DTO
+     * that treats null the same as omitted.
+     *
      * The code may change while nothing has been invoiced. Once an invoice exists the code appears on a
      * document the customer has, and changing it would leave two identifiers for the same account.
+     *
+     * Recognised keys: `code`, `name`, `legal_name`, `tax_identification_number`,
+     * `vat_registration_number`, `is_vat_registered`, `email`, `phone`, `website`, `address_line_1`,
+     * `address_line_2`, `city`, `district`, `postal_code`, `country_code`, `payment_terms_days`,
+     * `credit_limit`, `receivable_account_id`, `branch_id`, `notes`. Anything else is ignored rather
+     * than rejected, matching how the tax codes and chart of accounts behave.
+     *
+     * Every effective value is computed and every rule checked before the first assignment, so a
+     * refused update leaves the in-memory model exactly as it was handed in.
+     *
+     * @param  array<string, mixed>  $attributes
      */
-    public function update(Customer $customer, CustomerData $data): Customer
+    public function update(Customer $customer, array $attributes): Customer
     {
-        return DB::transaction(function () use ($customer, $data): Customer {
-            if ($data->code !== null && $this->normalise($data->code) !== $this->normalise($customer->code)) {
+        $code = $customer->code;
+
+        if (array_key_exists('code', $attributes)) {
+            $requestedCode = $attributes['code'] !== null ? (string) $attributes['code'] : '';
+
+            if ($this->normalise($requestedCode) !== $this->normalise($customer->code)) {
                 if ($this->receivables->hasAnyInvoice($customer)) {
                     throw BusinessRuleViolation::make(
                         'customer-code-locked',
@@ -93,25 +114,90 @@ final readonly class CustomerService
                     );
                 }
 
-                $customer->code = $this->assertCodeAvailable($customer->company, $data->code, $customer->getKey());
+                $code = $this->assertCodeAvailable($customer->company, $requestedCode, $customer->getKey());
             }
+        }
 
-            if ($data->branchId !== null) {
-                $customer->branch_id = $this->resolveBranchId($customer->company, $data->branchId);
-            }
+        $branchId = array_key_exists('branch_id', $attributes)
+            ? $this->resolveBranchId(
+                $customer->company,
+                $attributes['branch_id'] !== null ? (string) $attributes['branch_id'] : null,
+            )
+            : $customer->branch_id;
 
-            if ($data->receivableAccountId !== null) {
-                $customer->receivable_account_id = $this->resolveReceivableAccountId(
-                    $customer->company,
-                    $data->receivableAccountId,
+        $receivableAccountId = array_key_exists('receivable_account_id', $attributes)
+            ? $this->resolveReceivableAccountId(
+                $customer->company,
+                $attributes['receivable_account_id'] !== null ? (string) $attributes['receivable_account_id'] : null,
+            )
+            : $customer->receivable_account_id;
+
+        $creditLimit = array_key_exists('credit_limit', $attributes)
+            ? $this->resolveCreditLimit(
+                $attributes['credit_limit'] !== null ? (string) $attributes['credit_limit'] : null,
+            )
+            : $customer->credit_limit;
+
+        $isVatRegistered = array_key_exists('is_vat_registered', $attributes)
+            ? (bool) $attributes['is_vat_registered']
+            : $customer->is_vat_registered;
+
+        $vatRegistrationNumber = array_key_exists('vat_registration_number', $attributes)
+            ? ($attributes['vat_registration_number'] !== null ? (string) $attributes['vat_registration_number'] : null)
+            : $customer->vat_registration_number;
+
+        if ($isVatRegistered && $vatRegistrationNumber === null) {
+            throw BusinessRuleViolation::make(
+                'vat-registration-number-required',
+                'A VAT-registered customer needs its VAT registration number. Invoices to a registered '
+                .'customer must show it.',
+            );
+        }
+
+        $paymentTermsDays = $customer->payment_terms_days;
+
+        if (array_key_exists('payment_terms_days', $attributes)) {
+            $paymentTermsDays = (int) $attributes['payment_terms_days'];
+
+            if ($paymentTermsDays < 0) {
+                throw BusinessRuleViolation::make(
+                    'negative-payment-terms',
+                    'Payment terms cannot be negative — that would make an invoice due before it was issued.',
                 );
             }
+        }
 
-            $this->applyAttributes($customer, $data);
+        $countryCode = array_key_exists('country_code', $attributes)
+            ? ($attributes['country_code'] !== null ? strtoupper((string) $attributes['country_code']) : null)
+            : $customer->country_code;
 
-            $customer->save();
+        return DB::transaction(function () use (
+            $customer,
+            $attributes,
+            $code,
+            $branchId,
+            $receivableAccountId,
+            $creditLimit,
+            $isVatRegistered,
+            $vatRegistrationNumber,
+            $paymentTermsDays,
+            $countryCode,
+        ): Customer {
+            $customer->fill(array_intersect_key($attributes, array_flip([
+                'name', 'legal_name', 'tax_identification_number', 'email', 'phone', 'website',
+                'address_line_1', 'address_line_2', 'city', 'district', 'postal_code', 'notes',
+            ])));
 
-            return $customer;
+            $customer->code = $code;
+            $customer->branch_id = $branchId;
+            $customer->receivable_account_id = $receivableAccountId;
+            $customer->credit_limit = $creditLimit;
+            $customer->is_vat_registered = $isVatRegistered;
+            $customer->vat_registration_number = $vatRegistrationNumber;
+            $customer->payment_terms_days = $paymentTermsDays;
+            $customer->country_code = $countryCode;
+
+            return $this->save($customer);
         });
     }
 
@@ -153,7 +239,7 @@ final readonly class CustomerService
     {
         $outstanding = $this->receivables->outstandingBalance($customer);
 
-        if (bccomp($outstanding, '0', 4) !== 0) {
+        if (bccomp($outstanding, '0', Money::SCALE) !== 0) {
             throw BusinessRuleViolation::make(
                 'customer-has-outstanding-balance',
                 sprintf(
@@ -269,9 +355,30 @@ final readonly class CustomerService
 
     /**
      * Everything that is a plain value with no resolution or rule attached.
+     *
+     * Every rule is checked, and every value that can throw while being resolved is resolved, before
+     * the first assignment — so a refusal here never leaves the model holding some of the requested
+     * change and none of the rest.
      */
     private function applyAttributes(Customer $customer, CustomerData $data): void
     {
+        if ($data->isVatRegistered && $data->vatRegistrationNumber === null) {
+            throw BusinessRuleViolation::make(
+                'vat-registration-number-required',
+                'A VAT-registered customer needs its VAT registration number. Invoices to a registered '
+                .'customer must show it.',
+            );
+        }
+
+        if ($data->paymentTermsDays < 0) {
+            throw BusinessRuleViolation::make(
+                'negative-payment-terms',
+                'Payment terms cannot be negative — that would make an invoice due before it was issued.',
+            );
+        }
+
+        $creditLimit = $this->resolveCreditLimit($data->creditLimit);
+
         $customer->name = $data->name;
         $customer->legal_name = $data->legalName;
         $customer->tax_identification_number = $data->taxIdentificationNumber;
@@ -287,23 +394,38 @@ final readonly class CustomerService
         $customer->postal_code = $data->postalCode;
         $customer->country_code = $data->countryCode !== null ? strtoupper($data->countryCode) : null;
         $customer->payment_terms_days = $data->paymentTermsDays;
-        $customer->credit_limit = $this->resolveCreditLimit($data->creditLimit);
+        $customer->credit_limit = $creditLimit;
         $customer->notes = $data->notes;
+    }
 
-        if ($data->isVatRegistered && $data->vatRegistrationNumber === null) {
-            throw BusinessRuleViolation::make(
-                'vat-registration-number-required',
-                'A VAT-registered customer needs its VAT registration number. Invoices to a registered '
-                .'customer must show it.',
-            );
+    /**
+     * Persist, turning the code-uniqueness race into the same conflict the pre-check already produces.
+     *
+     * `assertCodeAvailable()` is read-then-write: two concurrent creates (or updates) for the same code
+     * can both pass it, and only one insert survives. Left to the database that surfaces as
+     * `UniqueConstraintViolationException` — a 500 naming a constraint, not a customer. Caught here it
+     * becomes the same `duplicate-resource` conflict the pre-check already throws, because it is the
+     * same conflict caught one layer later. The constraint stays the authority; only its refusal's
+     * shape changes.
+     */
+    private function save(Customer $customer): Customer
+    {
+        try {
+            $customer->save();
+        } catch (QueryException $exception) {
+            if ($this->isDuplicateCodeViolation($exception)) {
+                throw ResourceConflict::duplicate('customer', 'code', $customer->code);
+            }
+
+            throw $exception;
         }
 
-        if ($data->paymentTermsDays < 0) {
-            throw BusinessRuleViolation::make(
-                'negative-payment-terms',
-                'Payment terms cannot be negative — that would make an invoice due before it was issued.',
-            );
-        }
+        return $customer;
+    }
+
+    private function isDuplicateCodeViolation(QueryException $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'customers_company_code_unique');
     }
 
     /**
