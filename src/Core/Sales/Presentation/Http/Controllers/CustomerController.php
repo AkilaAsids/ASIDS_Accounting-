@@ -6,6 +6,7 @@ namespace Asids\Core\Sales\Presentation\Http\Controllers;
 
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Platform\Domain\Query\QueryCriteria;
+use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
 use Asids\Core\Platform\Http\Controllers\ApiController;
 use Asids\Core\Platform\Http\Responses\ApiResponse;
 use Asids\Core\Sales\Application\DTOs\CustomerData;
@@ -16,6 +17,7 @@ use Asids\Core\Sales\Presentation\Http\Requests\UpdateCustomerRequest;
 use Asids\Core\Sales\Presentation\Http\Resources\CustomerResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 /**
  * The parties a company invoices, nested under their company.
@@ -54,7 +56,22 @@ final class CustomerController extends ApiController
             )
             ->when(
                 $criteria->hasFilter('branch_id'),
-                static fn ($query) => $query->where('branch_id', $criteria->filters()['branch_id']),
+                static function ($query) use ($criteria) {
+                    $branchId = $criteria->filters()['branch_id'];
+
+                    // A non-uuid value would otherwise reach a `where()` on a uuid column and surface
+                    // as a Postgres 22P02 rendered as a generic 500 — the same failure mode
+                    // `ResolveActiveCompany::requestedCompanyId()` already guards `X-Company` against.
+                    // Validated here, before the query, so the caller gets a 422 naming the problem.
+                    if (! is_string($branchId) || ! Str::isUuid($branchId)) {
+                        throw BusinessRuleViolation::make(
+                            'invalid-branch-id-filter',
+                            'The branch_id filter must be a valid identifier.',
+                        );
+                    }
+
+                    return $query->where('branch_id', $branchId);
+                },
             )
             ->when(
                 $criteria->search() !== null,

@@ -40,6 +40,12 @@ use Illuminate\Support\Facades\DB;
  */
 final readonly class TaxCodeService
 {
+    /**
+     * Postgres's SQLSTATE for an exclusion-constraint violation — what the overlap check fires under,
+     * checked alongside the constraint name in `isOverlapViolation()`.
+     */
+    private const string EXCLUSION_VIOLATION = '23P01';
+
     public function __construct(
         private TaxRateUsageProbe $usage,
         private CompliancePackContract $compliance,
@@ -332,9 +338,21 @@ final readonly class TaxCodeService
         return $taxCode;
     }
 
+    /**
+     * Whether this failure is the range-overlap exclusion constraint `save()` exists to catch.
+     *
+     * The constraint name is matched as a substring of the whole driver message, which embeds the
+     * bound values — a payload that happened to contain the literal constraint name would otherwise
+     * misclassify an unrelated `QueryException` as this conflict. An exclusion constraint (not a unique
+     * one) has no dedicated Laravel exception class the way `UniqueConstraintViolationException` does
+     * for 23505, so the SQLSTATE itself — Postgres's `23P01`, exclusion_violation — is checked alongside
+     * the name via `getCode()`, the same technique `RowLevelSecurityBootstrapper::apply()` uses to tell
+     * one SQLSTATE from another.
+     */
     private function isOverlapViolation(QueryException $exception): bool
     {
-        return str_contains($exception->getMessage(), 'tax_codes_no_overlapping_rates');
+        return $exception->getCode() === self::EXCLUSION_VIOLATION
+            && str_contains($exception->getMessage(), 'tax_codes_no_overlapping_rates');
     }
 
     private function rangesOverlap(TaxCode $one, TaxCode $other): bool

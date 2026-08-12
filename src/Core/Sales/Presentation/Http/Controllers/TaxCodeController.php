@@ -40,7 +40,12 @@ final class TaxCodeController extends ApiController
             ->forCompany((string) $company->getKey())
             ->when($request->boolean('active_only', true), static fn ($query) => $query->active());
 
-        if ($request->filled('code')) {
+        // `is_string()` first: `?code[]=x` arrives as an array and `filled()` is true for it too, so
+        // without this guard `$request->string('code')` array-to-string converts it, which PHP raises
+        // as a warning and the framework's error handler escalates to an ErrorException — a 500.
+        // An array value is not a code filter anybody could have meant, so it is ignored rather than
+        // rejected, matching how an unknown filter degrades on this endpoint's peers.
+        if (is_string($request->query('code')) && $request->filled('code')) {
             $query->withCode($request->string('code')->toString());
         } else {
             // The order a chart of accounts is read in: by code, and — because one code may carry

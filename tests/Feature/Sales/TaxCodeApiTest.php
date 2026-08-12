@@ -339,6 +339,18 @@ describe('the index', function (): void {
 
         expect($codes)->toContain('FINDME')->not->toContain('IGNOREME');
     });
+
+    it('ignores an array code filter rather than crashing', function (): void {
+        // Security review S2: `?code[]=x` passed `$request->filled('code')` and then hit
+        // `$request->string('code')`, which array-to-string-converts an array into an E_WARNING that
+        // the framework's error handler escalates to an ErrorException, rendered as a 500. The code
+        // filter is only applied when the raw query value is actually a string.
+        createTaxCode(['code' => 'ARRAYSAFE']);
+
+        $response = asTaxCodeApi($this->accountant, 'GET', taxCodeUri().'?code[]=x');
+
+        expect($response)->toBeEnvelope();
+    });
 });
 
 describe('creating a tax code', function (): void {

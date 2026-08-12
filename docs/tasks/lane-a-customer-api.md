@@ -74,3 +74,46 @@ Lane A (Customer REST API) complete and green. All hard-constraint file boundari
 the four new Customer HTTP files, the customers hunk of `routes/api.php` (tax-codes hunk untouched),
 the customer paths/schemas of `docs/api/openapi.yaml`, and this task file were touched. No git
 commands run — changes left in the working tree for DM review.
+
+## Progress — Stage 6 fix cycle (BE-2, 2026-08-12)
+
+Applied the independent Security Reviewer's PASS-WITH-FIXES items that touch Lane A's files.
+
+**Issues resolved:**
+- **S1 (should).** `CustomerController::index()` fed an unvalidated `filter[branch_id]` straight into
+  `where('branch_id', ...)` on a uuid column; a non-uuid value (or an array, via `?filter[branch_id][]=`)
+  hit Postgres `22P02` and rendered as a generic 500. Fixed by validating the filter value with
+  `Illuminate\Support\Str::isUuid()` inside the existing `when($criteria->hasFilter('branch_id'), ...)`
+  closure, before the `where()` call — the same convention
+  `ResolveActiveCompany::requestedCompanyId()` already applies to `X-Company`. A malformed value now
+  throws `BusinessRuleViolation::make('invalid-branch-id-filter', ...)`, rendering a clean 422 rather
+  than a 500 (preferred over silently ignoring, per the reviewer's note and the `unsupported-sort`
+  precedent already in this same index method for a malformed `?sort=`).
+- **N1 (nit).** `CustomerService::isDuplicateCodeViolation()` matched the `customers_company_code_unique`
+  constraint name as a substring of the whole `QueryException` message, which embeds bound values — a
+  payload containing that literal string plus any unrelated `QueryException` would have misclassified a
+  500 as a 409. Tightened to additionally require
+  `$exception instanceof Illuminate\Database\UniqueConstraintViolationException` (Laravel's own SQLSTATE
+  23505 classification), so the name match only fires on a genuine unique-constraint violation.
+- **N2 (nit).** `routes/api.php`'s `{customer}/restore` route (`->withTrashed()`) is route-wide and so
+  also lifts the soft-delete scope on the bound `{company}`. Added a comment on the route documenting
+  that this is intended only for the `{customer}` binding and that a soft-deleted company still fails
+  closed with a 404 via `ResolveActiveCompany`'s independent re-resolution (default scopes + `active()`
+  + membership) — no behaviour change, comment only.
+
+**Regression tests** added to `tests/Feature/Sales/CustomerApiTest.php` (`describe('the index', ...)`):
+malformed `filter[branch_id]` now asserted `toBeProblem('invalid-branch-id-filter', 422)`, confirmed RED
+(actual 500, `internal-error`) before the fix and GREEN after.
+
+**Verification:**
+- `tests/Feature/Sales/CustomerApiTest.php` + `TaxCodeApiTest.php` together: **91/91 passed** (610
+  assertions).
+- Full `tests/Feature/Sales` suite: **453/453 passed** (1159 assertions) — up from the pre-fix-cycle
+  451/451 baseline plus the two new regression tests (this file's S1 test + Lane B's S2 test).
+- `./vendor/bin/pint --test` on `CustomerController.php`, `CustomerService.php`, `routes/api.php`,
+  `CustomerApiTest.php` (run together with the Lane B equivalents): **PASS, 7 files**.
+- `./vendor/bin/phpstan analyse --level=8` on `CustomerController.php` and `CustomerService.php` (run
+  together with the Lane B equivalents): **[OK] No errors**.
+
+Touched only: `CustomerController.php`, `CustomerService.php`, the customer restore-route comment in
+`routes/api.php`, and new tests in `CustomerApiTest.php`. No git commands run.

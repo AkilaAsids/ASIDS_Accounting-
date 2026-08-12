@@ -378,6 +378,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                     Route::put('{customer}', [CustomerController::class, 'update'])->name('update');
                     Route::delete('{customer}', [CustomerController::class, 'destroy'])->name('destroy');
                     Route::post('{customer}/archive', [CustomerController::class, 'archive'])->name('archive');
+                    // `withTrashed()` is route-wide, so it also lifts the soft-delete scope for the
+                    // bound `{company}` (which uses SoftDeletes) — intended only for the `{customer}`
+                    // binding, so a soft-deleted customer can still be restored. Not exploitable: the
+                    // `company` middleware's `ResolveActiveCompany` independently re-resolves the url
+                    // company with its default scopes plus `active()` and membership, so a trashed
+                    // company still fails closed with a 404 regardless of this route's binding.
                     Route::post('{customer}/restore', [CustomerController::class, 'restore'])->name('restore')->withTrashed();
                     Route::post('{customer}/deactivate', [CustomerController::class, 'deactivate'])->name('deactivate');
                     Route::post('{customer}/reactivate', [CustomerController::class, 'reactivate'])->name('reactivate');
@@ -399,6 +405,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                     Route::post('{taxCode}/end-range', [TaxCodeController::class, 'endRange'])->name('end-range');
                     Route::post('{taxCode}/deactivate', [TaxCodeController::class, 'deactivate'])->name('deactivate');
                     Route::post('{taxCode}/reactivate', [TaxCodeController::class, 'reactivate'])->name('reactivate');
+                    // `withTrashed()` is route-wide, so it also lifts the soft-delete scope for the
+                    // bound `{company}` (which uses SoftDeletes) — intended only for the `{taxCode}`
+                    // binding, so a soft-deleted tax code can still be restored. Not exploitable: the
+                    // `company` middleware's `ResolveActiveCompany` independently re-resolves the url
+                    // company with its default scopes plus `active()` and membership, so a trashed
+                    // company still fails closed with a 404 regardless of this route's binding.
                     Route::post('{taxCode}/restore', [TaxCodeController::class, 'restore'])->name('restore')->withTrashed();
                 });
 

@@ -55,3 +55,46 @@ Two contract notes flagged in the design already tracked here for the record:
 
 ## Outcome
 Lane B implementation complete and correct: **43/46 green** with the two issues above isolated and explained; the 3 remaining failures are a single pre-existing shared-Platform defect unrelated to any Lane B file. Full `tests/Feature/Sales` run (with the cache workaround): `CustomerTest.php` (Lane C) 68/68 green, unaffected. `CustomerApiTest.php` (Lane A) not yet built — its failures are expected and out of scope here. Pint clean and PHPStan level 8 clean on every Lane B file. OpenAPI: `node scripts/check-openapi.mjs` (no `--require-routes`, host PHP is 8.3 and this repo's `composer.json` requires `^8.4` so `vendor/` cannot be installed on host — same known gotcha as other ASIDS repos) is green; route↔spec coverage in both directions was independently verified against Docker's real `php artisan route:list --json` (104 routes / 104 documented operations, exact match, zero undocumented/phantom).
+
+## Progress — Stage 6 fix cycle (BE-2, 2026-08-12)
+
+Applied the independent Security Reviewer's PASS-WITH-FIXES items that touch Lane B's files.
+
+**Issues resolved:**
+- **S2 (should).** `TaxCodeController::index()`'s `?code[]=x` (an array) satisfies `$request->filled('code')`
+  and then hits `$request->string('code')`, which array-to-string-converts the array — PHP raises this
+  as a warning, and the framework's error handler escalates it to an `ErrorException`, rendering a 500.
+  Fixed by additionally requiring `is_string($request->query('code'))` before applying the filter; an
+  array value is now ignored (returns the unfiltered list), consistent with how an unrecognised filter
+  degrades elsewhere on this endpoint (`active_only`/`code` are the only two recognised query keys here).
+- **N1 (nit).** `TaxCodeService::isOverlapViolation()` matched the `tax_codes_no_overlapping_rates`
+  exclusion-constraint name as a substring of the whole `QueryException` message, which embeds bound
+  values — a payload containing that literal string plus any unrelated `QueryException` would have
+  misclassified a 500 as a 409. An exclusion constraint has no dedicated Laravel exception class the way
+  a unique constraint does, so tightened by additionally requiring the SQLSTATE via `getCode() === '23P01'`
+  (Postgres's `exclusion_violation`), the same technique `RowLevelSecurityBootstrapper::apply()` already
+  uses to distinguish one SQLSTATE from another (`25P02`).
+- **N2 (nit).** `routes/api.php`'s `{taxCode}/restore` route (`->withTrashed()`) is route-wide and so
+  also lifts the soft-delete scope on the bound `{company}`. Added a comment on the route documenting
+  that this is intended only for the `{taxCode}` binding and that a soft-deleted company still fails
+  closed with a 404 via `ResolveActiveCompany`'s independent re-resolution (default scopes + `active()`
+  + membership) — no behaviour change, comment only.
+
+**Regression test** added to `tests/Feature/Sales/TaxCodeApiTest.php` (`describe('the index', ...)`):
+`?code[]=x` now asserted `toBeEnvelope()` (200, filter ignored rather than crashing), confirmed RED
+(actual 500) before the fix — verified on the full-file run (46/47 passed, only the new test failing;
+an isolated `--filter` run of a single test 404s in this environment regardless of content, a pre-existing
+test-harness artifact unrelated to this fix, so the full-file run is the valid signal) — and GREEN after.
+
+**Verification:**
+- `tests/Feature/Sales/CustomerApiTest.php` + `TaxCodeApiTest.php` together: **91/91 passed** (610
+  assertions).
+- Full `tests/Feature/Sales` suite: **453/453 passed** (1159 assertions) — up from the pre-fix-cycle
+  451/451 baseline plus the two new regression tests (this file's S2 test + Lane A's S1 test).
+- `./vendor/bin/pint --test` on `TaxCodeController.php`, `TaxCodeService.php`, `routes/api.php`,
+  `TaxCodeApiTest.php` (run together with the Lane A equivalents): **PASS, 7 files**.
+- `./vendor/bin/phpstan analyse --level=8` on `TaxCodeController.php` and `TaxCodeService.php` (run
+  together with the Lane A equivalents): **[OK] No errors**.
+
+Touched only: `TaxCodeController.php`, `TaxCodeService.php`, the tax-code restore-route comment in
+`routes/api.php`, and new tests in `TaxCodeApiTest.php`. No git commands run.

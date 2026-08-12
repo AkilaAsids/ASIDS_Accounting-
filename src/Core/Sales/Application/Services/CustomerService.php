@@ -16,6 +16,7 @@ use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Enums\CustomerStatus;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -423,9 +424,20 @@ final readonly class CustomerService
         return $customer;
     }
 
+    /**
+     * Whether this failure is the code-uniqueness race `save()` exists to catch.
+     *
+     * The constraint name is matched as a substring of the whole driver message, which embeds the
+     * bound values — a payload that happened to contain the literal constraint name would otherwise
+     * misclassify an unrelated `QueryException` as this conflict. Requiring the exception to actually
+     * be a `UniqueConstraintViolationException` (Laravel's own classification, driven by SQLSTATE 23505,
+     * not by string matching) closes that gap without weakening the name check, which still identifies
+     * *which* unique index fired.
+     */
     private function isDuplicateCodeViolation(QueryException $exception): bool
     {
-        return str_contains($exception->getMessage(), 'customers_company_code_unique');
+        return $exception instanceof UniqueConstraintViolationException
+            && str_contains($exception->getMessage(), 'customers_company_code_unique');
     }
 
     /**

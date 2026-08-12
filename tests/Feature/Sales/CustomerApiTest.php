@@ -321,6 +321,16 @@ describe('the index', function (): void {
 
         expect($response)->toBeProblem('unsupported-sort', 422);
     });
+
+    it('returns a clean 422 rather than a 500 for a malformed branch_id filter', function (): void {
+        // Security review S1: a non-UUID `filter[branch_id]` used to flow straight into
+        // `where('branch_id', ...)` on a uuid column and blow up as a Postgres 22P02, rendered as a
+        // generic 500. `branch_id` is validated as a UUID shape before it reaches the query, the same
+        // convention `ResolveActiveCompany::requestedCompanyId()` already applies to `X-Company`.
+        $response = asCustomerApi($this->accountant, 'GET', customerUri().'?filter[branch_id]=not-a-uuid');
+
+        expect($response)->toBeProblem('invalid-branch-id-filter', 422);
+    });
 });
 
 describe('creating a customer', function (): void {
