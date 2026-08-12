@@ -16,6 +16,9 @@ Milestone 5** (issuing/ledger posting, owned by Akila). The Minions do not touch
 | 6 · Review | ✅ Security (Fable) **PASS-WITH-FIXES, 0 blockers**; fixes S1/S2/N1/N2 applied (`62d39f6`) |
 | Delivery | ✅ **PR opened for Akila** — autonomy ends here (no staging/prod deploy in scope) |
 
+## Merge with latest main (2026-08-12)
+`origin/main` (`d781c80` — Akila's M5 Stage 2 posting map) merged into this branch — **clean, no conflicts**; 3 new M5 migrations applied. Validated together: **Sales + Accounting 790/790 green**. `origin/main` is an ancestor, so the PR merges cleanly.
+
 ## Result
 Sales module REST surface delivered: **Customer API + Tax-code API + CustomerService hardening**, plus two incidental shared fixes (app-wide 403 rendering, test-cache isolation).
 - **Tests:** full Sales suite **453/453**; Accounting suite green (403 fix, no regression). OpenAPI 113/113 routes documented.
