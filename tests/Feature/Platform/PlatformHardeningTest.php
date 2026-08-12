@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Asids\Core\Identity\Domain\Contracts\UserRepositoryContract;
 use Asids\Core\Identity\Domain\Models\PersonalAccessToken;
+use Asids\Core\Identity\Domain\Models\User;
+use Asids\Core\Organization\Application\Services\MembershipService;
 use Asids\Core\Platform\Domain\Query\QueryCriteria;
 use Asids\Core\Tenancy\Domain\Contracts\TenantRepositoryContract;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
@@ -70,6 +72,32 @@ describe('sign-in rate limiting', function (): void {
         // field the SPA reads to show "try again in 43 seconds" instead of a bare failure.
         expect($response?->getStatusCode())->toBe(429)
             ->and($response?->json('retry_after_seconds'))->toBeInt();
+    });
+});
+
+describe('ApiExceptionRenderer 403 mapping', function (): void {
+    it('renders a policy-denied action as the forbidden problem, not a generic http-403', function (): void {
+        // `AccountPolicy::create()` returns false for a bookkeeper (no `accounting.accounts.manage`),
+        // so `$this->authorize()` in `AccountController::store()` throws `AuthorizationException`.
+        // Laravel's `Handler::prepareException()` converts that to `AccessDeniedHttpException`
+        // *before* `ApiExceptionRenderer` ever sees it — so this is the framework-thrown 403 path,
+        // not the explicitly-thrown `AuthorizationException` arm.
+        $bookkeeper = $this->createUserWithRole($this->acme['tenant'], 'bookkeeper', ['email' => 'renderer-403@acme.test']);
+
+        app(MembershipService::class)->grant($this->acme['company'], $bookkeeper, $this->owner);
+
+        $fresh = RowLevelSecurity::bypass(static fn (): ?User => $bookkeeper->fresh());
+
+        $response = test()->actingAs($fresh ?? $bookkeeper)
+            ->withHeader('X-Tenant', 'acme')
+            ->withHeader('X-Company', $this->acme['company']->getKey())
+            ->postJson('/api/v1/companies/'.$this->acme['company']->getKey().'/accounts', [
+                'code' => '9999',
+                'name' => 'Should Be Refused',
+                'type' => 'asset',
+            ]);
+
+        expect($response)->toBeProblem('forbidden', 403);
     });
 });
 
