@@ -350,8 +350,12 @@ describe('system accounts', function (): void {
         $this->template->ensureSystemAccounts($this->company);
         $this->template->ensureSystemAccounts($this->company);
 
+        // Counted against the template rather than a literal. The property under test is that repeated calls
+        // create nothing extra; the size of the set is incidental and grew when Milestone 5 added trade
+        // receivables. A hardcoded number turns every legitimate addition into a failing test that says nothing
+        // about idempotency.
         expect(Account::query()->forCompany($this->company->getKey())->whereNotNull('system_key')->count())
-            ->toBe(2);
+            ->toBe(count(ChartTemplate::requiredSystemAccounts()));
     });
 
     it('resolves a system account by key even after it is renumbered', function (): void {

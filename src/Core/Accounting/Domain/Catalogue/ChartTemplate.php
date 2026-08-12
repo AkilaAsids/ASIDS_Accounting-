@@ -37,7 +37,7 @@ final class ChartTemplate
      * or a removal. Companies store the version they were created from, so a correction can find
      * them.
      */
-    public const string VERSION = '2026.02-lk-sme-1';
+    public const string VERSION = '2026.08-lk-sme-2';
 
     /**
      * Shown wherever the template is offered or applied. Not optional, and not abbreviated.
@@ -79,7 +79,7 @@ final class ChartTemplate
             self::heading('1100', 'Current Assets', AccountType::Asset, parent: '1000'),
             self::leaf('1110', 'Cash in Hand', AccountType::Asset, parent: '1100'),
             self::leaf('1120', 'Bank Accounts', AccountType::Asset, parent: '1100'),
-            self::leaf('1130', 'Trade Receivables', AccountType::Asset, parent: '1100'),
+            self::leaf('1130', 'Trade Receivables', AccountType::Asset, parent: '1100', system: Account::TRADE_RECEIVABLES),
             self::leaf('1140', 'Other Receivables', AccountType::Asset, parent: '1100'),
             self::leaf('1150', 'Inventory', AccountType::Asset, parent: '1100'),
             self::leaf('1160', 'Prepayments', AccountType::Asset, parent: '1100'),
@@ -159,6 +159,9 @@ final class ChartTemplate
         return [
             self::leaf('3200', 'Retained Earnings', AccountType::Equity, system: Account::RETAINED_EARNINGS),
             self::leaf('3300', 'Opening Balance Equity', AccountType::Equity, system: Account::OPENING_BALANCE_EQUITY),
+            // Added by Phase 3 Milestone 5. Every sales invoice debits it unless the customer names an
+            // account of its own, so a company that skipped the starter chart must still receive it.
+            self::leaf('1130', 'Trade Receivables', AccountType::Asset, system: Account::TRADE_RECEIVABLES),
         ];
     }
 

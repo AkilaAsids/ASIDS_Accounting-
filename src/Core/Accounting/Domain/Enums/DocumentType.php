@@ -11,14 +11,15 @@ namespace Asids\Core\Accounting\Domain\Enums;
  * — because the statutory requirements differ. Sri Lankan e-invoicing will demand gapless invoice
  * numbering; journal vouchers merely need to be unique and orderly.
  *
- * Only the journal families exist in this phase. Sales and purchase documents arrive with their own
- * phases and add cases here.
+ * The journal families arrived with the ledger; `SalesInvoice` was added by Phase 3 Milestone 5, which is
+ * the phase this file's original comment anticipated. Purchase documents add their cases the same way.
  */
 enum DocumentType: string
 {
     case JournalVoucher = 'journal_voucher';
     case OpeningBalance = 'opening_balance';
     case YearEndClose = 'year_end_close';
+    case SalesInvoice = 'sales_invoice';
 
     public function label(): string
     {
@@ -26,6 +27,7 @@ enum DocumentType: string
             self::JournalVoucher => 'Journal voucher',
             self::OpeningBalance => 'Opening balance',
             self::YearEndClose => 'Year-end close',
+            self::SalesInvoice => 'Sales invoice',
         };
     }
 
@@ -38,6 +40,7 @@ enum DocumentType: string
             self::JournalVoucher => 'JV',
             self::OpeningBalance => 'OB',
             self::YearEndClose => 'YEC',
+            self::SalesInvoice => 'INV',
         };
     }
 
@@ -46,8 +49,9 @@ enum DocumentType: string
      *
      * Gapless numbering costs a row lock per document, serialising issuance within a company. It is
      * worth that for anything a tax authority may audit for completeness, and not worth it otherwise.
-     * Journal vouchers are auditable, so all three currently qualify — the distinction exists because
-     * later phases will add internal document types where it does not.
+     * Every family so far is auditable, so all four qualify — sales invoices most of all, since Sri Lankan
+     * e-invoicing demands completeness. The distinction exists because later phases will add internal
+     * document types where it does not.
      */
     public function requiresGaplessNumbering(): bool
     {
