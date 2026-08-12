@@ -2666,6 +2666,213 @@ paths:
                               credit: { $ref: '#/components/schemas/Amount' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ── Sales: customers ──────────────────────────────────────────────────────
+  /companies/{companyId}/customers:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Sales]
+      operationId: listCustomers
+      summary: The company's customers
+      description: |
+        A growing, searchable list rather than a bounded catalogue, so this is paginated.
+        Soft-deleted customers are never listed.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: filter[status]
+          in: query
+          schema: { type: string, enum: [active, inactive, archived] }
+        - name: filter[branch_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [name, -name, code, -code, created_at, -created_at], default: name }
+      responses:
+        '200':
+          description: Paginated customers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Customer' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: An unsupported sort column was requested.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    post:
+      tags: [Sales]
+      operationId: createCustomer
+      summary: Add a customer
+      description: |
+        `sales.customers.manage` only. `code` is optional — the service generates a `C-NNNN`
+        style code when it is left out. `status` is never accepted: a new customer is always
+        active, and moving between states goes through the named lifecycle endpoints below.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Customer' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: This customer code is already in use.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/customers/{customerId}:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/CustomerId'
+    get:
+      tags: [Sales]
+      operationId: getCustomer
+      summary: One customer
+      responses:
+        '200': { $ref: '#/components/responses/CustomerResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Sales]
+      operationId: updateCustomer
+      summary: Amend a customer
+      description: |
+        Every field is optional; only what is sent changes. Setting `branch_id`,
+        `receivable_account_id` or `credit_limit` to `null` clears each independently — omitting
+        one leaves it exactly as it was. The code cannot change once the customer has been
+        invoiced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/CustomerResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: This customer code is already in use.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Sales]
+      operationId: deleteCustomer
+      summary: Delete a customer that was never invoiced
+      description: |
+        Refused with `422` for any customer already invoiced — an invoice is a statutory record
+        and it names its customer, so the record has to outlive the relationship. Archiving is
+        the ordinary path; this is only for a genuine mistake.
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The customer has been invoiced.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/customers/{customerId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/CustomerId'
+    post:
+      tags: [Sales]
+      operationId: archiveCustomer
+      summary: Hide a customer from every picker
+      description: |
+        Refused while money is owed: an archived customer disappears from the screens used to
+        chase a receivable, so archiving one who still owes it would quietly lose the debt.
+      responses:
+        '200': { $ref: '#/components/responses/CustomerResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The customer has an outstanding balance.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/customers/{customerId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/CustomerId'
+    post:
+      tags: [Sales]
+      operationId: restoreCustomer
+      summary: Bring a deleted customer back
+      description: |
+        Refused with `422` if the customer was never deleted. Refused with `409` if the code it
+        held has since been taken by another customer — change one of the two codes first.
+      responses:
+        '200': { $ref: '#/components/responses/CustomerResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The code this customer held has since been taken by another.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The customer was never deleted.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/customers/{customerId}/deactivate:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/CustomerId'
+    post:
+      tags: [Sales]
+      operationId: deactivateCustomer
+      summary: Stop offering a customer on new invoices, without hiding it
+      description: |
+        Unlike archiving, a deactivated customer is still findable — someone reactivating a
+        dormant account can still see it. Refused if the customer is already archived.
+      responses:
+        '200': { $ref: '#/components/responses/CustomerResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The customer is archived.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/customers/{customerId}/reactivate:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/CustomerId'
+    post:
+      tags: [Sales]
+      operationId: reactivateCustomer
+      summary: Offer a deactivated customer again
+      responses:
+        '200': { $ref: '#/components/responses/CustomerResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ── Sales: tax codes ─────────────────────────────────────────────────────
   /companies/{companyId}/tax-codes:
     parameters: [{ $ref: '#/components/parameters/CompanyId' }]
@@ -2942,6 +3149,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     TaxCodeId:
       name: taxCodeId
       in: path
@@ -3080,6 +3292,15 @@ components:
             type: object
             properties:
               data: { $ref: '#/components/schemas/Account' }
+              meta: { $ref: '#/components/schemas/Meta' }
+    CustomerResponse:
+      description: A customer.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/Customer' }
               meta: { $ref: '#/components/schemas/Meta' }
     TaxCodeResponse:
       description: A tax code.
@@ -3685,6 +3906,84 @@ components:
       description: |
         On `PUT` every field is optional and only what is sent changes. `normal_balance` and
         `statement` are never accepted — they are derived from `type`.
+
+    Customer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        branch_id: { type: [string, 'null'], format: uuid }
+        code: { type: string, maxLength: 32, example: 'C-0001' }
+        name: { type: string, example: Silva Traders }
+        legal_name: { type: [string, 'null'] }
+        tax_identification_number: { type: [string, 'null'] }
+        vat_registration_number: { type: [string, 'null'] }
+        is_vat_registered: { type: boolean }
+        email: { type: [string, 'null'], format: email }
+        phone: { type: [string, 'null'] }
+        website: { type: [string, 'null'] }
+        address_line_1: { type: [string, 'null'] }
+        address_line_2: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        district: { type: [string, 'null'] }
+        postal_code: { type: [string, 'null'] }
+        country_code: { type: [string, 'null'], example: LK }
+        payment_terms_days: { type: integer, example: 30 }
+        credit_limit:
+          type: [string, 'null']
+          description: A decimal string at the ledger's scale, or null for no limit. Never a number.
+          example: '25000.0000'
+        receivable_account_id:
+          type: [string, 'null']
+          format: uuid
+          description: Null means the company's system AR default.
+        notes: { type: [string, 'null'] }
+        status: { type: string, enum: [active, inactive, archived] }
+        status_label: { type: string }
+        archived_at: { type: [string, 'null'], format: date-time }
+        deleted_at: { type: [string, 'null'], format: date-time }
+        capabilities:
+          type: object
+          properties:
+            can_update: { type: boolean }
+            can_delete: { type: boolean }
+            accepts_new_invoices: { type: boolean, description: Model state, not a gate — whether a new invoice may name this customer. }
+
+    CustomerRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        code:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 32
+          description: Omitted or null on create generates a `C-NNNN` style code. Never cleared on update — only replaced, and only while nothing has been invoiced.
+        legal_name: { type: [string, 'null'], maxLength: 255 }
+        tax_identification_number: { type: [string, 'null'], maxLength: 64 }
+        vat_registration_number: { type: [string, 'null'], maxLength: 64 }
+        is_vat_registered: { type: boolean, default: false }
+        email: { type: [string, 'null'], format: email, maxLength: 255 }
+        phone: { type: [string, 'null'], maxLength: 32 }
+        website: { type: [string, 'null'], maxLength: 255 }
+        address_line_1: { type: [string, 'null'], maxLength: 255 }
+        address_line_2: { type: [string, 'null'], maxLength: 255 }
+        city: { type: [string, 'null'], maxLength: 96 }
+        district: { type: [string, 'null'], maxLength: 96 }
+        postal_code: { type: [string, 'null'], maxLength: 24 }
+        country_code: { type: [string, 'null'], minLength: 2, maxLength: 2 }
+        payment_terms_days: { type: integer, minimum: 0, maximum: 65535, default: 30 }
+        credit_limit:
+          type: [string, 'null']
+          description: A decimal string, e.g. `'5000.00'`. A leading minus is accepted so the service's own `negative-credit-limit` check names the actual problem rather than a generic validation failure.
+        receivable_account_id: { type: [string, 'null'], format: uuid }
+        branch_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'], maxLength: 5000 }
+      required: [name]
+      description: |
+        On `PUT` every field is optional and only what is sent changes; setting `branch_id`,
+        `receivable_account_id` or `credit_limit` to `null` clears each independently.
+        `status` is never accepted — a customer's state moves only through the named lifecycle
+        endpoints.
 
     TaxCode:
       type: object

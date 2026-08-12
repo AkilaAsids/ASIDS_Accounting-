@@ -21,6 +21,7 @@ use Asids\Core\Identity\Presentation\Http\Controllers\UserController;
 use Asids\Core\Organization\Presentation\Http\Controllers\BranchController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyMembershipController;
+use Asids\Core\Sales\Presentation\Http\Controllers\CustomerController;
 use Asids\Core\Sales\Presentation\Http\Controllers\TaxCodeController;
 use Asids\Core\Settings\Presentation\Http\Controllers\SettingsController;
 use Asids\Core\Tenancy\Presentation\Http\Controllers\TenantRegistrationController;
@@ -361,6 +362,25 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
                 Route::prefix('{company}/reports')->name('reports.')->middleware('company')->group(function (): void {
                     Route::get('trial-balance', [LedgerReportController::class, 'trialBalance'])->name('trial-balance');
+                });
+
+                /*
+                 * ── Sales: customers ────────────────────────────────────────
+                 *
+                 * A customer is company-owned for the same reason the chart of accounts is: the
+                 * receivable a customer's invoices post to belongs to one set of books, and a flat
+                 * route would invite a query that forgets to scope by company.
+                 */
+                Route::prefix('{company}/customers')->name('customers.')->middleware('company')->group(function (): void {
+                    Route::get('/', [CustomerController::class, 'index'])->name('index');
+                    Route::post('/', [CustomerController::class, 'store'])->name('store');
+                    Route::get('{customer}', [CustomerController::class, 'show'])->name('show');
+                    Route::put('{customer}', [CustomerController::class, 'update'])->name('update');
+                    Route::delete('{customer}', [CustomerController::class, 'destroy'])->name('destroy');
+                    Route::post('{customer}/archive', [CustomerController::class, 'archive'])->name('archive');
+                    Route::post('{customer}/restore', [CustomerController::class, 'restore'])->name('restore')->withTrashed();
+                    Route::post('{customer}/deactivate', [CustomerController::class, 'deactivate'])->name('deactivate');
+                    Route::post('{customer}/reactivate', [CustomerController::class, 'reactivate'])->name('reactivate');
                 });
 
                 /*
