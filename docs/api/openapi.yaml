@@ -107,6 +107,8 @@ tags:
     description: The append-only trail and the activity feed.
   - name: Accounting
     description: The double-entry ledger — chart of accounts, journal entries, the fiscal calendar and reports.
+  - name: Sales
+    description: Customers and the tax codes their invoices will charge.
 
 paths:
   # ── Workspaces ────────────────────────────────────────────────────────────
@@ -2664,6 +2666,229 @@ paths:
                               credit: { $ref: '#/components/schemas/Amount' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ── Sales: tax codes ─────────────────────────────────────────────────────
+  /companies/{companyId}/tax-codes:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Sales]
+      operationId: listTaxCodes
+      summary: The company's tax codes
+      description: |
+        A bounded configuration catalogue like the chart of accounts, so this is unpaginated.
+        Inactive codes are omitted unless `active_only=0`: a closed historical range usually
+        stays `is_active` and remains visible, since a document issued under it still needs to
+        resolve the rate it charged.
+      parameters:
+        - name: active_only
+          in: query
+          schema: { type: boolean, default: true }
+        - name: code
+          in: query
+          description: Exact code match, case-insensitive. Newest range first when a code carries several.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The tax codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/TaxCode' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Sales]
+      operationId: createTaxCode
+      summary: Add a tax code
+      description: |
+        `sales.tax-codes.manage` only — a bookkeeper reads the rates an invoice will charge but
+        does not decide what they are. A charging rate (anything above zero) needs an
+        `output_account_id` naming the liability tax charged under it posts to; an exempt or
+        zero-rated code must carry a zero rate by definition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaxCodeRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/TaxCode' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: This code already has a rate covering part of the requested range.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/tax-codes/{taxCodeId}:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/TaxCodeId'
+    get:
+      tags: [Sales]
+      operationId: getTaxCode
+      summary: One tax code
+      responses:
+        '200': { $ref: '#/components/responses/TaxCodeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Sales]
+      operationId: updateTaxCode
+      summary: Amend a tax code
+      description: |
+        Every field is optional; only what is sent changes. Setting `effective_to` to `null`
+        reopens a closed range. `rate` and `effective_from` are refused once the rate has been
+        applied to a document — those are historical facts an invoice was priced against; the
+        way to change what a code charges going forward is `POST .../end-range` followed by a
+        new code carrying the new rate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaxCodeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/TaxCodeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The range overlaps another rate on this code, or the rate/start date has already been applied to a document.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Sales]
+      operationId: deleteTaxCode
+      summary: Delete a tax code that was never used
+      description: |
+        Refused with `422` for any code already applied to a document — the document's tax has
+        to stay explicable, so the code it cited has to stay resolvable. Deactivate is the
+        ordinary path; this is only for a genuine mistake.
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The tax code has been applied to a document.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/tax-codes/{taxCodeId}/end-range:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/TaxCodeId'
+    post:
+      tags: [Sales]
+      operationId: endTaxCodeRange
+      summary: End the current rate's effective range
+      description: |
+        The intended way to change what a code charges: close the current row on its last day so
+        a successor row can open the next. Doing this through `PUT` would mean remembering which
+        date goes where, and an off-by-one leaves either a gap no document can resolve or an
+        overlap the database refuses.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                last_effective_day: { type: string, format: date }
+              required: [last_effective_day]
+      responses:
+        '200': { $ref: '#/components/responses/TaxCodeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The new range overlaps another rate on this code.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The given day falls before the range starts.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/tax-codes/{taxCodeId}/deactivate:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/TaxCodeId'
+    post:
+      tags: [Sales]
+      operationId: deactivateTaxCode
+      summary: Stop offering a tax code without deleting it
+      description: |
+        Does not end the effective range: a code inactive for new documents still holds its
+        dates, because a document already issued under it must still resolve the rate it charged.
+      responses:
+        '200': { $ref: '#/components/responses/TaxCodeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The tax code is already inactive.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/tax-codes/{taxCodeId}/reactivate:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/TaxCodeId'
+    post:
+      tags: [Sales]
+      operationId: reactivateTaxCode
+      summary: Offer a deactivated tax code again
+      responses:
+        '200': { $ref: '#/components/responses/TaxCodeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The tax code is already active.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/tax-codes/{taxCodeId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/TaxCodeId'
+    post:
+      tags: [Sales]
+      operationId: restoreTaxCode
+      summary: Bring a deleted tax code back
+      description: |
+        Refused with `422` if the code was never deleted. Refused with `409` if the code and
+        date range it held have since been taken by another row — end that row's range first, or
+        restore this one over different dates.
+      responses:
+        '200': { $ref: '#/components/responses/TaxCodeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The code and range this row held have since been taken by another.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The tax code was never deleted.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -2714,6 +2939,11 @@ components:
 
     AccountId:
       name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TaxCodeId:
+      name: taxCodeId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -2850,6 +3080,15 @@ components:
             type: object
             properties:
               data: { $ref: '#/components/schemas/Account' }
+              meta: { $ref: '#/components/schemas/Meta' }
+    TaxCodeResponse:
+      description: A tax code.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/TaxCode' }
               meta: { $ref: '#/components/schemas/Meta' }
     JournalEntryResponse:
       description: A journal entry, with its lines.
@@ -3446,6 +3685,62 @@ components:
       description: |
         On `PUT` every field is optional and only what is sent changes. `normal_balance` and
         `statement` are never accepted — they are derived from `type`.
+
+    TaxCode:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        code: { type: string, maxLength: 32, example: VAT }
+        name: { type: string, example: Value Added Tax }
+        tax_type: { type: string, enum: [vat, svat, exempt, zero_rated] }
+        tax_type_label: { type: string }
+        rate:
+          type: string
+          description: A **percentage** as a decimal string — `18.0000` means 18%, never 0.18. Never a number; the ledger scale needs exact decimal arithmetic.
+          example: '18.0000'
+        output_account_id:
+          type: [string, 'null']
+          format: uuid
+          description: Where tax charged under this code posts. Null only for a code that charges nothing.
+        input_account_id:
+          type: [string, 'null']
+          format: uuid
+          description: Where recoverable tax on purchases would post. Unused by sales.
+        is_active: { type: boolean }
+        effective_from: { type: string, format: date }
+        effective_to: { type: [string, 'null'], format: date }
+        is_open_ended:
+          type: boolean
+          description: Whether this row's range is still open — the ordinary state of a company's current rate.
+        notes: { type: [string, 'null'] }
+        deleted_at: { type: [string, 'null'], format: date-time }
+        capabilities:
+          type: object
+          properties:
+            can_update: { type: boolean }
+            can_delete: { type: boolean }
+            charges_tax: { type: boolean, description: Whether this rate is above zero — model state, not a gate. }
+
+    TaxCodeRequest:
+      type: object
+      properties:
+        code: { type: string, minLength: 1, maxLength: 32 }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        tax_type: { type: string, enum: [vat, svat, exempt, zero_rated] }
+        rate:
+          type: string
+          description: A percentage as a decimal string, e.g. `'18'` for 18%. Sign, 0–100 and zero-rate-type rules are enforced server-side so the refusal names the actual problem.
+        effective_from: { type: string, format: date }
+        effective_to: { type: [string, 'null'], format: date }
+        output_account_id: { type: [string, 'null'], format: uuid }
+        input_account_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'], maxLength: 5000 }
+        is_active: { type: boolean, default: true }
+      required: [code, name, tax_type, rate, effective_from]
+      description: |
+        On `PUT` every field is optional and only what is sent changes; setting `effective_to` to
+        `null` reopens a closed range.
 
     JournalEntry:
       type: object

@@ -21,6 +21,7 @@ use Asids\Core\Identity\Presentation\Http\Controllers\UserController;
 use Asids\Core\Organization\Presentation\Http\Controllers\BranchController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyMembershipController;
+use Asids\Core\Sales\Presentation\Http\Controllers\TaxCodeController;
 use Asids\Core\Settings\Presentation\Http\Controllers\SettingsController;
 use Asids\Core\Tenancy\Presentation\Http\Controllers\TenantRegistrationController;
 use Illuminate\Support\Facades\Route;
@@ -360,6 +361,25 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
                 Route::prefix('{company}/reports')->name('reports.')->middleware('company')->group(function (): void {
                     Route::get('trial-balance', [LedgerReportController::class, 'trialBalance'])->name('trial-balance');
+                });
+
+                /*
+                 * ── Sales: tax codes ────────────────────────────────────────
+                 *
+                 * A company's tax configuration is company-owned for the same reason the chart of
+                 * accounts is: the rate an invoice charges belongs to one set of books, and a flat
+                 * route would invite a query that forgets to scope by company.
+                 */
+                Route::prefix('{company}/tax-codes')->name('tax-codes.')->middleware('company')->group(function (): void {
+                    Route::get('/', [TaxCodeController::class, 'index'])->name('index');
+                    Route::post('/', [TaxCodeController::class, 'store'])->name('store');
+                    Route::get('{taxCode}', [TaxCodeController::class, 'show'])->name('show');
+                    Route::put('{taxCode}', [TaxCodeController::class, 'update'])->name('update');
+                    Route::delete('{taxCode}', [TaxCodeController::class, 'destroy'])->name('destroy');
+                    Route::post('{taxCode}/end-range', [TaxCodeController::class, 'endRange'])->name('end-range');
+                    Route::post('{taxCode}/deactivate', [TaxCodeController::class, 'deactivate'])->name('deactivate');
+                    Route::post('{taxCode}/reactivate', [TaxCodeController::class, 'reactivate'])->name('reactivate');
+                    Route::post('{taxCode}/restore', [TaxCodeController::class, 'restore'])->name('restore')->withTrashed();
                 });
 
                 Route::prefix('{company}/members')->name('members.')->middleware('company')->group(function (): void {
