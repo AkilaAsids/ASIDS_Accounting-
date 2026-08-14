@@ -678,7 +678,11 @@ describe('the audit trail', function (): void {
 
         // Lines have no life of their own — auditing them as well would turn a three-line edit into four
         // unrelated events, and the invoice's own entries already record the document changing.
-        expect(AuditLog::query()->where('auditable_type', SalesInvoiceLine::MORPH_ALIAS)->count())->toBe(0);
+        //
+        // Both spellings are checked because Stage 5 removed the line's morph alias (decision B6). Without a
+        // map an audit entry would store the class name, so asserting only the alias would pass vacuously.
+        expect(AuditLog::query()->where('auditable_type', 'sales_invoice_line')->count())->toBe(0)
+            ->and(AuditLog::query()->where('auditable_type', SalesInvoiceLine::class)->count())->toBe(0);
     });
 });
 

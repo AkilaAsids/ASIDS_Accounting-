@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use Asids\Core\Accounting\Application\Services\ChartTemplateService;
+use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
 use Asids\Core\Accounting\Domain\Models\Account;
+use Asids\Core\Authorization\Application\Services\PermissionSynchroniser;
 use Asids\Core\Authorization\Domain\Catalogue\PermissionCatalogue;
 use Asids\Core\Authorization\Domain\Catalogue\RoleTemplate;
 use Asids\Core\Identity\Domain\Models\User;
@@ -22,6 +24,7 @@ use Asids\Core\Sales\Policies\SalesInvoicePolicy;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -44,6 +47,10 @@ beforeEach(function (): void {
     $this->owner = $this->acme['owner'];
 
     app(ChartTemplateService::class)->apply($this->company);
+
+    // Added by Stage 5: the issuing and cancellation groups post to the ledger, which needs a period to post
+    // into. Harmless to the drafting groups, which never reach the calendar.
+    app(FiscalCalendarService::class)->openYearContaining($this->company, CarbonImmutable::parse('2026-06-15'));
 
     $this->revenue = Account::query()->forCompany($this->company->getKey())->where('code', '4100')->firstOrFail();
 
@@ -78,62 +85,77 @@ function invoiceMemberWithRole(string $role, string $email): User
 }
 
 describe('the permission catalogue', function (): void {
-    it('declares both invoice capabilities', function (): void {
+    it('declares all four invoice capabilities', function (): void {
         $names = array_map(
             static fn (object $definition): string => $definition->name(),
             PermissionCatalogue::all(),
         );
 
+        // Issuing and cancellation arrived with Milestone 5 Stage 5, alongside the transitions they guard —
+        // which is why they were absent until now rather than declared against operations nobody could call.
         expect($names)->toContain('sales.invoices.view')
-            ->and($names)->toContain('sales.invoices.draft');
+            ->and($names)->toContain('sales.invoices.draft')
+            ->and($names)->toContain('sales.invoices.issue')
+            ->and($names)->toContain('sales.invoices.cancel');
     });
 
-    it('does not declare issuing or cancellation yet', function (): void {
-        $names = array_map(
-            static fn (object $definition): string => $definition->name(),
-            PermissionCatalogue::all(),
-        );
-
-        // Milestone 5's capabilities are absent on purpose. Declaring authorisation for an operation that does
-        // not exist means writing a guard nobody can test, which is how a guard ends up protecting the wrong
-        // thing.
-        expect($names)->not->toContain('sales.invoices.issue')
-            ->and($names)->not->toContain('sales.invoices.cancel');
-    });
-
-    it('marks neither invoice capability sensitive', function (): void {
+    it('marks issuing and cancellation sensitive, and drafting not', function (): void {
         $definitions = [];
 
         foreach (PermissionCatalogue::all() as $definition) {
             $definitions[$definition->name()] = $definition;
         }
 
-        // Deliberate, and the contrast with `sales.tax-codes.manage` is the point: a draft can be corrected or
-        // deleted with no trace and no consequence. Issuing is what will carry the marker.
+        // The contrast is the point. A draft has no number, is not in the ledger and the customer has never
+        // seen it, so it can be corrected or deleted with no trace. Issuing consumes a number from a gapless
+        // series and posts to the books; cancelling reverses a posting that is now permanent.
         expect($definitions['sales.invoices.view']->sensitive)->toBeFalse()
-            ->and($definitions['sales.invoices.draft']->sensitive)->toBeFalse();
+            ->and($definitions['sales.invoices.draft']->sensitive)->toBeFalse()
+            ->and($definitions['sales.invoices.issue']->sensitive)->toBeTrue()
+            ->and($definitions['sales.invoices.cancel']->sensitive)->toBeTrue();
+    });
+
+    it('orders the invoice capabilities as they escalate', function (): void {
+        $definitions = [];
+
+        foreach (PermissionCatalogue::all() as $definition) {
+            $definitions[$definition->name()] = $definition;
+        }
+
+        // Read, prepare, commit, undo. The order is what a permissions screen shows a customer, so it should
+        // read as increasing consequence rather than as the order someone happened to add them.
+        expect($definitions['sales.invoices.view']->sortOrder)->toBe(50)
+            ->and($definitions['sales.invoices.draft']->sortOrder)->toBe(60)
+            ->and($definitions['sales.invoices.issue']->sortOrder)->toBe(70)
+            ->and($definitions['sales.invoices.cancel']->sortOrder)->toBe(80);
     });
 });
 
 describe('role grants', function (): void {
-    it('gives the accountant both capabilities', function (): void {
+    it('gives the accountant all four capabilities', function (): void {
         $template = collect(RoleTemplate::all())->firstOrFail(
             static fn (RoleTemplate $t): bool => $t->name === 'accountant',
         );
 
+        // The same side of the split this template holds for the ledger, where it has
+        // `accounting.journals.post` and `.reverse`.
         expect($template->permissions)->toContain('sales.invoices.view')
-            ->and($template->permissions)->toContain('sales.invoices.draft');
+            ->and($template->permissions)->toContain('sales.invoices.draft')
+            ->and($template->permissions)->toContain('sales.invoices.issue')
+            ->and($template->permissions)->toContain('sales.invoices.cancel');
     });
 
-    it('gives the bookkeeper both capabilities', function (): void {
+    it('lets the bookkeeper draft but neither issue nor cancel', function (): void {
         $template = collect(RoleTemplate::all())->firstOrFail(
             static fn (RoleTemplate $t): bool => $t->name === 'bookkeeper',
         );
 
-        // Unlike tax codes, which a bookkeeper may only read. Drafting an invoice is the ordinary day-to-day
-        // work this role exists for, and the split that matters is issuing.
+        // The whole reason the split exists: a bookkeeper records what was sold, and someone else commits it
+        // to the ledger and the customer — or reverses that commitment.
         expect($template->permissions)->toContain('sales.invoices.view')
-            ->and($template->permissions)->toContain('sales.invoices.draft');
+            ->and($template->permissions)->toContain('sales.invoices.draft')
+            ->and($template->permissions)->not->toContain('sales.invoices.issue')
+            ->and($template->permissions)->not->toContain('sales.invoices.cancel');
     });
 
     it('gives the viewer read access only', function (): void {
@@ -142,7 +164,9 @@ describe('role grants', function (): void {
         );
 
         expect($template->permissions)->toContain('sales.invoices.view')
-            ->and($template->permissions)->not->toContain('sales.invoices.draft');
+            ->and($template->permissions)->not->toContain('sales.invoices.draft')
+            ->and($template->permissions)->not->toContain('sales.invoices.issue')
+            ->and($template->permissions)->not->toContain('sales.invoices.cancel');
     });
 
     it('grants drafting to exactly the templates intended', function (): void {
@@ -158,6 +182,19 @@ describe('role grants', function (): void {
         // a fourth is a change that fails this test rather than passing unnoticed.
         expect($drafting)->toBe(['administrator', 'accountant', 'bookkeeper']);
     });
+
+    it('grants issuing and cancellation to exactly the templates intended', function (string $permission): void {
+        $holders = collect(RoleTemplate::all())
+            ->reject(static fn (RoleTemplate $t): bool => $t->isOwner)
+            ->filter(static fn (RoleTemplate $t): bool => in_array($permission, $t->permissions, true))
+            ->map(static fn (RoleTemplate $t): string => $t->name)
+            ->values()
+            ->all();
+
+        // Narrower than drafting by exactly one role, which is the point of adding them at all. `administrator`
+        // is there because it is the whole grantable catalogue — the automatic inheritance ADR 0003 designed.
+        expect($holders)->toBe(['administrator', 'accountant']);
+    })->with(['sales.invoices.issue', 'sales.invoices.cancel']);
 });
 
 describe('the accountant and the bookkeeper', function (): void {
@@ -173,6 +210,126 @@ describe('the accountant and the bookkeeper', function (): void {
         ['accountant', 'inv-acct@acme.test'],
         ['bookkeeper', 'inv-book@acme.test'],
     ]);
+});
+
+describe('reaching an existing workspace', function (): void {
+    it('synchronises the new capabilities into a workspace that predates them', function (): void {
+        // The rollout question, and the reason it needs asserting: permissions are code, not a migration, so a
+        // workspace provisioned before Stage 5 acquires these only when the synchroniser runs. Deleting the
+        // rows and re-running reproduces that workspace without needing one.
+        RowLevelSecurity::bypass(static function (): void {
+            DB::table('permissions')->whereIn('name', ['sales.invoices.issue', 'sales.invoices.cancel'])->delete();
+        });
+
+        expect(RowLevelSecurity::bypass(static fn (): int => DB::table('permissions')
+            ->whereIn('name', ['sales.invoices.issue', 'sales.invoices.cancel'])->count()))->toBe(0);
+
+        $result = RowLevelSecurity::bypass(static fn (): array => app(PermissionSynchroniser::class)->sync());
+
+        expect($result['created'])->toBe(2)
+            ->and(RowLevelSecurity::bypass(static fn (): int => DB::table('permissions')
+                ->whereIn('name', ['sales.invoices.issue', 'sales.invoices.cancel'])
+                ->where('is_sensitive', true)
+                ->count()))->toBe(2);
+    });
+});
+
+describe('issuing and cancelling', function (): void {
+    it('lets an accountant do both', function (): void {
+        $accountant = invoiceMemberWithRole('accountant', 'inv-issue-acct@acme.test');
+
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        expect($accountant->can('issue', $this->invoice->refresh()))->toBeFalse()
+            // Refused above only because the invoice is no longer a draft — the advisory state check. The
+            // capability itself is held, which the cancellation below demonstrates.
+            ->and($accountant->can('cancel', $issued))->toBeTrue();
+    });
+
+    it('lets an accountant issue a draft', function (): void {
+        $accountant = invoiceMemberWithRole('accountant', 'inv-issue-draft@acme.test');
+
+        expect($accountant->can('issue', $this->invoice))->toBeTrue();
+    });
+
+    it('refuses a bookkeeper both, while still allowing drafting', function (): void {
+        $bookkeeper = invoiceMemberWithRole('bookkeeper', 'inv-issue-book@acme.test');
+
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        expect($bookkeeper->can('update', $this->invoice->refresh()))->toBeTrue()
+            ->and($bookkeeper->can('issue', $this->invoice))->toBeFalse()
+            ->and($bookkeeper->can('cancel', $issued))->toBeFalse();
+    });
+
+    it('refuses a viewer both', function (): void {
+        $viewer = invoiceMemberWithRole('viewer', 'inv-issue-view@acme.test');
+
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        expect($viewer->can('issue', $this->invoice))->toBeFalse()
+            ->and($viewer->can('cancel', $issued))->toBeFalse();
+    });
+
+    it('refuses someone holding the capability but not a member of the company', function (): void {
+        $outsider = $this->createUserWithRole($this->acme['tenant'], 'accountant', ['email' => 'inv-iss-out@acme.test']);
+        $fresh = RowLevelSecurity::bypass(static fn () => $outsider->fresh());
+
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        // Permission and membership are different questions, and both new methods ask both.
+        expect($fresh->can('issue', $this->invoice))->toBeFalse()
+            ->and($fresh->can('cancel', $issued))->toBeFalse();
+    });
+
+    it('applies the state check as guidance for a client', function (): void {
+        $accountant = invoiceMemberWithRole('accountant', 'inv-state@acme.test');
+
+        // A draft cannot be cancelled and an issued invoice cannot be issued again. Asserted so the advisory
+        // half of the policy is covered — a client asking these decides whether to show a button.
+        expect($accountant->can('cancel', $this->invoice))->toBeFalse();
+
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        expect($accountant->can('issue', $issued))->toBeFalse()
+            ->and($accountant->can('cancel', $issued))->toBeTrue();
+    });
+});
+
+describe('the tenant owner', function (): void {
+    it('passes every policy through the Gate::before short circuit', function (): void {
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        // Note what this proves: `issue` is allowed on an *already issued* invoice. The owner never reaches
+        // `SalesInvoicePolicy`, so its status check is unreachable for them. That is why the policy's state
+        // checks are advisory and the service is the enforcement.
+        expect($this->owner->can('issue', $issued))->toBeTrue()
+            ->and($this->owner->can('cancel', $issued))->toBeTrue();
+    });
+
+    it('is still refused by the service when the invoice cannot be issued', function (): void {
+        $issued = app(SalesInvoiceService::class)->issue($this->invoice, $this->owner);
+
+        // The trap this architecture exists to avoid, asserted rather than assumed: the gate says yes and the
+        // service says no. Had the state rule lived only in the policy, an owner would have been able to issue
+        // the same invoice twice.
+        $exception = catchPlatformException(
+            fn () => app(SalesInvoiceService::class)->issue($issued->refresh(), $this->owner)
+        );
+
+        expect($exception->problemCode())->toBe('invoice-not-a-draft');
+    });
+
+    it('is still refused by the service when the invoice cannot be cancelled', function (): void {
+        // A draft: the gate allows `cancel` for an owner, and the service refuses it.
+        expect($this->owner->can('cancel', $this->invoice))->toBeTrue();
+
+        $exception = catchPlatformException(
+            fn () => app(SalesInvoiceService::class)->cancel($this->invoice, 'Not issued yet', $this->owner)
+        );
+
+        expect($exception->problemCode())->toBe('invoice-not-issued');
+    });
 });
 
 describe('the viewer', function (): void {
@@ -237,11 +394,16 @@ describe('provider registration', function (): void {
             ->and(app(InvoiceTotalsCalculator::class))->toBe(app(InvoiceTotalsCalculator::class));
     });
 
-    it('registers both invoice morph aliases', function (): void {
+    it('registers the invoice morph alias, and only that one', function (): void {
         // `SalesInvoice` applies `Auditable`, and the enforced morph map means an audit entry for an unmapped
-        // class throws rather than storing a class name a rename would orphan. The line alias is registered too,
-        // because Milestone 5's `SourceDocument` will refuse an unmapped model.
-        expect(Relation::getMorphedModel(SalesInvoice::MORPH_ALIAS))->toBe(SalesInvoice::class)
-            ->and(Relation::getMorphedModel(SalesInvoiceLine::MORPH_ALIAS))->toBe(SalesInvoiceLine::class);
+        // class throws rather than storing a class name a rename would orphan. It is also what
+        // `SourceDocument` feeds back through `getMorphedModel()` when an issued invoice cites its posting.
+        expect(Relation::getMorphedModel(SalesInvoice::MORPH_ALIAS))->toBe(SalesInvoice::class);
+
+        // The line's alias was removed by decision B6. A line is never audited separately and can never be a
+        // source document, so registering one claimed something may point at it — and the first caller to
+        // believe that claim would have been wrong to.
+        expect(Relation::getMorphedModel('sales_invoice_line'))->toBeNull()
+            ->and(defined(SalesInvoiceLine::class.'::MORPH_ALIAS'))->toBeFalse();
     });
 });

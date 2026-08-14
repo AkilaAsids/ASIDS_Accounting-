@@ -104,10 +104,13 @@ final readonly class RoleTemplate
                     'sales.tax-codes.view',
                     'sales.tax-codes.manage',
 
-                    // Drafts invoices as well. Issuing is a separate capability arriving with Milestone 5;
-                    // preparing the document is ordinary work an accountant does daily.
+                    // Drafts invoices, and is the side of the split that commits them. The same reasoning as
+                    // `accounting.journals.post` and `.reverse` above: preparing a document is ordinary work,
+                    // deciding it is part of the record — and undoing that decision — is the accountant's.
                     'sales.invoices.view',
                     'sales.invoices.draft',
+                    'sales.invoices.issue',
+                    'sales.invoices.cancel',
                 ],
             ),
 
@@ -145,8 +148,9 @@ final readonly class RoleTemplate
                     // accountant's call, and the same drafting/posting split reasoning applies.
                     'sales.tax-codes.view',
 
-                    // Drafts invoices. This is the role the drafting/issuing split exists for: a bookkeeper
-                    // records what was sold, and someone else commits it to the ledger and the customer.
+                    // Drafts invoices, and neither issues nor cancels. This is the role the drafting/issuing
+                    // split exists for: a bookkeeper records what was sold, and someone else commits it to the
+                    // ledger and the customer — or reverses that commitment.
                     'sales.invoices.view',
                     'sales.invoices.draft',
                 ],

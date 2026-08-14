@@ -14,7 +14,6 @@ use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
-use Asids\Core\Sales\Domain\Models\SalesInvoiceLine;
 use Asids\Core\Sales\Domain\Models\TaxCode;
 use Asids\Core\Sales\Infrastructure\NoReceivables;
 use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
@@ -98,7 +97,6 @@ final class SalesServiceProvider extends ServiceProvider
             Customer::MORPH_ALIAS => Customer::class,
             TaxCode::MORPH_ALIAS => TaxCode::class,
             SalesInvoice::MORPH_ALIAS => SalesInvoice::class,
-            SalesInvoiceLine::MORPH_ALIAS => SalesInvoiceLine::class,
         ]);
     }
 }

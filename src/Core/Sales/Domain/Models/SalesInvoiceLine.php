@@ -69,8 +69,14 @@ final class SalesInvoiceLine extends Model
 
     use HasUuids;
 
-    public const string MORPH_ALIAS = 'sales_invoice_line';
-
+    /*
+     * No morph alias, by decision B6.
+     *
+     * A line is never the subject of a polymorphic reference: it is not audited separately — the invoice's own
+     * entries record the document changing — and it can never be a `SourceDocument`, because what causes a
+     * ledger entry is the invoice, not one of its rows. An alias registered for neither purpose is a claim
+     * that something may point here, and the first thing to act on that claim would be wrong to.
+     */
     protected $table = 'sales_invoice_lines';
 
     /**

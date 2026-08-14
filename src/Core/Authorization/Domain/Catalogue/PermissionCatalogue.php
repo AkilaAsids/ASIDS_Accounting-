@@ -252,6 +252,14 @@ final class PermissionCatalogue
             // to the customer, and that capability arrives with Milestone 5 rather than being declared unused
             // here.
             new PermissionDefinition('sales', 'invoices', 'draft', 'Draft sales invoices', 'Prepare, change and delete draft invoices before they are issued.', sortOrder: 60),
+            // The capability the comment above anticipated, arriving with Milestone 5. Issuing takes a number
+            // from a gapless series, posts to the ledger and produces a document the customer receives — none
+            // of which can be taken back except by a cancellation that is itself permanent.
+            new PermissionDefinition('sales', 'invoices', 'issue', 'Issue sales invoices', 'Commit a draft to the ledger and to the customer.', sensitive: true, sortOrder: 70),
+            // Separate from issuing rather than folded into it, following `accounting.journals.post` and
+            // `.reverse`. A business may well let someone raise invoices without letting them undo one, and a
+            // single combined ability could not express that.
+            new PermissionDefinition('sales', 'invoices', 'cancel', 'Cancel sales invoices', 'Reverse an issued invoice’s posting, keeping both entries in the ledger.', sensitive: true, sortOrder: 80),
         ];
     }
 
