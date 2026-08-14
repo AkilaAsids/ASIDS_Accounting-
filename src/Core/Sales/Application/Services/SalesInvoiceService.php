@@ -4,9 +4,16 @@ declare(strict_types=1);
 
 namespace Asids\Core\Sales\Application\Services;
 
+use Asids\Core\Accounting\Application\DTOs\JournalEntryData;
+use Asids\Core\Accounting\Application\Services\DocumentNumberService;
+use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
+use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Enums\AccountType;
+use Asids\Core\Accounting\Domain\Enums\DocumentType;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
+use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
+use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
@@ -14,9 +21,11 @@ use Asids\Core\Sales\Application\DTOs\SalesInvoiceData;
 use Asids\Core\Sales\Application\DTOs\SalesInvoiceLineData;
 use Asids\Core\Sales\Domain\Enums\SalesInvoiceStatus;
 use Asids\Core\Sales\Domain\Exceptions\InvalidInvoiceDiscount;
+use Asids\Core\Sales\Domain\Exceptions\InvoiceCannotBeIssued;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Asids\Core\Sales\Domain\Models\SalesInvoiceLine;
+use Asids\Core\Sales\Domain\Models\TaxCode;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
@@ -46,6 +55,10 @@ final readonly class SalesInvoiceService
     public function __construct(
         private TaxRateResolver $resolver,
         private InvoiceTotalsCalculator $totals,
+        private InvoicePostingMap $postingMap,
+        private PostingService $posting,
+        private DocumentNumberService $numbers,
+        private FiscalCalendarService $calendar,
     ) {}
 
     public function createDraft(Company $company, SalesInvoiceData $data, ?string $createdById = null): SalesInvoice
@@ -153,6 +166,108 @@ final readonly class SalesInvoiceService
                 : $this->lineDataFromExisting($invoice);
 
             $this->replaceLines($invoice, $company, $lines, $discount);
+
+            return $invoice->refresh();
+        });
+    }
+
+    /**
+     * Turn a draft into an issued invoice, posted to the ledger.
+     *
+     * The moment the document becomes real: it gets a number a customer will quote, a date it was issued on, and
+     * an entry in a ledger that will never let it be edited again. All of it commits together or none of it does.
+     *
+     * WHY EVERYTHING IS RE-VALIDATED HERE
+     * -----------------------------------
+     * A draft written in March and issued in June has had three months in which its customer could be archived,
+     * its revenue account reclassified, its tax code's output account cleared, or its period closed. Draft-time
+     * validation says what was true when it was written; approved decision B5 says the only validation that
+     * matters is the one at the moment of posting. So every account, the customer and the calendar are checked
+     * again, and none of the checks is skipped on the grounds that `createDraft` already made it.
+     *
+     * WHAT IS NOT RECOMPUTED
+     * ----------------------
+     * The money. `line_subtotal` and `tax_amount` were rounded to the currency when the draft was written, and
+     * the header CHECK holds `total = subtotal + tax_total`. Re-resolving a tax rate here would silently reprice
+     * a document the customer has already seen; recomputing the totals would risk a different rounding path
+     * producing an entry that does not balance. The posting map sums the stored values, which is why the entry
+     * balances by construction rather than by luck.
+     *
+     * TWO NUMBERS, TWO SEQUENCES
+     * --------------------------
+     * The invoice takes `INV-…` from the `sales_invoice` counter. Its journal entry takes `JV-…` from the
+     * journal voucher counter, because `document_sequences` is keyed on the document type and a single counter
+     * feeding both would hand the invoice 0001 and its own entry 0002 — invoice numbers running 1, 3, 5, which
+     * is precisely the gap `requiresGaplessNumbering()` promises never to leave. The entry is still identifiably
+     * this invoice's: it carries the invoice as its source document, and the unique index over `source_id` is
+     * what makes a second posting impossible.
+     *
+     * ORDER MATTERS, AND THE ORDER IS DELIBERATE
+     * ------------------------------------------
+     * Everything that can refuse runs before anything is reserved. A closed period, an archived account or a
+     * zero total costs no document number, because `document_sequences` is incremented under a row lock inside
+     * this transaction — a rollback returns the number, but only if we never needed it in the first place is the
+     * failure free of contention.
+     */
+    public function issue(SalesInvoice $invoice, ?User $actor = null): SalesInvoice
+    {
+        $invoice->loadMissing(['company', 'customer', 'lines.taxCode']);
+
+        $company = $invoice->company;
+        $identifier = (string) $invoice->getKey();
+
+        // 1–3. What the document is, before what it points at. A cancelled invoice and an empty one fail for
+        // reasons a user can act on without knowing anything about the chart of accounts.
+        if ($invoice->status !== SalesInvoiceStatus::Draft) {
+            throw InvoiceCannotBeIssued::notADraft($invoice->number ?? $identifier, $invoice->status);
+        }
+
+        if ($invoice->lines->isEmpty()) {
+            throw InvoiceCannotBeIssued::withoutLines($identifier);
+        }
+
+        if (bccomp($invoice->total, '0', Money::SCALE) <= 0) {
+            throw InvoiceCannotBeIssued::withZeroTotal($identifier, $invoice->total);
+        }
+
+        // 4. Everything the invoice points at, checked as it is now rather than as it was.
+        $this->assertIssuable($invoice, $company);
+
+        // 5–6. The calendar, before any number is reserved. `PostingService` refuses a closed period too, but
+        // only after it has taken a number of its own.
+        $period = $this->calendar->periodFor($company, $invoice->invoice_date->startOfDay());
+
+        if (! $period->acceptsPostings()) {
+            throw InvoiceCannotBeIssued::intoClosedPeriod($identifier, $period->label, $period->status);
+        }
+
+        // 7. Built before the transaction opens: the map writes nothing, so a refusal here costs no lock.
+        $lines = $this->postingMap->for($invoice);
+
+        return DB::transaction(function () use ($invoice, $company, $period, $lines, $actor): SalesInvoice {
+            // 8. Gapless, and reserved inside the transaction — `DocumentNumberService` refuses to run outside
+            // one, precisely so a rollback returns the number instead of leaving a hole.
+            $number = $this->numbers->next($company, DocumentType::SalesInvoice, $period);
+
+            // 9. `JournalVoucher` by explicit choice, not by omission — see the note above on the two counters.
+            // The source document is what ties the entry back, and what stops it being posted twice.
+            $entry = $this->posting->postNew($company, new JournalEntryData(
+                entryDate: $invoice->invoice_date->startOfDay(),
+                description: sprintf('Invoice %s — %s', $number, $invoice->customer->name),
+                lines: $lines,
+                reference: $number,
+                documentType: DocumentType::JournalVoucher,
+                source: SourceDocument::for($invoice),
+            ), $actor);
+
+            // 10. One save, carrying the whole issued state. Split across two writes it would momentarily be an
+            // invoice that is issued with no number, and `sales_invoices_number_matches_status_check` refuses
+            // exactly that — the constraint is what makes the single save mandatory rather than merely tidy.
+            $invoice->status = SalesInvoiceStatus::Issued;
+            $invoice->number = $number;
+            $invoice->issued_at = now();
+            $invoice->journal_entry_id = $entry->getKey();
+            $invoice->save();
 
             return $invoice->refresh();
         });
@@ -470,6 +585,55 @@ final readonly class SalesInvoiceService
         }
 
         return $branchId;
+    }
+
+    /**
+     * Everything the invoice points at, re-checked as it stands now.
+     *
+     * The B5 contract, minus the accounts — and the omission is deliberate rather than an oversight.
+     * `InvoicePostingMap` already validates every account it touches: company ownership, postability, and the
+     * type rules for receivable, revenue and tax output. Repeating those here would put the same rule in two
+     * places, and two copies of a rule drift. The map runs before the transaction opens, so its refusals are
+     * exactly as free as these — nothing is reserved either way.
+     *
+     * What is left is what the map has no reason to look at: the customer, the tax codes themselves as opposed
+     * to the accounts they name, and the branch.
+     */
+    private function assertIssuable(SalesInvoice $invoice, Company $company): void
+    {
+        // Archived or dormant since the draft was written. Issuing is what creates the receivable, so it is a
+        // new invoice in every sense that matters — `CustomerService::archive()` refuses a customer with a
+        // balance, and letting a draft issue afterwards would create the balance it was archived for not having.
+        $this->resolveCustomer($company, (string) $invoice->customer_id, forNewInvoice: true);
+
+        // The branch may have been reassigned or removed. The posting map copies it onto every journal line, so
+        // a branch belonging elsewhere would tag this company's ledger with another's dimension.
+        $this->resolveBranchId($company, $invoice->branch_id);
+
+        foreach ($invoice->lines as $line) {
+            if ($line->tax_code_id === null) {
+                continue;
+            }
+
+            // The map checks the *output account* belongs to this company; nothing checks the code does. Two
+            // companies in one workspace share a `tenant_id`, so row level security is satisfied by either.
+            $belongs = TaxCode::query()
+                ->forCompany((string) $company->getKey())
+                ->whereKey($line->tax_code_id)
+                ->exists();
+
+            if (! $belongs) {
+                throw BusinessRuleViolation::make(
+                    'tax-code-outside-company',
+                    sprintf(
+                        'Line %d names a tax code belonging to a different company, or one that no longer '
+                        .'exists. The invoice cannot be issued until the line is corrected.',
+                        $line->line_number,
+                    ),
+                    ['line' => $line->line_number],
+                );
+            }
+        }
     }
 
     private function assertEditable(SalesInvoice $invoice): void
