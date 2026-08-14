@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — roadmap
 
-**Last updated:** 2026-08-11
+**Last updated:** 2026-08-13
 
 This exists because the plan previously lived only in commit messages and conversation, so "what is
 left?" had no answer anyone could look up.
@@ -44,7 +44,7 @@ template, immutable double-entry journals enforced by database triggers, gapless
 per-period balance aggregates, opening balances, period and year close, trial balance and account
 ledger. Tagged `phase-2`. See [PHASE-2-STATUS.md](PHASE-2-STATUS.md).
 
-### Phase 3 — Milestones 1 to 3
+### Phase 3 — Milestones 1 to 4
 
 - **Milestone 1** — the source-document link on `journal_entries`, giving a ledger entry a traceable
   cause and the database-level guard against a document posting twice.
@@ -54,10 +54,6 @@ ledger. Tagged `phase-2`. See [PHASE-2-STATUS.md](PHASE-2-STATUS.md).
   resolution by company and date that refuses rather than guessing, percentage-to-factor conversion through
   the existing `Money`, and the jurisdictional seam. Decisions recorded in
   [ADR 0006](adr/0006-tax-code-modelling.md).
-
----
-
-## 🔵 Current
 
 ### Phase 3 — Milestone 4, draft invoices
 
@@ -76,18 +72,77 @@ The decisions governing this milestone are recorded in
 hard-deleted, the issued boundary is prepared structurally but enforced by Milestone 5's trigger, a draft may
 total zero, and decision B1 was withdrawn after its premise proved false.
 
+### Phase 3 — Milestone 6, the Sales HTTP surface
+
+Delivered **out of numerical order**, on `feature/sales-http-api` by a second team working in parallel
+with Milestone 5, and merged through PR #1 as `6a8485c`. That team did not touch the ledger; Milestone 5
+did not touch the HTTP layer.
+
+`CustomerController` and `TaxCodeController` with their form requests and API resources, wired at
+`companies/{company}/customers` and `companies/{company}/tax-codes` behind the company middleware. Nine
+endpoints each. Authorization goes through the **existing** `sales.customers.*` and `sales.tax-codes.*`
+abilities and the existing policies — no new permissions. Acceptance tests were written test-first
+against the approved contract, and `docs/api/openapi.yaml` is verified against the live route list in CI.
+
+Decisions recorded in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md). The milestone
+also closed five debt items through `CustomerService` hardening — I3, I4, M6, M7 and M8, all struck from
+the table below — and made two incidental platform fixes: framework-thrown 403s now render as `forbidden`
+rather than `http-403`, and the base `TestCase` forces the array cache store.
+
+The requirements, endpoint contract and the three lane briefs it was built from are in
+[SALES-HTTP-API-REQUIREMENTS.md](SALES-HTTP-API-REQUIREMENTS.md),
+[SALES-HTTP-API-DESIGN.md](SALES-HTTP-API-DESIGN.md) and [docs/tasks/](tasks/); the delivery record is in
+[STATUS.md](STATUS.md).
+
+### Test-database safety guard
+
+`phpunit.xml` boots through `tests/bootstrap.php`, which forces `DB_DATABASE` and `CACHE_STORE` to safe
+values before the framework reads the environment. Without it the app container's real `.env` values
+leaked past PHPUnit's `<env>` block and `RefreshDatabase` ran `migrate:fresh` against the **development**
+database. Conditional, so CI and parallel testing are unaffected. Cherry-picked to `main` as `ea0f421`.
+
+---
+
+## 🔵 Current
+
+### Phase 3 — Milestone 5, issuing
+
+Six stages, deliberately, so each can be reviewed before the next begins. This is where money reaches the
+ledger, and it warrants the closest review of the eight milestones.
+
+```
+Stage 1 complete — DocumentType::SalesInvoice, the total invariant CHECK, the issued-invoice
+                   immutability triggers
+Stage 2 complete — InvoicePostingMap, InvoiceCannotBePosted, Account::TRADE_RECEIVABLES with its
+                   chart-template registration and idempotent backfill
+Stage 3 not started — issue(): the transaction, gapless number reservation, posting through
+                   PostingService, re-validation at issue, and the failure, rollback and
+                   concurrency tests
+Stage 4 not started — cancellation and reversal through PostingService::reverse()
+Stage 5 not started — permissions, policy, role grants, removal of the SalesInvoiceLine morph alias
+Stage 6 not started — final verification, ADR 0009, roadmap update, CI
+```
+
+Stage 2 shipped in `d781c80`. The posting map writes nothing, posts nothing and reserves no document
+number — it returns `JournalLineData` for the existing `PostingService`, which is what let it be tested
+exhaustively before anything could touch the ledger. Stage 3 connects it to issuing.
+
+The decisions governing this milestone are approved but not yet written up. They are due in Stage 6 as
+**ADR 0009** — ADR 0008 was taken by Milestone 6 while this milestone was in progress. Until then the
+summary in [HANDOVER.md](HANDOVER.md) is the record. Two crossings into the Accounting module have been
+explicitly sanctioned — `DocumentType::SalesInvoice` and `Account::TRADE_RECEIVABLES` — and a third would
+need raising rather than assuming.
+
 ### Phase 3 — remaining milestones 🟢
 
 Scope firm; these follow from the approved Phase 3 design.
 
 | Milestone | Scope |
 | --- | --- |
-| 5 | Issuing — `DocumentType::SalesInvoice`, the posting map, duplicate guards, cancellation, the invoice immutability trigger, and the positive-total rule |
-| 6 | HTTP surface — endpoints, requests, resources, policies, OpenAPI |
 | 7 | Reports — outstanding balance, aged receivables, AR control reconciliation |
 | 8 | Front end — customer and invoice screens, routing, Vitest |
 
-Milestone 5 warrants the closest review of the eight: it is where money reaches the ledger.
+Neither waits on Milestone 5, and Milestone 5 does not wait on them.
 
 ---
 
@@ -183,34 +238,32 @@ applied. They are listed here so they are visible outside the commit messages th
 
 | Ref | Issue | Note |
 | --- | --- | --- |
-| **I3** | `CustomerService::update()` cannot distinguish "clear this field" from "field not supplied" | **Must be resolved before Milestone 6 finalises HTTP `PUT` semantics** — see below |
-| **I4** | Customer code generation reads-then-inserts with no lock | The unique index prevents duplicates, so this is an error-shape defect: a concurrent create surfaces as a raw `QueryException` rather than a 409 |
-| **M5** | `CustomerFactory` is not exercised by any test or seeder | Untested code that Milestone 4 will start relying on |
-| **M6** | `credit_limit` and `payment_terms_days` are in `Customer::$fillable` | Currently inert — the service assigns directly — but a future `fill()` would bypass `resolveCreditLimit()` validation |
-| **M7** | `CustomerService::archive()` hardcodes scale 4 instead of `Money::SCALE` | Cosmetic today; a scale change would miss it |
-| **M8** | `applyAttributes()` assigns before validating | The transaction rolls the database back; the in-memory model keeps the invalid values |
+| **M5** | `CustomerFactory` is not exercised by any test or seeder | Untested code that later milestones rely on |
+| **N3** | Same-workspace 403-vs-404 existence oracle | A caller can distinguish "exists but forbidden" from "does not exist". Platform-wide — accounts and journals share the pattern — so it wants fixing once across all modules rather than per module. Raised by Milestone 6's security review and recorded in [STATUS.md](STATUS.md) |
 | — | `Gate::before` grants a tenant owner every ability | Short-circuits *state* preconditions in policies, so any `capabilities` block must ask the model for state as well as the gate. Root cause unfixed by product decision — changing it would subject owners to membership-based company access |
 | — | `TenantProvisioningService` does five things in one transaction and depends outward on three modules | ADR 0005 predicted the extraction point; each new module adds tables to it |
+| — | Two competing patterns: Phase 1 repositories versus Phase 2 services querying models directly | Pick one before a third module is written. The largest architectural decision still open |
+| — | A stale `// EXPERIMENT: temporarily disabled` comment sits above an **active** `RecordRequestContext::class` in `bootstrap/app.php` | Comment-only: the middleware is registered and running, so the comment states the opposite of the truth |
+| — | `tests/bootstrap.php` keys on the substring `"testing"` | Any future database name lacking it is silently redirected to `asids_erp_testing`. Fails in the safe direction, but it is now a naming convention to honour |
 
-### I3 blocks Milestone 6
+### Closed by Milestone 6
 
-Stated separately because it is the only item on this list with a hard dependency.
+Five items were resolved by the `CustomerService` hardening that shipped with the Sales HTTP surface, and
+are recorded here rather than deleted because older notes still describe them as open. The reasoning is
+in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md).
 
-Milestone 6 exposes `PUT /companies/{companyId}/customers/{customerId}`. A customer has nullable fields
-a user must be able to clear — the branch, the receivable account override — and the current DTO cannot
-express the difference between omitting a field and clearing it. Shipping the endpoint first would bake
-that ambiguity into the public API, where changing it later is a breaking change rather than a
-refactor.
-
-**I3 must therefore be resolved before Milestone 6's `PUT` semantics are finalised.** Milestone 3
-sidestepped it rather than inheriting it: `TaxCodeService::update()` takes an attributes array and uses
-`array_key_exists()`, following `ChartOfAccountsService::update()`, which is the one mechanism in the
-codebase that expresses the distinction. That is a precedent for the eventual fix, not the fix itself.
+| Ref | Was | Resolution |
+| --- | --- | --- |
+| **I3** | `CustomerService::update()` could not distinguish "clear this field" from "field not supplied" — it took a whole `CustomerData` DTO | ✅ Takes a partial attribute array with `array_key_exists()` semantics, matching `TaxCodeService::update()` and `ChartOfAccountsService::update()`. **This was the hard blocker on Milestone 6's `PUT` semantics; it is gone** |
+| **I4** | Customer code generation read-then-inserted with no lock, so a concurrent create surfaced as a raw `QueryException` | ✅ `UniqueConstraintViolationException` is translated to `ResourceConflict` (409) |
+| **M6** | `credit_limit` and `payment_terms_days` were in `Customer::$fillable` | ✅ Removed |
+| **M7** | `CustomerService::archive()` hardcoded scale 4 | ✅ Uses `Money::SCALE` |
+| **M8** | `applyAttributes()` assigned before validating | ✅ Validates first |
 
 ---
 
 ## What this document is not
 
-It is documentation. No migration, model, service, module or endpoint exists for anything above Phase 3
-Milestone 3, and none should be created on the strength of being listed here. A 🟡 item in particular
-carries no authority to write code.
+It is documentation. Phase 3 Milestones 1 to 4 and 6 are built, and Milestone 5 is built as far as Stage
+2. Nothing exists for anything beyond that, and none of it should be created on the strength of being
+listed here. A 🟡 item in particular carries no authority to write code.
