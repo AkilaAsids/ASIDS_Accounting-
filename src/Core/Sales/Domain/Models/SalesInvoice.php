@@ -59,6 +59,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable|null $issued_at
  * @property string|null $issued_by_id
  * @property string|null $journal_entry_id
+ * @property CarbonImmutable|null $cancelled_at
+ * @property string|null $cancellation_reason
+ * @property string|null $cancelled_by_id
  * @property string|null $notes
  * @property string|null $terms
  * @property string|null $created_by_id
@@ -281,6 +284,7 @@ final class SalesInvoice extends Model
             'invoice_date' => 'immutable_date',
             'due_date' => 'immutable_date',
             'issued_at' => 'immutable_datetime',
+            'cancelled_at' => 'immutable_datetime',
             'exchange_rate' => 'decimal:10',
             'subtotal' => 'decimal:4',
             'discount_total' => 'decimal:4',

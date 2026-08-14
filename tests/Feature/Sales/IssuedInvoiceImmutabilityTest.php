@@ -268,8 +268,15 @@ describe('the transitions an issued invoice may still make', function (): void {
     });
 
     it('permits cancellation', function (): void {
-        DB::table('sales_invoices')->where('id', $this->id)
-            ->update(['status' => SalesInvoiceStatus::Cancelled->value, 'updated_at' => now()]);
+        // Stage 4 added `sales_invoices_cancellation_matches_status_check`, so a cancelled invoice must carry
+        // its cancellation record. Planted here rather than asserted — this test is about what happens *after*
+        // cancellation, and a half-cancelled row is a state the database no longer allows to exist.
+        DB::table('sales_invoices')->where('id', $this->id)->update([
+            'status' => SalesInvoiceStatus::Cancelled->value,
+            'cancelled_at' => now(),
+            'cancellation_reason' => 'Cancelled for the purposes of this test',
+            'updated_at' => now(),
+        ]);
 
         expect(DB::table('sales_invoices')->where('id', $this->id)->value('status'))
             ->toBe(SalesInvoiceStatus::Cancelled->value);
@@ -294,8 +301,15 @@ describe('the transitions an issued invoice may still make', function (): void {
     });
 
     it('treats a cancelled invoice as final', function (): void {
-        DB::table('sales_invoices')->where('id', $this->id)
-            ->update(['status' => SalesInvoiceStatus::Cancelled->value, 'updated_at' => now()]);
+        // Stage 4 added `sales_invoices_cancellation_matches_status_check`, so a cancelled invoice must carry
+        // its cancellation record. Planted here rather than asserted — this test is about what happens *after*
+        // cancellation, and a half-cancelled row is a state the database no longer allows to exist.
+        DB::table('sales_invoices')->where('id', $this->id)->update([
+            'status' => SalesInvoiceStatus::Cancelled->value,
+            'cancelled_at' => now(),
+            'cancellation_reason' => 'Cancelled for the purposes of this test',
+            'updated_at' => now(),
+        ]);
 
         // Its posting has already been reversed. A further transition would double-reverse or resurrect a
         // document whose reversal is in the books.
@@ -305,8 +319,15 @@ describe('the transitions an issued invoice may still make', function (): void {
     });
 
     it('keeps the number on a cancelled invoice', function (): void {
-        DB::table('sales_invoices')->where('id', $this->id)
-            ->update(['status' => SalesInvoiceStatus::Cancelled->value, 'updated_at' => now()]);
+        // Stage 4 added `sales_invoices_cancellation_matches_status_check`, so a cancelled invoice must carry
+        // its cancellation record. Planted here rather than asserted — this test is about what happens *after*
+        // cancellation, and a half-cancelled row is a state the database no longer allows to exist.
+        DB::table('sales_invoices')->where('id', $this->id)->update([
+            'status' => SalesInvoiceStatus::Cancelled->value,
+            'cancelled_at' => now(),
+            'cancellation_reason' => 'Cancelled for the purposes of this test',
+            'updated_at' => now(),
+        ]);
 
         // Releasing it would leave a gap in a series a tax authority audits for completeness.
         expect(DB::table('sales_invoices')->where('id', $this->id)->value('number'))

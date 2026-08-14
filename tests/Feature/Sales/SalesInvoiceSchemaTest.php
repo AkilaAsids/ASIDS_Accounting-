@@ -147,6 +147,13 @@ describe('a draft invoice', function (): void {
             ? []
             : ['status' => $status, 'number' => 'INV-2026-06-0001', 'issued_at' => now()];
 
+        if ($status === SalesInvoiceStatus::Cancelled->value) {
+            // Stage 4 tied the cancellation record to the status as well, so `cancelled` needs its own two
+            // columns for the same reason the others need a number and a timestamp.
+            $overrides['cancelled_at'] = now();
+            $overrides['cancellation_reason'] = 'Cancelled for the purposes of this test';
+        }
+
         insertInvoice($overrides === [] ? [] : $overrides);
 
         expect(DB::table('sales_invoices')->where('status', $status)->count())->toBe(1);
@@ -194,6 +201,10 @@ describe('the issued boundary', function (): void {
             'status' => SalesInvoiceStatus::Cancelled->value,
             'number' => 'INV-2026-06-0001',
             'issued_at' => now(),
+            // Required from Stage 4 onwards: `sales_invoices_cancellation_matches_status_check` ties the
+            // cancellation record to the status, so a cancelled invoice cannot exist without one.
+            'cancelled_at' => now(),
+            'cancellation_reason' => 'Cancelled for the purposes of this test',
         ]);
 
         expect(DB::table('sales_invoices')->value('number'))->toBe('INV-2026-06-0001');

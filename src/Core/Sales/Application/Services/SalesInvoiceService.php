@@ -10,6 +10,7 @@ use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
 use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Enums\AccountType;
 use Asids\Core\Accounting\Domain\Enums\DocumentType;
+use Asids\Core\Accounting\Domain\Enums\JournalEntryStatus;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
@@ -21,6 +22,7 @@ use Asids\Core\Sales\Application\DTOs\SalesInvoiceData;
 use Asids\Core\Sales\Application\DTOs\SalesInvoiceLineData;
 use Asids\Core\Sales\Domain\Enums\SalesInvoiceStatus;
 use Asids\Core\Sales\Domain\Exceptions\InvalidInvoiceDiscount;
+use Asids\Core\Sales\Domain\Exceptions\InvoiceCannotBeCancelled;
 use Asids\Core\Sales\Domain\Exceptions\InvoiceCannotBeIssued;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
@@ -270,6 +272,116 @@ final readonly class SalesInvoiceService
             $invoice->save();
 
             return $invoice->refresh();
+        });
+    }
+
+    /**
+     * Cancel an issued invoice, reversing its posting.
+     *
+     * The counterpart to `issue()`, and deliberately not its undo. Nothing is deleted and nothing is edited: the
+     * invoice keeps its number, its dates and its figures, its original entry stays in the ledger, and a mirror
+     * entry is posted alongside. An auditor sees the document, the posting and the correction — which is what
+     * they expect, and what a deletion would destroy.
+     *
+     * WHICH PERIOD HAS TO BE OPEN
+     * ---------------------------
+     * The reversal's, not the invoice's. `PostingService::reverse()` dates the mirror today rather than at the
+     * original's date, because backdating a correction into a closed period is precisely what closing prevents.
+     * So an invoice from a closed March may still be cancelled today; what refuses a cancellation is today's
+     * period being closed. Checked here as well as inside the posting service so the caller is told about the
+     * *invoice* rather than about a journal entry they never asked about.
+     *
+     * NO INVOICE NUMBER IS CONSUMED
+     * -----------------------------
+     * `reverse()` copies the original entry's document type, and Stage 3 types a sales posting as
+     * `JournalVoucher`. The mirror therefore draws from the journal voucher counter, and the `sales_invoice`
+     * counter is untouched — so cancelling invoice 1 does not push the next invoice from 3 to 4. That is the
+     * whole reason Stage 3 split the counters, and a test asserts it across a cancel-then-issue sequence.
+     *
+     * WHAT HOLDS UNDER CONCURRENCY
+     * ----------------------------
+     * The row lock, then the database. Two simultaneous cancellations both want the same row; the second waits,
+     * re-reads a now-cancelled invoice, and is refused by the state check. Were that check somehow bypassed, the
+     * immutability trigger refuses any update to a cancelled invoice and `asids_journal_entries_immutable`
+     * refuses to re-reverse an entry. The service check is the readable answer, not the protection.
+     */
+    public function cancel(SalesInvoice $invoice, string $reason, ?User $actor = null): SalesInvoice
+    {
+        $reason = trim($reason);
+
+        if ($reason === '') {
+            throw InvoiceCannotBeCancelled::withoutReason($invoice->number ?? (string) $invoice->getKey());
+        }
+
+        return DB::transaction(function () use ($invoice, $reason, $actor): SalesInvoice {
+            // Locked before anything is read, so a concurrent attempt queues here rather than racing to the
+            // trigger. Re-read through the lock: the in-memory instance may predate another request's work.
+            $locked = SalesInvoice::query()
+                ->whereKey($invoice->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $locked->loadMissing(['company', 'journalEntry']);
+
+            $identifier = $locked->number ?? (string) $locked->getKey();
+
+            if ($locked->status === SalesInvoiceStatus::Cancelled) {
+                throw InvoiceCannotBeCancelled::alreadyCancelled($identifier);
+            }
+
+            if ($locked->status !== SalesInvoiceStatus::Issued) {
+                throw InvoiceCannotBeCancelled::notIssued($identifier, $locked->status);
+            }
+
+            // Phase 4 will make this reachable. Stated now so the rule exists before the thing it guards
+            // against does — a cancellation that stranded a receipt would be found by a customer, not a test.
+            if (bccomp($locked->amount_paid, '0', Money::SCALE) > 0) {
+                throw InvoiceCannotBeCancelled::partiallyPaid($identifier, $locked->amount_paid);
+            }
+
+            $entry = $locked->journalEntry;
+
+            if ($entry === null) {
+                throw InvoiceCannotBeCancelled::withoutJournalEntry($identifier);
+            }
+
+            // Two companies in one workspace share a `tenant_id`, so row level security is satisfied by either
+            // one's entries. Only this comparison stops a reversal landing in a sibling's ledger.
+            if ((string) $entry->company_id !== (string) $locked->company_id) {
+                throw InvoiceCannotBeCancelled::journalEntryOutsideCompany($identifier);
+            }
+
+            // Compared to `Posted` explicitly rather than asking `isPosted()`, which answers "has been posted"
+            // and is true for a reversed entry as well. Using it here would have let a second cancellation
+            // through to `PostingService`, which refuses it — but with a message about a journal entry rather
+            // than about this invoice.
+            if ($entry->status !== JournalEntryStatus::Posted) {
+                throw InvoiceCannotBeCancelled::journalEntryNotReversible(
+                    $identifier,
+                    $entry->number ?? (string) $entry->getKey(),
+                    $entry->status->value,
+                );
+            }
+
+            $reversalDate = CarbonImmutable::now()->startOfDay();
+            $period = $this->calendar->periodFor($locked->company, $reversalDate);
+
+            if (! $period->acceptsPostings()) {
+                throw InvoiceCannotBeCancelled::intoClosedPeriod($identifier, $period->label, $period->status);
+            }
+
+            $this->posting->reverse($entry, $reason, $reversalDate, $actor);
+
+            // One save, like issuing. The CHECK ties the cancellation columns to the status, so a status
+            // written without them — or them without it — is refused by the database rather than merely
+            // avoided here.
+            $locked->status = SalesInvoiceStatus::Cancelled;
+            $locked->cancelled_at = now();
+            $locked->cancellation_reason = $reason;
+            $locked->cancelled_by_id = $actor?->getKey();
+            $locked->save();
+
+            return $locked->refresh();
         });
     }
 
