@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — roadmap
 
-**Last updated:** 2026-08-13
+**Last updated:** 2026-08-14
 
 This exists because the plan previously lived only in commit messages and conversation, so "what is
 left?" had no answer anyone could look up.
@@ -115,23 +115,67 @@ Stage 1 complete — DocumentType::SalesInvoice, the total invariant CHECK, the 
                    immutability triggers
 Stage 2 complete — InvoicePostingMap, InvoiceCannotBePosted, Account::TRADE_RECEIVABLES with its
                    chart-template registration and idempotent backfill
-Stage 3 not started — issue(): the transaction, gapless number reservation, posting through
-                   PostingService, re-validation at issue, and the failure, rollback and
+Stage 3 complete — SalesInvoiceService::issue(): one transaction covering re-validation, gapless
+                   number reservation and posting, plus InvoiceCannotBeIssued and the rollback and
                    concurrency tests
 Stage 4 not started — cancellation and reversal through PostingService::reverse()
 Stage 5 not started — permissions, policy, role grants, removal of the SalesInvoiceLine morph alias
 Stage 6 not started — final verification, ADR 0009, roadmap update, CI
 ```
 
-Stage 2 shipped in `d781c80`. The posting map writes nothing, posts nothing and reserves no document
-number — it returns `JournalLineData` for the existing `PostingService`, which is what let it be tested
-exhaustively before anything could touch the ledger. Stage 3 connects it to issuing.
+Stage 2 shipped in `d781c80`, Stage 3 in `9f437c9`. The posting map writes nothing, posts nothing and
+reserves no document number — it returns `JournalLineData` for the existing `PostingService`, which is what
+let it be tested exhaustively before anything could touch the ledger. Stage 3 connects it to issuing
+without changing it.
+
+**Stage 4 has not started.** It concerns cancellation and reversal, and is expected to use the existing
+`PostingService::reverse()` rather than new reversal machinery — but its scope goes through the same
+inspection and approval process every stage has, and nothing about it is settled here.
 
 The decisions governing this milestone are approved but not yet written up. They are due in Stage 6 as
 **ADR 0009** — ADR 0008 was taken by Milestone 6 while this milestone was in progress. Until then the
-summary in [HANDOVER.md](HANDOVER.md) is the record. Two crossings into the Accounting module have been
-explicitly sanctioned — `DocumentType::SalesInvoice` and `Account::TRADE_RECEIVABLES` — and a third would
-need raising rather than assuming.
+notes below and the summary in [HANDOVER.md](HANDOVER.md) are the record. Two crossings into the Accounting
+module have been explicitly sanctioned — `DocumentType::SalesInvoice` and `Account::TRADE_RECEIVABLES` —
+and a third would need raising rather than assuming.
+
+#### Stage 3 decision notes, for ADR 0009
+
+Recorded here because Stage 6 will consolidate them and because the numbering decision in particular is
+not something a reader would infer from the code.
+
+**Two counters, not one.** The invoice takes `INV-…` from the `sales_invoice` sequence; its journal entry
+takes `JV-…` from the journal voucher sequence. `document_sequences` is keyed on
+`(company_id, document_type, period_key)`, so typing the entry `SalesInvoice` would have drawn both numbers
+from one counter: the invoice takes 0001, its own entry takes 0002, and the next invoice starts at 0003.
+Invoice numbers running 1, 3, 5 is exactly the gap `requiresGaplessNumbering()` promises never to leave,
+and every single-invoice test passes either way — only a sequence of them exposes it. Both series are now
+independently gapless, and a test asserts that across three invoices.
+
+**`JournalVoucher` was selected through the existing seam.** `JournalEntryData::documentType` is already a
+constructor parameter, so Stage 3 passes it at the call site. No new `DocumentType`, no change to the
+numbering architecture, and no third Accounting boundary crossing — the Stage 3 commit touches three Sales
+files and nothing else.
+
+**Traceability moved to the source document.** The entry no longer declares itself a sales invoice through
+`document_type`, so the link is `source_type`/`source_id`, which is the stronger one: the unique index over
+`source_id` across non-reversing entries is what makes a second posting of the same invoice impossible.
+Double issuance is therefore refused by the database, not only by the service's status check — a test
+proves it by bypassing the service check entirely.
+
+**This also leaves Stage 4 room.** `PostingService::reverse()` copies the original entry's document type,
+so a cancellation will draw its mirror from the journal voucher counter and never consume an invoice
+number.
+
+**The B5 re-validation split.** `assertIssuable()` covers the customer, the branch and tax-code company
+ownership. The accounts — receivable, revenue and tax output, with their ownership, postability and type
+rules — are left to `InvoicePostingMap`, which already validates them and runs before the transaction
+opens, so its refusals cost nothing either. The split is a division of responsibility, not duplicated
+validation. Tax-code company ownership was a real gap: the map verifies the output *account* belongs to the
+company, but nothing verified the *code* did.
+
+**Permissions were deliberately deferred to Stage 5.** `issue()` enforces state and domain rules only.
+There is no `sales.invoices.issue` ability and no `SalesInvoicePolicy::issue()`; the authorization layer
+arrives with the rest of Stage 5. Nothing HTTP-facing calls `issue()` yet, so nothing is exposed meanwhile.
 
 ### Phase 3 — remaining milestones 🟢
 
@@ -265,5 +309,5 @@ in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md).
 ## What this document is not
 
 It is documentation. Phase 3 Milestones 1 to 4 and 6 are built, and Milestone 5 is built as far as Stage
-2. Nothing exists for anything beyond that, and none of it should be created on the strength of being
+3. Nothing exists for anything beyond that, and none of it should be created on the strength of being
 listed here. A 🟡 item in particular carries no authority to write code.

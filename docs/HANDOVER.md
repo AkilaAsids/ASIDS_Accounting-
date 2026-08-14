@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — engineering handover
 
-**Prepared:** 13 August 2026 · **Branch:** `main` · **HEAD:** `ea0f421` · **CI:** green, 5/5 · `main` = `origin/main`
+**Prepared:** 14 August 2026 · **Branch:** `main` · **HEAD:** `cd0ed44` · **CI:** green, 5/5 · `main` = `origin/main`
 
 Where the build stands, the rules it runs on, and the exact line to pick up next.
 
@@ -9,8 +9,8 @@ Where the build stands, the rules it runs on, and the exact line to pick up next
 1. [Where it stands](#1-where-it-stands)
 2. [The rules this project runs on](#2-the-rules-this-project-runs-on)
 3. [Architecture in sixty seconds](#3-architecture-in-sixty-seconds)
-4. [Start here — Milestone 5, Stage 3](#4-start-here--milestone-5-stage-3)
-5. [Decisions that constrain Stage 3](#5-decisions-that-constrain-stage-3)
+4. [Start here — Milestone 5, Stage 4](#4-start-here--milestone-5-stage-4)
+5. [Decisions that govern this milestone](#5-decisions-that-govern-this-milestone)
 6. [Working alongside another team](#6-working-alongside-another-team)
 7. [Traps that have already cost time](#7-traps-that-have-already-cost-time)
 8. [Known debt, carried deliberately](#8-known-debt-carried-deliberately)
@@ -27,15 +27,15 @@ been that shortcuts become permanent liabilities in a product sold to thousands 
 
 | Metric | Value | |
 | --- | --- | --- |
-| Tests | 1,296 passed | 3,793 assertions; 0 failed, 0 skipped, 0 risky |
-| Coverage | 87.9% | CI figure; floor 85%, enforced |
+| Tests | 1,319 passed | 3,847 assertions; 0 failed, 0 skipped, 0 risky |
+| Coverage | 88.0% | CI figure; floor 85%, enforced |
 | PHPStan | Level 8 | clean |
 | Modules | 9 | 352 PHP source files, 46 test files |
-| CI | 5 jobs, all green | run `31695104058` on `ea0f421` |
+| CI | 5 jobs, all green | run `31772703024` on `cd0ed44` |
 
-A locally run suite reports **87.3%** rather than CI's 87.9%. That gap is runner variance — which lines
-a given environment happens to exercise — not a difference in the suite. Treat the CI figure as the
-project's current status.
+A locally run suite reports a slightly lower coverage figure than CI's — 87.3% against 88.0% on the last
+comparison. That gap is runner variance, which lines a given environment happens to exercise, not a
+difference in the suite. Treat the CI figure as the project's current status.
 
 | Phase | Delivers | State |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ delivery — Milestone 6 landed first. See [§6](#6-working-alongside-another-te
 | 2 | Customer domain — model, migration, FORCED RLS, service, policy, permissions, factory; archive-with-balance rule behind a probe seam | ✅ Done |
 | 3 | Tax codes — effective-dated rates behind a GiST exclusion constraint, deterministic resolution that refuses rather than guessing | ✅ Done |
 | 4 | Draft invoices — schema, status enum, models, DTOs, service, totals, discounts, tax integration, policy, permissions, factories | ✅ Done |
-| 5 | **Issuing** — the posting map, numbering, cancellation, immutability. Six stages; Stages 1 and 2 complete, **Stage 3 not started**. | 🔵 Current |
+| 5 | **Issuing** — the posting map, numbering, cancellation, immutability. Six stages; Stages 1, 2 and 3 complete, **Stage 4 not started**. | 🔵 Current |
 | 6 | HTTP surface — customer and tax-code REST API, `CustomerService` hardening | ✅ Done, merged via PR #1 |
 | 7 | Reports — outstanding balance, aged receivables, AR control reconciliation | Not started |
 | 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
@@ -96,7 +96,7 @@ reviewed against them.
 | Gate | Command | Bar |
 | --- | --- | --- |
 | Tests | `./vendor/bin/pest` | All pass, none skipped |
-| Coverage | `pest --coverage --min=85` | 85% floor, currently 87.9% |
+| Coverage | `pest --coverage --min=85` | 85% floor, currently 88.0% |
 | Static analysis | `composer analyse` | PHPStan level 8, zero errors |
 | Formatting | `composer lint` | Pint clean |
 | Security | `php artisan asids:security-check` | All checks pass |
@@ -151,7 +151,7 @@ database is what enforces the rule.
 
 ---
 
-## 4. Start here — Milestone 5, Stage 3
+## 4. Start here — Milestone 5, Stage 4
 
 Milestone 5 turns a draft invoice into a posted one. It is the milestone where money reaches the ledger,
 and it was singled out during design review as warranting the closest scrutiny of the eight. It runs in
@@ -161,10 +161,15 @@ six stages, deliberately, so each can be reviewed before the next begins.
 | --- | --- | --- |
 | 1 | `DocumentType::SalesInvoice`; the `total = subtotal + tax_total` CHECK; the issued-invoice immutability triggers, which permit only `status`, `amount_paid`, `amount_due` and `updated_at` to move once a document leaves draft | ✅ Done |
 | 2 | `InvoicePostingMap` and `InvoiceCannotBePosted`; `Account::TRADE_RECEIVABLES` with its chart-template registration and idempotent backfill | ✅ Done — `d781c80` |
-| 3 | **Issuing.** The `issue()` transaction, gapless number reservation, posting through the existing `PostingService`, re-validation at the moment of issue, and the failure, rollback and concurrency tests that prove none of it half-completes | **Not started** |
-| 4 | Cancellation and reversal through `PostingService::reverse()` | Not started |
-| 5 | Permissions, policy, role grants, and removal of the `SalesInvoiceLine` morph alias (decision B6) | Not started |
-| 6 | Final verification, **ADR 0009**, roadmap update, CI | Not started |
+| 3 | **Issuing.** `SalesInvoiceService::issue()`, `InvoiceCannotBeIssued`, `IssueInvoiceTest` | ✅ Done — `9f437c9` |
+| 4 | Cancellation and reversal through `PostingService::reverse()` | 🔵 **Not started** — next |
+| 5 | Permissions, policy, role grants, and removal of the `SalesInvoiceLine` morph alias (decision B6) | ⏳ Not started |
+| 6 | Final verification, **ADR 0009**, roadmap update, CI | ⏳ Not started |
+
+**Stage 4 has not started.** It concerns cancellation and reversal, and is expected to use the existing
+`PostingService::reverse()` rather than new machinery — but its scope goes through the same inspection and
+approval process every stage has, and nothing about it is settled. Do not infer its requirements from this
+document.
 
 ### What Stage 2 delivered
 
@@ -185,30 +190,76 @@ and Stage 3 should preserve it rather than fold posting back into the map.
 - Its public `receivableAccountFor()` exists so Stage 3 can validate before issuing without building the
   whole entry.
 
-### What Stage 3 is expected to do
+### What Stage 3 delivered
 
-Not yet written — this is the description of the work, not a design for it.
+`SalesInvoiceService::issue(SalesInvoice $invoice, ?User $actor = null)`, plus the
+`InvoiceCannotBeIssued` exception and `IssueInvoiceTest`. Three Sales files; no Accounting file was
+touched.
 
-- An `issue()` path that moves a draft to issued inside **one** transaction: reserve the gapless document
-  number, build the entry through `InvoicePostingMap`, post it through the existing `PostingService`, and
-  link the resulting journal entry to the invoice as its source document.
-- Re-validate at the moment of issue, per decision B5 — a draft written in March and issued in June may
-  have had its customer, tax codes, accounts or fiscal period changed underneath it.
-- Refuse a zero total and an invoice with no lines, as domain errors (B4).
-- Prove the failure modes, not just the happy path: a refusal part-way through must leave no reserved
-  number, no partial entry and no mutated invoice; and concurrent issuance of the same invoice must
-  produce one document, not two.
+Everything that can refuse runs **before** the transaction opens: draft check, at least one line, positive
+total, re-validation, fiscal period, and the posting map. A closed period or an archived account therefore
+costs no document number, because `document_sequences` is never reached. Inside the single transaction the
+number is reserved, the entry is posted, and the invoice is written **once** — status, number, `issued_at`
+and `journal_entry_id` together, because `sales_invoices_number_matches_status_check` refuses an issued
+invoice without a number, which makes the single save mandatory rather than merely tidy.
+
+**Two number series, and this is the decision to understand.** The invoice takes `INV-…` from the
+`sales_invoice` sequence; its journal entry takes `JV-…` from the journal voucher sequence:
+
+```
+INV-2026-06-0001 → JV-2026-06-0001
+INV-2026-06-0002 → JV-2026-06-0002
+INV-2026-06-0003 → JV-2026-06-0003
+```
+
+`document_sequences` is keyed on `(company_id, document_type, period_key)`, so typing the entry
+`SalesInvoice` would have drawn both numbers from one counter — invoice 0001, its own entry 0002, next
+invoice 0003. Invoice numbers running 1, 3, 5 is exactly the gap `requiresGaplessNumbering()` promises
+never to leave, and every single-invoice test passes either way. Only a sequence of them exposes it, and a
+test now asserts three in a row on both sides.
+
+`JournalVoucher` is selected through the existing seam — `JournalEntryData::documentType` was already a
+constructor parameter — so no `DocumentType` was added and the Accounting numbering architecture is
+unchanged.
+
+**Traceability is the source document, not the document type.** The entry carries the invoice as
+`source_type`/`source_id`, and the unique index over `source_id` across non-reversing entries is what makes
+a second posting impossible. Double issuance is refused by the *database*, not only by the service's status
+check — a test proves it by bypassing the service check entirely. This also leaves Stage 4 room:
+`PostingService::reverse()` copies the original's document type, so a cancellation draws its mirror from
+the journal voucher counter and never consumes an invoice number.
+
+**The B5 re-validation split.** `assertIssuable()` covers the customer, the branch and tax-code company
+ownership. The accounts — receivable, revenue, tax output, with ownership, postability and type — stay with
+`InvoicePostingMap`, which already validates them and runs before the transaction, so its refusals cost
+nothing either. That is a division of responsibility, not duplicated validation. Tax-code company ownership
+closed a real gap: the map verifies the output *account* belongs to the company, but nothing verified the
+*code* did.
+
+**Money is never recomputed.** The stored `line_subtotal` and `tax_amount` were rounded when the draft was
+written; re-resolving a rate at issue would silently reprice a document the customer has already agreed.
+
+**Permissions are deliberately deferred to Stage 5.** `issue()` enforces state and domain rules only. There
+is no `sales.invoices.issue` ability and no `SalesInvoicePolicy::issue()`. Nothing HTTP-facing calls
+`issue()` yet, so nothing is exposed meanwhile — but do not mistake the current state for the finished
+authorization model.
+
+**ADR 0009 is intentionally unwritten.** Stage 6 consolidates it. Until then the decision notes in
+[ROADMAP.md](ROADMAP.md) under Milestone 5 are the record, and they carry the numbering model, the
+`JournalVoucher` choice, source-document traceability, the B5 split and the permission ordering.
 
 ### Suggested first hour
 
-1. Read `src/Core/Sales/Application/Services/InvoicePostingMap.php` top to bottom. Its class docblock
-   explains the shape of a sales posting and why grouping is not optional.
-2. Read `tests/Feature/Sales/InvoicePostingMapTest.php`. It is the specification for what Stage 3 is
-   allowed to assume.
-3. Read [ADR 0007](adr/0007-draft-invoice-modelling.md) for the draft/issued boundary, then the Stage 1
+1. Read `src/Core/Sales/Application/Services/SalesInvoiceService.php` — `issue()` and its docblock explain
+   the ordering and the two counters.
+2. Read `tests/Feature/Sales/IssueInvoiceTest.php`, especially the rollback and concurrency groups. They
+   are the specification for what Stage 4 must not break.
+3. Read `src/Core/Sales/Application/Services/InvoicePostingMap.php`. Its class docblock explains the shape
+   of a sales posting and why grouping is not optional.
+4. Read [ADR 0007](adr/0007-draft-invoice-modelling.md) for the draft/issued boundary, then the Stage 1
    migration `2026_03_05_000002_make_issued_invoices_immutable.php` to see where that boundary is
    enforced.
-4. Run the suite once, serially, to confirm your environment is sound before changing anything.
+5. Run the suite once, serially, to confirm your environment is sound before changing anything.
 
 The prose in this codebase is load-bearing. Class and migration docblocks explain *why* a decision was
 made and what breaks otherwise — several record defects found the hard way. Read them before assuming an
@@ -216,20 +267,20 @@ oddity is accidental, and keep writing them at the same density.
 
 ---
 
-## 5. Decisions that constrain Stage 3
+## 5. Decisions that govern this milestone
 
-These were reviewed and approved before Milestone 5 started. They are settled, and Stage 3 must be built
-to them rather than around them. They are **not yet written up as an ADR** — that is Stage 6's job, and
-it must use **ADR 0009**, because ADR 0008 is occupied by Milestone 6's Sales HTTP surface. Until then
-this table is the record.
+These were reviewed and approved before Milestone 5 started. They are settled, and the remaining stages
+must be built to them rather than around them. They are **not yet written up as an ADR** — that is Stage
+6's job, and it must use **ADR 0009**, because ADR 0008 is occupied by Milestone 6's Sales HTTP surface.
+Until then this table, together with the Stage 3 decision notes in [ROADMAP.md](ROADMAP.md), is the record.
 
 | Ref | Decision |
 | --- | --- |
 | B1 | Receivable and tax output accounts resolve from current configuration *at the moment of issue*. No snapshot columns on the invoice — the posted journal entry is the permanent snapshot, and it names the accounts it used. |
 | B2 | A database CHECK enforces `total = subtotal + tax_total`. ✅ Shipped |
 | B3 | No `reversal_journal_entry_id` column. The reversal is discoverable through the existing source-document link. |
-| B4 | A draft may total zero. At issue, require `total > 0` and at least one line — raised as domain errors, never as raw database exceptions. |
-| B5 | Re-validate everything at issue: customer, tax codes, revenue accounts, tax output accounts, receivable account, postability and fiscal period. |
+| B4 | A draft may total zero. At issue, require `total > 0` and at least one line — raised as domain errors, never as raw database exceptions. ✅ Shipped |
+| B5 | Re-validate everything at issue: customer, tax codes, revenue accounts, tax output accounts, receivable account, postability and fiscal period. ✅ Shipped, split between `assertIssuable()` and `InvoicePostingMap` |
 | B6 | Remove the `SalesInvoiceLine` morph alias in Stage 5. Keep the `sales_invoice` header alias. |
 | B7 | Only issued invoices are cancellable; drafts are hard-deleted. Cancellation goes through `PostingService::reverse()`, retains the document number, and is refused when the period is closed. |
 | C1 | Adding `DocumentType::SalesInvoice` to the Accounting enum was a **sanctioned exception** to the module boundary — additive only, and reported explicitly. ✅ Shipped |
@@ -239,7 +290,9 @@ this table is the record.
 > **The Accounting boundary.** Sales reaching into Accounting is not routine. Two crossings have been
 > sanctioned so far — `DocumentType::SalesInvoice` and `Account::TRADE_RECEIVABLES` with its supporting
 > chart-template and backfill work — and each was raised, approved and reported before it was made.
-> **If Stage 3 turns out to need a third, stop and raise it rather than widening the exception quietly.**
+> Stage 3 needed no third crossing: it reached `JournalVoucher` through `JournalEntryData`'s existing
+> constructor parameter and touched no Accounting file. **If a later stage turns out to need one, stop and
+> raise it rather than widening the exception quietly.**
 
 ---
 
@@ -288,6 +341,19 @@ database names still contain `"testing"`.
 One consequence worth knowing: any database whose name lacks `"testing"` is silently redirected to
 `asids_erp_testing`. It fails in the safe direction, but it is now a naming convention the project
 depends on.
+
+### Dependency advisories will turn CI red without anyone changing anything
+
+`npm audit --audit-level=high` is a CI gate, so a newly published advisory against an existing dependency
+fails the build on a commit that did not touch JavaScript. It has happened twice: `happy-dom` during
+Milestone 6, and `nanoid` immediately after Stage 3, fixed by `cd0ed44`.
+
+The `nanoid` case is worth reading before the next one. `npm ls nanoid` shows it under `postcss`, a
+devDependency, which invites the conclusion that it cannot reach production — but the production graph
+reaches it too, through `vue → @vue/compiler-sfc → postcss → nanoid`, and the lockfile marks it
+`"dev": false`. **Check `npm audit --omit=dev` rather than reading the tree.** The fix was lockfile-only:
+`postcss` already declared `nanoid: ^3.3.16`, which the patched version satisfied, so `package.json` was
+untouched and exactly one entry moved out of 443.
 
 ---
 
