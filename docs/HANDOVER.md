@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — engineering handover
 
-**Prepared:** 14 August 2026 · **Branch:** `main` · **HEAD:** `cd0ed44` · **CI:** green, 5/5 · `main` = `origin/main`
+**Prepared:** 14 August 2026 · **Branch:** `main` · **HEAD:** `cfa500d` · **CI:** green, 5/5 · `main` = `origin/main`
 
 Where the build stands, the rules it runs on, and the exact line to pick up next.
 
@@ -9,7 +9,7 @@ Where the build stands, the rules it runs on, and the exact line to pick up next
 1. [Where it stands](#1-where-it-stands)
 2. [The rules this project runs on](#2-the-rules-this-project-runs-on)
 3. [Architecture in sixty seconds](#3-architecture-in-sixty-seconds)
-4. [Start here — Milestone 5, Stage 4](#4-start-here--milestone-5-stage-4)
+4. [Start here — Milestone 7](#4-start-here--milestone-7)
 5. [Decisions that govern this milestone](#5-decisions-that-govern-this-milestone)
 6. [Working alongside another team](#6-working-alongside-another-team)
 7. [Traps that have already cost time](#7-traps-that-have-already-cost-time)
@@ -27,13 +27,13 @@ been that shortcuts become permanent liabilities in a product sold to thousands 
 
 | Metric | Value | |
 | --- | --- | --- |
-| Tests | 1,319 passed | 3,847 assertions; 0 failed, 0 skipped, 0 risky |
-| Coverage | 88.0% | CI figure; floor 85%, enforced |
+| Tests | 1,352 passed | 3,950 assertions; 0 failed, 0 skipped, 0 risky |
+| Coverage | 88.1% | CI figure; floor 85%, enforced |
 | PHPStan | Level 8 | clean |
 | Modules | 9 | 352 PHP source files, 46 test files |
-| CI | 5 jobs, all green | run `31772703024` on `cd0ed44` |
+| CI | 5 jobs, all green | run `31825371899` on `cfa500d` |
 
-A locally run suite reports a slightly lower coverage figure than CI's — 87.3% against 88.0% on the last
+A locally run suite reports a slightly lower coverage figure than CI's — 87.5% against 88.1% on the last
 comparison. That gap is runner variance, which lines a given environment happens to exercise, not a
 difference in the suite. Treat the CI figure as the project's current status.
 
@@ -41,7 +41,7 @@ difference in the suite. Treat the CI figure as the project's current status.
 | --- | --- | --- |
 | **1** — Platform foundation | Multi-tenancy on PostgreSQL with FORCED row level security, companies, branches, users, sessions, devices, two-factor, roles and permissions, settings, append-only audit trail | ✅ Done, tagged `phase-1` |
 | **2** — Accounting core | Fiscal calendar, chart of accounts with a versioned Sri Lankan starter template, immutable double-entry journals enforced by database triggers, gapless document numbering, per-period balances, opening balances, period and year close, trial balance, account ledger | ✅ Done, tagged `phase-2` |
-| **3** — Customers & sales invoicing | Eight milestones. Five delivered; Milestone 5 is two stages into six. | 🔵 In progress |
+| **3** — Customers & sales invoicing | Eight milestones. Six delivered; Milestones 7 and 8 remain. | 🔵 In progress |
 
 ### Phase 3, milestone by milestone
 
@@ -54,7 +54,7 @@ delivery — Milestone 6 landed first. See [§6](#6-working-alongside-another-te
 | 2 | Customer domain — model, migration, FORCED RLS, service, policy, permissions, factory; archive-with-balance rule behind a probe seam | ✅ Done |
 | 3 | Tax codes — effective-dated rates behind a GiST exclusion constraint, deterministic resolution that refuses rather than guessing | ✅ Done |
 | 4 | Draft invoices — schema, status enum, models, DTOs, service, totals, discounts, tax integration, policy, permissions, factories | ✅ Done |
-| 5 | **Issuing** — the posting map, numbering, cancellation, immutability. Six stages; Stages 1, 2 and 3 complete, **Stage 4 not started**. | 🔵 Current |
+| 5 | **Issuing and cancellation** — the posting map, numbering, reversal, immutability, authorization. All six stages complete. | ✅ Done |
 | 6 | HTTP surface — customer and tax-code REST API, `CustomerService` hardening | ✅ Done, merged via PR #1 |
 | 7 | Reports — outstanding balance, aged receivables, AR control reconciliation | Not started |
 | 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
@@ -96,7 +96,7 @@ reviewed against them.
 | Gate | Command | Bar |
 | --- | --- | --- |
 | Tests | `./vendor/bin/pest` | All pass, none skipped |
-| Coverage | `pest --coverage --min=85` | 85% floor, currently 88.0% |
+| Coverage | `pest --coverage --min=85` | 85% floor, currently 88.1% |
 | Static analysis | `composer analyse` | PHPStan level 8, zero errors |
 | Formatting | `composer lint` | Pint clean |
 | Security | `php artisan asids:security-check` | All checks pass |
@@ -151,25 +151,29 @@ database is what enforces the rule.
 
 ---
 
-## 4. Start here — Milestone 5, Stage 4
+## 4. Start here — Milestone 7
 
-Milestone 5 turns a draft invoice into a posted one. It is the milestone where money reaches the ledger,
-and it was singled out during design review as warranting the closest scrutiny of the eight. It runs in
-six stages, deliberately, so each can be reviewed before the next begins.
+**Nothing is in progress.** Phase 3 Milestones 1 to 6 are complete, so the next work is **Milestone 7 —
+reports: outstanding balance, aged receivables, and AR control reconciliation.** Milestone 8, the front end,
+follows it. Neither has been designed, and this document deliberately says nothing about their scope: every
+milestone so far has gone through inspection and approval before implementation, and inferring requirements
+from a handover would skip that.
+
+The rest of this section describes **Milestone 5, which is complete**, because it is the machinery Milestone 7
+reports on and the part of the codebase a new reader most needs to understand.
 
 | Stage | Scope | State |
 | --- | --- | --- |
-| 1 | `DocumentType::SalesInvoice`; the `total = subtotal + tax_total` CHECK; the issued-invoice immutability triggers, which permit only `status`, `amount_paid`, `amount_due` and `updated_at` to move once a document leaves draft | ✅ Done |
+| 1 | `DocumentType::SalesInvoice`; the `total = subtotal + tax_total` CHECK; the issued-invoice immutability triggers | ✅ Done |
 | 2 | `InvoicePostingMap` and `InvoiceCannotBePosted`; `Account::TRADE_RECEIVABLES` with its chart-template registration and idempotent backfill | ✅ Done — `d781c80` |
 | 3 | **Issuing.** `SalesInvoiceService::issue()`, `InvoiceCannotBeIssued`, `IssueInvoiceTest` | ✅ Done — `9f437c9` |
-| 4 | Cancellation and reversal through `PostingService::reverse()` | 🔵 **Not started** — next |
-| 5 | Permissions, policy, role grants, and removal of the `SalesInvoiceLine` morph alias (decision B6) | ⏳ Not started |
-| 6 | Final verification, **ADR 0009**, roadmap update, CI | ⏳ Not started |
+| 4 | **Cancellation.** `SalesInvoiceService::cancel()`, `InvoiceCannotBeCancelled`, cancellation metadata, `CancelInvoiceTest` | ✅ Done — `edb89eb` |
+| 5 | Permissions, policy, role grants, removal of the `SalesInvoiceLine` morph alias (B6) | ✅ Done — `cfa500d` |
+| 6 | [ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md), roadmap and handover | ✅ Done |
 
-**Stage 4 has not started.** It concerns cancellation and reversal, and is expected to use the existing
-`PostingService::reverse()` rather than new machinery — but its scope goes through the same inspection and
-approval process every stage has, and nothing about it is settled. Do not infer its requirements from this
-document.
+**The one thing to read before touching invoices** is
+[ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md). It records the numbering model,
+which is not inferable from the code and is easy to break.
 
 ### What Stage 2 delivered
 
@@ -225,9 +229,9 @@ unchanged.
 **Traceability is the source document, not the document type.** The entry carries the invoice as
 `source_type`/`source_id`, and the unique index over `source_id` across non-reversing entries is what makes
 a second posting impossible. Double issuance is refused by the *database*, not only by the service's status
-check — a test proves it by bypassing the service check entirely. This also leaves Stage 4 room:
-`PostingService::reverse()` copies the original's document type, so a cancellation draws its mirror from
-the journal voucher counter and never consumes an invoice number.
+check — a test proves it by bypassing the service check entirely. It is also what makes cancellation free of
+the invoice series: `PostingService::reverse()` copies the original's document type, so the mirror draws
+from the journal voucher counter and never consumes an invoice number.
 
 **The B5 re-validation split.** `assertIssuable()` covers the customer, the branch and tax-code company
 ownership. The accounts — receivable, revenue, tax output, with ownership, postability and type — stay with
@@ -239,21 +243,45 @@ closed a real gap: the map verifies the output *account* belongs to the company,
 **Money is never recomputed.** The stored `line_subtotal` and `tax_amount` were rounded when the draft was
 written; re-resolving a rate at issue would silently reprice a document the customer has already agreed.
 
-**Permissions are deliberately deferred to Stage 5.** `issue()` enforces state and domain rules only. There
-is no `sales.invoices.issue` ability and no `SalesInvoicePolicy::issue()`. Nothing HTTP-facing calls
-`issue()` yet, so nothing is exposed meanwhile — but do not mistake the current state for the finished
-authorization model.
+### What Stage 4 delivered
 
-**ADR 0009 is intentionally unwritten.** Stage 6 consolidates it. Until then the decision notes in
-[ROADMAP.md](ROADMAP.md) under Milestone 5 are the record, and they carry the numbering model, the
-`JournalVoucher` choice, source-document traceability, the B5 split and the permission ordering.
+`SalesInvoiceService::cancel(SalesInvoice $invoice, string $reason, ?User $actor = null)`, plus
+`InvoiceCannotBeCancelled`, three cancellation columns and `CancelInvoiceTest`. Again no Accounting file was
+touched: cancellation reverses through the existing `PostingService::reverse()`.
+
+A cancellation is not a deletion and not an edit. The invoice keeps its number, dates and every figure; its
+original posting stays in the ledger marked reversed; a mirror entry is written alongside. The whole
+operation is one transaction opened with `lockForUpdate()` on the invoice row.
+
+**Which period must be open is the reversal's, not the invoice's.** The mirror is dated today, because
+backdating a correction into a closed period is what closing exists to prevent. So an invoice from a closed
+March may still be cancelled today; what refuses a cancellation is *today's* period being closed.
+
+**Cancellation metadata is conditionally immutable.** `cancelled_at`, `cancellation_reason` and
+`cancelled_by_id` are writable only during the issued → cancelled transition. Freezing them in the trigger's
+column list would have refused the very update that sets them, so a CHECK ties them to the status and the
+trigger guards them on every *other* update.
+
+**Only issued invoices cancel.** Drafts are deleted instead; an already-cancelled invoice is refused; and an
+invoice with `amount_paid > 0` is refused — inert today, stated now so the rule exists before payments do.
+
+### What Stage 5 delivered
+
+`sales.invoices.issue` and `sales.invoices.cancel`, both sensitive, held by the accountant alone — the
+bookkeeper drafts but neither issues nor cancels, and the administrator inherits both automatically.
+`SalesInvoicePolicy::issue()` and `cancel()` check permission and company access, with an **advisory** state
+check for UI only. The `SalesInvoiceLine` morph alias was removed (B6).
+
+**The decisions are recorded in [ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md)** —
+numbering, posting and reversal architecture, the validation strategy, authorization, and the known
+limitations below.
 
 ### Suggested first hour
 
 1. Read `src/Core/Sales/Application/Services/SalesInvoiceService.php` — `issue()` and its docblock explain
    the ordering and the two counters.
 2. Read `tests/Feature/Sales/IssueInvoiceTest.php`, especially the rollback and concurrency groups. They
-   are the specification for what Stage 4 must not break.
+   are the specification for what any future change must not break.
 3. Read `src/Core/Sales/Application/Services/InvoicePostingMap.php`. Its class docblock explains the shape
    of a sales posting and why grouping is not optional.
 4. Read [ADR 0007](adr/0007-draft-invoice-modelling.md) for the draft/issued boundary, then the Stage 1
@@ -502,7 +530,7 @@ why — including the honest limits of the choice.
 | [0006](adr/0006-tax-code-modelling.md) | Tax codes: effective-dated rates behind a jurisdictional seam |
 | [0007](adr/0007-draft-invoice-modelling.md) | Draft invoices: hard-deletable, issued boundary prepared |
 | [0008](adr/0008-sales-http-api-and-customer-update-semantics.md) | The Sales HTTP surface, and attribute-array update semantics for customers (Milestone 6) |
-| 0009 | *Not yet written.* Reserved for Milestone 5's decisions, due in Stage 6 |
+| [0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) | Sales invoice issuing and cancellation: two number series, one ledger seam (Milestone 5) |
 
 **ADR 0008 is taken.** Milestone 5's decisions must be written up as **ADR 0009**.
 

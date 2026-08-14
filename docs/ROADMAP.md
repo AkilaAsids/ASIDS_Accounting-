@@ -101,14 +101,10 @@ values before the framework reads the environment. Without it the app container'
 leaked past PHPUnit's `<env>` block and `RefreshDatabase` ran `migrate:fresh` against the **development**
 database. Conditional, so CI and parallel testing are unaffected. Cherry-picked to `main` as `ea0f421`.
 
----
+### Phase 3 — Milestone 5, issuing and cancellation
 
-## 🔵 Current
-
-### Phase 3 — Milestone 5, issuing
-
-Six stages, deliberately, so each can be reviewed before the next begins. This is where money reaches the
-ledger, and it warrants the closest review of the eight milestones.
+Six stages, deliberately, so each could be reviewed before the next began. This is where money reaches the
+ledger, and it received the closest review of the eight milestones.
 
 ```
 Stage 1 complete — DocumentType::SalesInvoice, the total invariant CHECK, the issued-invoice
@@ -118,30 +114,28 @@ Stage 2 complete — InvoicePostingMap, InvoiceCannotBePosted, Account::TRADE_RE
 Stage 3 complete — SalesInvoiceService::issue(): one transaction covering re-validation, gapless
                    number reservation and posting, plus InvoiceCannotBeIssued and the rollback and
                    concurrency tests
-Stage 4 not started — cancellation and reversal through PostingService::reverse()
-Stage 5 not started — permissions, policy, role grants, removal of the SalesInvoiceLine morph alias
-Stage 6 not started — final verification, ADR 0009, roadmap update, CI
+Stage 4 complete — SalesInvoiceService::cancel(): reversal through PostingService::reverse(),
+                   cancellation metadata with its conditional immutability, InvoiceCannotBeCancelled
+Stage 5 complete — sales.invoices.issue and .cancel, the policy methods, role grants, and removal of
+                   the SalesInvoiceLine morph alias
+Stage 6 complete — ADR 0009, roadmap and handover synchronisation
 ```
 
-Stage 2 shipped in `d781c80`, Stage 3 in `9f437c9`. The posting map writes nothing, posts nothing and
-reserves no document number — it returns `JournalLineData` for the existing `PostingService`, which is what
-let it be tested exhaustively before anything could touch the ledger. Stage 3 connects it to issuing
-without changing it.
+Stage 2 shipped in `d781c80`, Stage 3 in `9f437c9`, Stage 4 in `edb89eb`, Stage 5 in `cfa500d`. The posting
+map writes nothing, posts nothing and reserves no document number — it returns `JournalLineData` for the
+existing `PostingService`, which is what let it be tested exhaustively before anything could touch the
+ledger. Stages 3 and 4 connect it to issuing and reversal without changing it.
 
-**Stage 4 has not started.** It concerns cancellation and reversal, and is expected to use the existing
-`PostingService::reverse()` rather than new reversal machinery — but its scope goes through the same
-inspection and approval process every stage has, and nothing about it is settled here.
+The decisions governing this milestone are recorded in
+[ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) — numbered 0009 because ADR 0008
+was taken by Milestone 6 while this milestone was in progress. Two crossings into the Accounting module were
+explicitly sanctioned, both in Stages 1–2: `DocumentType::SalesInvoice` and `Account::TRADE_RECEIVABLES`.
+**Stages 3 to 5 crossed no new boundary and modified no Accounting file.**
 
-The decisions governing this milestone are approved but not yet written up. They are due in Stage 6 as
-**ADR 0009** — ADR 0008 was taken by Milestone 6 while this milestone was in progress. Until then the
-notes below and the summary in [HANDOVER.md](HANDOVER.md) are the record. Two crossings into the Accounting
-module have been explicitly sanctioned — `DocumentType::SalesInvoice` and `Account::TRADE_RECEIVABLES` —
-and a third would need raising rather than assuming.
+#### The decisions in brief
 
-#### Stage 3 decision notes, for ADR 0009
-
-Recorded here because Stage 6 will consolidate them and because the numbering decision in particular is
-not something a reader would infer from the code.
+The full record is [ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md). Summarised here
+because the numbering decision in particular is not something a reader would infer from the code.
 
 **Two counters, not one.** The invoice takes `INV-…` from the `sales_invoice` sequence; its journal entry
 takes `JV-…` from the journal voucher sequence. `document_sequences` is keyed on
@@ -162,9 +156,9 @@ files and nothing else.
 Double issuance is therefore refused by the database, not only by the service's status check — a test
 proves it by bypassing the service check entirely.
 
-**This also leaves Stage 4 room.** `PostingService::reverse()` copies the original entry's document type,
-so a cancellation will draw its mirror from the journal voucher counter and never consume an invoice
-number.
+**Cancellation therefore consumes no invoice number.** `PostingService::reverse()` copies the original
+entry's document type, so the mirror draws from the journal voucher counter. Cancelling invoice 1 leaves the
+next invoice at 0003, not 0004 — asserted across an issue/cancel/issue sequence.
 
 **The B5 re-validation split.** `assertIssuable()` covers the customer, the branch and tax-code company
 ownership. The accounts — receivable, revenue and tax output, with their ownership, postability and type
@@ -173,20 +167,33 @@ opens, so its refusals cost nothing either. The split is a division of responsib
 validation. Tax-code company ownership was a real gap: the map verifies the output *account* belongs to the
 company, but nothing verified the *code* did.
 
-**Permissions were deliberately deferred to Stage 5.** `issue()` enforces state and domain rules only.
-There is no `sales.invoices.issue` ability and no `SalesInvoicePolicy::issue()`; the authorization layer
-arrives with the rest of Stage 5. Nothing HTTP-facing calls `issue()` yet, so nothing is exposed meanwhile.
+**Cancellation metadata is conditionally immutable.** `cancelled_at`, `cancellation_reason` and
+`cancelled_by_id` are writable only during the issued → cancelled transition. Freezing them outright would
+have refused the one update that must set them, so a CHECK ties them to the status and the trigger guards
+them on every other update.
+
+**Permissions arrived in Stage 5, after the transitions they guard.** `sales.invoices.issue` and `.cancel`
+are separate sensitive capabilities held by the accountant alone. For the interval between Stage 3 and
+Stage 5 both operations were state-guarded but carried no capability of their own — safe because no HTTP or
+API surface for invoices existed, and none does today.
+
+---
+
+## 🔵 Current
+
+Nothing is in progress. Milestones 1 to 6 of Phase 3 are complete; **Milestone 7 is the next unstarted
+work.**
 
 ### Phase 3 — remaining milestones 🟢
 
 Scope firm; these follow from the approved Phase 3 design.
 
-| Milestone | Scope |
-| --- | --- |
-| 7 | Reports — outstanding balance, aged receivables, AR control reconciliation |
-| 8 | Front end — customer and invoice screens, routing, Vitest |
+| Milestone | Scope | State |
+| --- | --- | --- |
+| 7 | Reports — outstanding balance, aged receivables, AR control reconciliation | Not started |
+| 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
 
-Neither waits on Milestone 5, and Milestone 5 does not wait on them.
+Neither depends on the other, and both now have the invoice lifecycle they were waiting for.
 
 ---
 
@@ -289,6 +296,7 @@ applied. They are listed here so they are visible outside the commit messages th
 | — | Two competing patterns: Phase 1 repositories versus Phase 2 services querying models directly | Pick one before a third module is written. The largest architectural decision still open |
 | — | A stale `// EXPERIMENT: temporarily disabled` comment sits above an **active** `RecordRequestContext::class` in `bootstrap/app.php` | Comment-only: the middleware is registered and running, so the comment states the opposite of the truth |
 | — | `tests/bootstrap.php` keys on the substring `"testing"` | Any future database name lacking it is silently redirected to `asids_erp_testing`. Fails in the safe direction, but it is now a naming convention to honour |
+| — | `SalesInvoiceService::issue()` does not persist `issued_by_id` | The actor is accepted and passed into the posting path, so the ledger records who posted — but the invoice's own column is left null, and the immutability trigger freezes it, so it **cannot be backfilled**. Needs a deliberate follow-up commit with its own tests; carried to Milestone 7. Recorded in [ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) |
 
 ### Closed by Milestone 6
 
@@ -308,6 +316,6 @@ in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md).
 
 ## What this document is not
 
-It is documentation. Phase 3 Milestones 1 to 4 and 6 are built, and Milestone 5 is built as far as Stage
-3. Nothing exists for anything beyond that, and none of it should be created on the strength of being
-listed here. A 🟡 item in particular carries no authority to write code.
+It is documentation. Phase 3 Milestones 1 to 6 are built. Nothing exists for anything beyond that, and none
+of it should be created on the strength of being listed here. A 🟡 item in particular carries no authority
+to write code.
