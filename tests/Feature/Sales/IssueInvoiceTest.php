@@ -108,6 +108,37 @@ describe('issuing a draft', function (): void {
             ->and($invoice->journal_entry_id)->not->toBeNull();
     });
 
+    it('records who issued it', function (): void {
+        $invoice = $this->invoices->issue(issuableDraft(), $this->owner);
+
+        // On the document as well as on the entry it posted. The ledger already knew — the actor is passed
+        // to `postNew()` — but "who issued this invoice" is a question asked of the invoice, and for the
+        // whole of Milestone 5 it had no answer.
+        expect((string) $invoice->issued_by_id)->toBe((string) $this->owner->getKey())
+            ->and((string) JournalEntry::query()->findOrFail($invoice->journal_entry_id)->posted_by_id)
+            ->toBe((string) $this->owner->getKey());
+    });
+
+    it('leaves the issuer null when nobody issued it', function (): void {
+        // A system-initiated issue — a scheduled run, an import. Nullable for the same reason
+        // `created_by_id` and `cancelled_by_id` are, and the column is nullable in the schema.
+        $invoice = $this->invoices->issue(issuableDraft(), null);
+
+        expect($invoice->issued_by_id)->toBeNull()
+            ->and($invoice->status)->toBe(SalesInvoiceStatus::Issued)
+            ->and($invoice->number)->toBe('INV-2026-06-0001');
+    });
+
+    it('freezes the issuer once the invoice is issued', function (): void {
+        $invoice = $this->invoices->issue(issuableDraft(), $this->owner);
+
+        // Which is why the value has to be written during the issuing update or not at all: the immutability
+        // trigger lists `issued_by_id` among the frozen columns, so a missed value cannot be backfilled.
+        expect(fn () => DB::table('sales_invoices')->where('id', $invoice->getKey())
+            ->update(['issued_by_id' => null]))
+            ->toThrow(QueryException::class);
+    });
+
     it('numbers the journal entry from the journal voucher series, not the invoice series', function (): void {
         $invoice = $this->invoices->issue(issuableDraft(), $this->owner);
 

@@ -268,6 +268,11 @@ final readonly class SalesInvoiceService
             $invoice->status = SalesInvoiceStatus::Issued;
             $invoice->number = $number;
             $invoice->issued_at = now();
+            // Who issued it, recorded on the document as well as on the entry it posted. Written here or
+            // never: the immutability trigger freezes this column the moment the invoice leaves draft, so a
+            // value missed now cannot be filled in afterwards. Null when the system issues without a person,
+            // matching `created_by_id` and `cancelled_by_id`.
+            $invoice->issued_by_id = $actor?->getKey();
             $invoice->journal_entry_id = $entry->getKey();
             $invoice->save();
 

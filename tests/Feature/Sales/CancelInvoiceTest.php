@@ -128,7 +128,11 @@ describe('cancelling an issued invoice', function (): void {
             ->and($cancelled->journal_entry_id)->toBe($originalEntryId)
             ->and($cancelled->total)->toBe($invoice->total)
             ->and($cancelled->subtotal)->toBe($invoice->subtotal)
-            ->and($cancelled->tax_total)->toBe($invoice->tax_total);
+            ->and($cancelled->tax_total)->toBe($invoice->tax_total)
+            // Who issued it is a separate fact from who cancelled it, and cancelling does not rewrite the
+            // first. The trigger freezes `issued_by_id`, so this also proves the cancelling update does not
+            // accidentally touch it.
+            ->and((string) $cancelled->issued_by_id)->toBe((string) $this->owner->getKey());
     });
 
     it('leaves the original entry reversed and pointing at its mirror', function (): void {
