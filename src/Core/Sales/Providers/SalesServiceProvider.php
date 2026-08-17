@@ -15,6 +15,7 @@ use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Asids\Core\Sales\Domain\Models\TaxCode;
+use Asids\Core\Sales\Infrastructure\EloquentReceivableBalanceProbe;
 use Asids\Core\Sales\Infrastructure\NoReceivables;
 use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
 use Asids\Core\Sales\Policies\CustomerPolicy;
@@ -38,18 +39,18 @@ final class SalesServiceProvider extends ServiceProvider
         $this->app->singleton(CustomerService::class);
 
         /*
-         * The receivables seam.
+         * The receivables seam, now answered for real.
          *
-         * `NoReceivables` is not a placeholder — it is an accurate statement of the current schema,
-         * which has customers and no invoices. Milestone 5 binds an implementation that queries
-         * `sales_invoices` over this line, and the archive and delete rules in `CustomerService`
-         * start biting without those methods changing.
+         * `NoReceivables` was an accurate statement of a schema with customers and no invoices, not a
+         * placeholder. Invoices exist, so the binding moves — and the archive, delete and code-lock
+         * rules in `CustomerService` start biting without a line of that service changing. That is
+         * the whole point of the seam, and the same shape Phase 1 used for `LedgerActivityProbe`.
          *
-         * The same shape Phase 1 used for `LedgerActivityProbe`, which let Organization enforce
-         * "a company's base currency freezes once its books have activity" a whole phase before any
-         * postable table existed.
+         * `NoReceivables` is kept rather than deleted: it is the honest implementation for any context
+         * with no invoice table, and a test wanting "this customer owes nothing" binds it directly
+         * rather than constructing invoices to prove a negative.
          */
-        $this->app->bind(ReceivableBalanceProbe::class, NoReceivables::class);
+        $this->app->bind(ReceivableBalanceProbe::class, EloquentReceivableBalanceProbe::class);
 
         $this->app->singleton(TaxCodeService::class);
         $this->app->singleton(TaxRateResolver::class);
