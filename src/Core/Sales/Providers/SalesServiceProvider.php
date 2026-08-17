@@ -7,6 +7,7 @@ namespace Asids\Core\Sales\Providers;
 use Asids\Core\Sales\Application\Services\CustomerService;
 use Asids\Core\Sales\Application\Services\InvoicePostingMap;
 use Asids\Core\Sales\Application\Services\InvoiceTotalsCalculator;
+use Asids\Core\Sales\Application\Services\ReceivableReportService;
 use Asids\Core\Sales\Application\Services\SalesInvoiceService;
 use Asids\Core\Sales\Application\Services\TaxCodeService;
 use Asids\Core\Sales\Application\Services\TaxRateResolver;
@@ -58,6 +59,7 @@ final class SalesServiceProvider extends ServiceProvider
         $this->app->singleton(InvoicePostingMap::class);
         $this->app->singleton(InvoiceTotalsCalculator::class);
         $this->app->singleton(SalesInvoiceService::class);
+        $this->app->singleton(ReceivableReportService::class);
 
         /*
          * The rate-usage seam, now answered for real — same shape and same reasoning as the receivables
