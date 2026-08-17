@@ -16,6 +16,7 @@ use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Asids\Core\Sales\Domain\Models\TaxCode;
 use Asids\Core\Sales\Infrastructure\EloquentReceivableBalanceProbe;
+use Asids\Core\Sales\Infrastructure\EloquentTaxRateUsageProbe;
 use Asids\Core\Sales\Infrastructure\NoReceivables;
 use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
 use Asids\Core\Sales\Policies\CustomerPolicy;
@@ -59,14 +60,17 @@ final class SalesServiceProvider extends ServiceProvider
         $this->app->singleton(SalesInvoiceService::class);
 
         /*
-         * The rate-usage seam, same shape and same reasoning as the receivables probe above.
+         * The rate-usage seam, now answered for real — same shape and same reasoning as the receivables
+         * probe above.
          *
-         * `NoTaxRateUsage` states the truth for the current schema: tax codes exist, documents that could
-         * carry tax do not, so no rate has been applied to anything. Milestone 4 binds an implementation
-         * that queries the documents over this line, and the rate-immutability rules in `TaxCodeService`
-         * start biting without that service changing.
+         * `NoTaxRateUsage` stated the truth for a schema with tax codes and no documents carrying tax.
+         * Invoices exist, so the binding moves, and the rate-immutability and delete rules in
+         * `TaxCodeService` start biting without that service changing.
+         *
+         * Kept rather than deleted, for the same reason as `NoReceivables`: it is the honest answer where
+         * nothing has been invoiced, and a test wanting an unused rate binds it directly.
          */
-        $this->app->bind(TaxRateUsageProbe::class, NoTaxRateUsage::class);
+        $this->app->bind(TaxRateUsageProbe::class, EloquentTaxRateUsageProbe::class);
     }
 
     public function boot(): void

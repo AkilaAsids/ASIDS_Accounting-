@@ -16,6 +16,7 @@ use Asids\Core\Sales\Application\Services\TaxRateResolver;
 use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
 use Asids\Core\Sales\Domain\Enums\TaxType;
 use Asids\Core\Sales\Domain\Models\TaxCode;
+use Asids\Core\Sales\Infrastructure\EloquentTaxRateUsageProbe;
 use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
 use Asids\Core\Sales\Policies\TaxCodePolicy;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
@@ -257,8 +258,11 @@ describe('provider registration', function (): void {
             ->toBe(TaxCode::class);
     });
 
-    it('binds the rate-usage probe to the current-schema implementation', function (): void {
+    it('binds the rate-usage probe to the real implementation', function (): void {
+        // `NoTaxRateUsage` was the honest answer while no document carried tax. Invoices exist, so Milestone
+        // 7 moved the binding — and this assertion moved with it, because a seam left unbound is exactly the
+        // failure it is here to catch.
         expect(app(TaxRateUsageProbe::class))
-            ->toBeInstanceOf(NoTaxRateUsage::class);
+            ->toBeInstanceOf(EloquentTaxRateUsageProbe::class);
     });
 });
