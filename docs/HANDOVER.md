@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — engineering handover
 
-**Prepared:** 14 August 2026 · **Branch:** `main` · **HEAD:** `cfa500d` · **CI:** green, 5/5 · `main` = `origin/main`
+**Prepared:** 18 August 2026 · **Branch:** `main` · **HEAD:** `4f98071` · **CI:** green, 5/5 · `main` = `origin/main`
 
 Where the build stands, the rules it runs on, and the exact line to pick up next.
 
@@ -9,7 +9,7 @@ Where the build stands, the rules it runs on, and the exact line to pick up next
 1. [Where it stands](#1-where-it-stands)
 2. [The rules this project runs on](#2-the-rules-this-project-runs-on)
 3. [Architecture in sixty seconds](#3-architecture-in-sixty-seconds)
-4. [Start here — Milestone 7](#4-start-here--milestone-7)
+4. [Start here — Milestone 8](#4-start-here--milestone-8)
 5. [Decisions that govern this milestone](#5-decisions-that-govern-this-milestone)
 6. [Working alongside another team](#6-working-alongside-another-team)
 7. [Traps that have already cost time](#7-traps-that-have-already-cost-time)
@@ -27,13 +27,13 @@ been that shortcuts become permanent liabilities in a product sold to thousands 
 
 | Metric | Value | |
 | --- | --- | --- |
-| Tests | 1,352 passed | 3,950 assertions; 0 failed, 0 skipped, 0 risky |
-| Coverage | 88.1% | CI figure; floor 85%, enforced |
+| Tests | 1,455 passed | 4,165 assertions; 0 failed, 0 skipped, 0 risky |
+| Coverage | 88.3% | CI figure; floor 85%, enforced |
 | PHPStan | Level 8 | clean |
-| Modules | 9 | 352 PHP source files, 46 test files |
-| CI | 5 jobs, all green | run `31825371899` on `cfa500d` |
+| Modules | 9 | 359 PHP source files, 53 test files |
+| CI | 5 jobs, all green | run `32123483890` on `4f98071` |
 
-A locally run suite reports a slightly lower coverage figure than CI's — 87.5% against 88.1% on the last
+A locally run suite reports a slightly lower coverage figure than CI's — 87.7% against 88.3% on the last
 comparison. That gap is runner variance, which lines a given environment happens to exercise, not a
 difference in the suite. Treat the CI figure as the project's current status.
 
@@ -41,7 +41,7 @@ difference in the suite. Treat the CI figure as the project's current status.
 | --- | --- | --- |
 | **1** — Platform foundation | Multi-tenancy on PostgreSQL with FORCED row level security, companies, branches, users, sessions, devices, two-factor, roles and permissions, settings, append-only audit trail | ✅ Done, tagged `phase-1` |
 | **2** — Accounting core | Fiscal calendar, chart of accounts with a versioned Sri Lankan starter template, immutable double-entry journals enforced by database triggers, gapless document numbering, per-period balances, opening balances, period and year close, trial balance, account ledger | ✅ Done, tagged `phase-2` |
-| **3** — Customers & sales invoicing | Eight milestones. Six delivered; Milestones 7 and 8 remain. | 🔵 In progress |
+| **3** — Customers & sales invoicing | Eight milestones. Seven delivered; Milestone 8 remains. | 🔵 In progress |
 
 ### Phase 3, milestone by milestone
 
@@ -56,7 +56,7 @@ delivery — Milestone 6 landed first. See [§6](#6-working-alongside-another-te
 | 4 | Draft invoices — schema, status enum, models, DTOs, service, totals, discounts, tax integration, policy, permissions, factories | ✅ Done |
 | 5 | **Issuing and cancellation** — the posting map, numbering, reversal, immutability, authorization. All six stages complete. | ✅ Done |
 | 6 | HTTP surface — customer and tax-code REST API, `CustomerService` hardening | ✅ Done, merged via PR #1 |
-| 7 | Reports — outstanding balance, aged receivables, AR control reconciliation | Not started |
+| 7 | **Receivables reporting** — outstanding balance, aged receivables, AR control reconciliation, plus the two probe seams | ✅ Done |
 | 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
 
 Milestone 6 was once blocked on debt item I3. **That block is gone** — I3 was resolved as part of the
@@ -96,7 +96,7 @@ reviewed against them.
 | Gate | Command | Bar |
 | --- | --- | --- |
 | Tests | `./vendor/bin/pest` | All pass, none skipped |
-| Coverage | `pest --coverage --min=85` | 85% floor, currently 88.1% |
+| Coverage | `pest --coverage --min=85` | 85% floor, currently 88.3% |
 | Static analysis | `composer analyse` | PHPStan level 8, zero errors |
 | Formatting | `composer lint` | Pint clean |
 | Security | `php artisan asids:security-check` | All checks pass |
@@ -124,7 +124,7 @@ infrastructure and presentation layers, wired by one service provider registered
 | Settings | 13 | Hierarchical typed settings: user → company → tenant → system |
 | Audit | 22 | Append-only hash-chained audit trail, activity feed |
 | Accounting | 77 | Fiscal calendar, chart of accounts, ledger, balances, close, `Money` |
-| Sales | 47 | Customers, tax codes, invoices, and the customer/tax-code REST surface |
+| Sales | 54 | Customers, tax codes, invoices, receivables reporting, and the customer/tax-code REST surface |
 
 **Dependency rule.** Modules depend on Tenancy's domain layer and on Platform, never on each other's
 internals. Sales depends on Accounting; the reverse must never become true. The single documented
@@ -151,16 +151,44 @@ database is what enforces the rule.
 
 ---
 
-## 4. Start here — Milestone 7
+## 4. Start here — Milestone 8
 
-**Nothing is in progress.** Phase 3 Milestones 1 to 6 are complete, so the next work is **Milestone 7 —
-reports: outstanding balance, aged receivables, and AR control reconciliation.** Milestone 8, the front end,
-follows it. Neither has been designed, and this document deliberately says nothing about their scope: every
-milestone so far has gone through inspection and approval before implementation, and inferring requirements
-from a handover would skip that.
+**Nothing is in progress.** Phase 3 Milestones 1 to 7 are complete, so the next work is **Milestone 8 — the
+front end: customer and invoice screens, routing, Vitest.** It has not been designed, and this document
+deliberately says nothing about its scope: every milestone so far has gone through inspection and approval
+before implementation, and inferring requirements from a handover would skip that.
 
-The rest of this section describes **Milestone 5, which is complete**, because it is the machinery Milestone 7
-reports on and the part of the codebase a new reader most needs to understand.
+Two things Milestone 8 will find waiting for it. **There is no HTTP surface for invoices** — customers and
+tax codes have one from Milestone 6, invoices do not, so screens for issuing or cancelling need an API layer
+first. **The three receivables reports are service methods only**, with no route and no
+`sales.reports.view` permission, for the same reason: there was nothing to authorize yet.
+
+### Milestone 7 — receivables reporting, complete
+
+`ReceivableReportService` carries all three reports, following `LedgerBalanceService`: a `Company` first,
+plain arrays out carrying `Money`, no report DTOs.
+
+| Report | Semantics |
+| --- | --- |
+| `outstandingBalance(Company)` | Live snapshot. Collectable invoices only, `amount_due`, zero balances excluded |
+| `agedReceivables(Company, CarbonImmutable $asOf)` | Aged from `due_date` against a required cutoff. Not Yet Due / 0–30 / 31–60 / 61–90 / 90+, inclusive edges, per customer |
+| `arControlReconciliation(Company)` | Current date only. Per receivable account and in total; subledger from collectable invoices, ledger from `balanceAsAt()`, difference as ledger − subledger |
+
+**Read [ADR 0010](adr/0010-receivables-reporting-and-ar-account-identification.md) before touching
+`InvoicePostingMap`.** An invoice's receivable account is identified as **line number 1** of its journal
+entry — provable from the map's ordering, but that couples reporting to it. `ArControlReconciliationTest`
+asserts the ordering directly so it cannot change silently.
+
+Milestone 7 also closed two seams that had been left on placeholder implementations after the milestones
+meant to replace them had closed. Five documented rules were inert as a result: an invoiced customer could
+be archived, renamed or deleted, and a used tax rate could be edited or removed. All five were confirmed by
+execution before any code was written, and all five are now live — a deliberate behavioural change for
+existing data.
+
+### Milestone 5 — issuing and cancellation, complete
+
+Described here because it is the machinery the reports read and the part of the codebase a new reader most
+needs to understand.
 
 | Stage | Scope | State |
 | --- | --- | --- |
@@ -531,8 +559,9 @@ why — including the honest limits of the choice.
 | [0007](adr/0007-draft-invoice-modelling.md) | Draft invoices: hard-deletable, issued boundary prepared |
 | [0008](adr/0008-sales-http-api-and-customer-update-semantics.md) | The Sales HTTP surface, and attribute-array update semantics for customers (Milestone 6) |
 | [0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) | Sales invoice issuing and cancellation: two number series, one ledger seam (Milestone 5) |
+| [0010](adr/0010-receivables-reporting-and-ar-account-identification.md) | Receivables reporting, and how an invoice's receivable account is identified (Milestone 7) |
 
-**ADR 0008 is taken.** Milestone 5's decisions must be written up as **ADR 0009**.
+ADRs are sequential through 0010; the next new one is 0011.
 
 ### Also worth reading
 

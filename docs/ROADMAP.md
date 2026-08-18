@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — roadmap
 
-**Last updated:** 2026-08-14
+**Last updated:** 2026-08-18
 
 This exists because the plan previously lived only in commit messages and conversation, so "what is
 left?" had no answer anyone could look up.
@@ -177,11 +177,50 @@ are separate sensitive capabilities held by the accountant alone. For the interv
 Stage 5 both operations were state-guarded but carried no capability of their own — safe because no HTTP or
 API surface for invoices existed, and none does today.
 
+### Phase 3 — Milestone 7, receivables reporting
+
+Three reports, and two dormant seams that had to be closed before them.
+
+```
+Phase 1 complete — SalesInvoiceService::issue() persists issued_by_id (cc9589c)
+Phase 2 complete — EloquentReceivableBalanceProbe bound over NoReceivables (352da1e)
+Phase 3 complete — EloquentTaxRateUsageProbe bound over NoTaxRateUsage, plus the
+                   sales_invoice_lines.tax_code_id index (747292b)
+Phase 4A complete — outstanding balance report (8177789)
+Phase 4B complete — aged receivables report (d4b564d)
+Phase 4C complete — AR control reconciliation (4f98071)
+```
+
+**The seams came first because they were not optional.** `ReceivableBalanceProbe` and `TaxRateUsageProbe`
+were still bound to the "nothing exists yet" stubs from Milestones 2 and 3, although the milestones meant to
+replace them had closed. Five documented protection rules therefore did nothing: an invoiced customer could
+be archived, renamed or deleted, and a tax rate an issued invoice had already used could be edited or
+removed. All five were confirmed by execution against real data before any code was written. The bindings
+moved; no rule changed. Enabling them is a deliberate behavioural change for existing data.
+
+All three reports are service methods on `ReceivableReportService`, following `LedgerBalanceService`: a
+`Company` first, plain arrays out carrying `Money`, and no report DTOs. **No HTTP route, controller or
+resource exists for any of them**, and no `sales.reports.view` permission has been added — there is nothing
+yet to authorize.
+
+- **Outstanding balance** — a live snapshot, collectable invoices only, `amount_due`, zero balances excluded.
+- **Aged receivables** — aged from `due_date` against a required explicit cutoff, in Not Yet Due / 0–30 /
+  31–60 / 61–90 / 90+, aggregated per customer.
+- **AR control reconciliation** — current date only, per receivable account and in total, subledger from
+  collectable invoices, ledger from `LedgerBalanceService::balanceAsAt()`, difference as ledger minus
+  subledger.
+
+The decisions are recorded in
+[ADR 0010](adr/0010-receivables-reporting-and-ar-account-identification.md). The one worth reading before
+touching the posting map: an invoice's receivable account is identified as **line number 1** of its journal
+entry, which is provable from the map's ordering but couples reporting to it. A test asserts that ordering
+directly so it cannot be changed silently.
+
 ---
 
 ## 🔵 Current
 
-Nothing is in progress. Milestones 1 to 6 of Phase 3 are complete; **Milestone 7 is the next unstarted
+Nothing is in progress. Milestones 1 to 7 of Phase 3 are complete; **Milestone 8 is the next unstarted
 work.**
 
 ### Phase 3 — remaining milestones 🟢
@@ -190,10 +229,7 @@ Scope firm; these follow from the approved Phase 3 design.
 
 | Milestone | Scope | State |
 | --- | --- | --- |
-| 7 | Reports — outstanding balance, aged receivables, AR control reconciliation | Not started |
 | 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
-
-Neither depends on the other, and both now have the invoice lifecycle they were waiting for.
 
 ---
 
@@ -296,7 +332,13 @@ applied. They are listed here so they are visible outside the commit messages th
 | — | Two competing patterns: Phase 1 repositories versus Phase 2 services querying models directly | Pick one before a third module is written. The largest architectural decision still open |
 | — | A stale `// EXPERIMENT: temporarily disabled` comment sits above an **active** `RecordRequestContext::class` in `bootstrap/app.php` | Comment-only: the middleware is registered and running, so the comment states the opposite of the truth |
 | — | `tests/bootstrap.php` keys on the substring `"testing"` | Any future database name lacking it is silently redirected to `asids_erp_testing`. Fails in the safe direction, but it is now a naming convention to honour |
-| — | `SalesInvoiceService::issue()` does not persist `issued_by_id` | The actor is accepted and passed into the posting path, so the ledger records who posted — but the invoice's own column is left null, and the immutability trigger freezes it, so it **cannot be backfilled**. Needs a deliberate follow-up commit with its own tests; carried to Milestone 7. Recorded in [ADR 0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) |
+
+### Closed by Milestone 7
+
+| Ref | Was | Resolution |
+| --- | --- | --- |
+| — | `SalesInvoiceService::issue()` did not persist `issued_by_id` | ✅ Persisted in the existing save block (`cc9589c`). The column is frozen once the invoice leaves draft, so it had to be written during the issuing update or never |
+| — | Two probe seams still bound to their placeholder implementations | ✅ `EloquentReceivableBalanceProbe` (`352da1e`) and `EloquentTaxRateUsageProbe` (`747292b`) bound over the stubs, activating five documented rules that had been inert. Recorded in [ADR 0010](adr/0010-receivables-reporting-and-ar-account-identification.md) |
 
 ### Closed by Milestone 6
 
@@ -316,6 +358,6 @@ in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md).
 
 ## What this document is not
 
-It is documentation. Phase 3 Milestones 1 to 6 are built. Nothing exists for anything beyond that, and none
+It is documentation. Phase 3 Milestones 1 to 7 are built. Nothing exists for anything beyond that, and none
 of it should be created on the strength of being listed here. A 🟡 item in particular carries no authority
 to write code.
