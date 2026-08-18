@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Asids\Core\Sales\Application\Services;
 
+use Asids\Core\Accounting\Application\Services\LedgerBalanceService;
+use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * What customers owe, and whether the ledger agrees.
@@ -48,6 +51,8 @@ use Illuminate\Support\Collection;
  */
 final readonly class ReceivableReportService
 {
+    public function __construct(private LedgerBalanceService $balances) {}
+
     /**
      * What each customer currently owes.
      *
@@ -280,6 +285,254 @@ final readonly class ReceivableReportService
             'totals' => $totals,
             'as_of' => $asOf,
         ];
+    }
+
+    /**
+     * Whether the sales ledger and the general ledger agree about receivables.
+     *
+     * The subledger side sums what the invoices say is owed. The general ledger side asks
+     * `LedgerBalanceService::balanceAsAt()` what the receivable accounts hold. They should be equal, and any
+     * difference is something that reached the AR account without going through an invoice — a manual journal,
+     * most often, which is exactly what this report exists to surface.
+     *
+     * HOW AN INVOICE'S RECEIVABLE ACCOUNT IS IDENTIFIED
+     * ------------------------------------------------
+     * From the posting, never from the customer. `customer.receivable_account_id` is mutable: repoint a
+     * customer after their invoices were issued and their current setting no longer describes where those
+     * invoices posted. Grouping by it would move old balances to the new account while the ledger kept them in
+     * the old one, showing two equal and opposite differences that cancel in the total — a discrepancy the
+     * report would create rather than find.
+     *
+     * The receivable line is **line number 1** of the invoice's journal entry, and that is a structural fact
+     * rather than a guess. Four properties make it so:
+     *
+     *   1. `InvoicePostingMap::for()` returns `[...receivableLines, ...revenueLines, ...taxLines]` — the
+     *      receivable line is first by construction.
+     *   2. `receivableLines()` returns exactly one line, and returns none only for a zero total, which
+     *      `issue()` refuses outright (decision B4).
+     *   3. `JournalService::writeLines()` numbers lines from 1 in array order.
+     *   4. `journal_lines_immutable` refuses any update or delete once the entry is posted, so the number
+     *      cannot drift afterwards.
+     *
+     * Note what is *not* used: "the debit line". `revenueLines()` and `taxLines()` flip to the debit side for a
+     * net-negative group, so an entry can carry more than one debit and "the debit" would not identify
+     * anything. The line number does.
+     *
+     * The coupling this creates is real and worth naming: reorder the posting map and this report
+     * misattributes silently. `ArControlReconciliationTest` pins the ordering directly for that reason, so the
+     * map cannot be reordered without a test failing first.
+     *
+     * WHICH ACCOUNTS APPEAR
+     * ---------------------
+     * Every account any invoice has ever posted its receivable line to, plus the company's system
+     * `trade_receivables` account. Derived from the ledger, so an account that used to receive invoices and no
+     * longer has open ones still gets a row — which matters, because a stranded GL balance on an abandoned AR
+     * account is precisely the thing that would otherwise go unnoticed.
+     *
+     * WHY THERE IS NO `$asOf` PARAMETER
+     * --------------------------------
+     * Because the report cannot honour one. `balanceAsAt()` is date-addressable, but the subledger side reads
+     * current `status` and current `amount_due` and there is no invoice history to reconstruct either. Aged as
+     * at a past date the two halves would answer different questions: an invoice issued in June and cancelled
+     * in August reconciled as at July shows the receivable outstanding in the ledger — correctly, the reversal
+     * had not happened — and excluded from the subledger, because its status is *now* cancelled.
+     *
+     * Accepting a date would promise something the data cannot support, so the signature does not offer one.
+     * `as_of` is reported so a printed copy carries the day it was produced. When Phase 4 brings real payment
+     * history, a dated variant becomes possible.
+     *
+     * @return array{
+     *     rows: list<array{
+     *         account: Account,
+     *         subledger: Money,
+     *         general_ledger: Money,
+     *         difference: Money,
+     *         reconciles: bool,
+     *     }>,
+     *     totals: array{
+     *         subledger: Money,
+     *         general_ledger: Money,
+     *         difference: Money,
+     *         reconciles: bool,
+     *     },
+     *     as_of: CarbonImmutable,
+     * }
+     */
+    public function arControlReconciliation(Company $company): array
+    {
+        $currency = $company->base_currency_code;
+        $asOf = CarbonImmutable::now()->startOfDay();
+        $accounts = $this->receivableAccounts($company);
+
+        $totals = [
+            'subledger' => Money::zero($currency),
+            'general_ledger' => Money::zero($currency),
+            'difference' => Money::zero($currency),
+            'reconciles' => true,
+        ];
+
+        if ($accounts === []) {
+            return ['rows' => [], 'totals' => $totals, 'as_of' => $asOf];
+        }
+
+        $subledger = $this->subledgerByReceivableAccount($company);
+        $rows = [];
+
+        foreach ($accounts as $account) {
+            $owed = $subledger[(string) $account->getKey()] ?? Money::zero($currency);
+
+            // The ledger side is asked of `LedgerBalanceService` rather than computed here. It already signs
+            // the balance by the account's normal balance and already counts reversed entries alongside posted
+            // ones, which is what makes a cancelled invoice net to nothing.
+            $ledger = $this->balances->balanceAsAt($company, $account, $asOf);
+
+            // Ledger minus subledger, so a positive difference means the books carry more receivable than the
+            // invoices account for — the direction a stray manual journal shows up in.
+            $difference = $ledger->minus($owed);
+
+            $rows[] = [
+                'account' => $account,
+                'subledger' => $owed,
+                'general_ledger' => $ledger,
+                'difference' => $difference,
+                'reconciles' => $difference->isZero(),
+            ];
+
+            $totals['subledger'] = $totals['subledger']->plus($owed);
+            $totals['general_ledger'] = $totals['general_ledger']->plus($ledger);
+            $totals['difference'] = $totals['difference']->plus($difference);
+        }
+
+        // Every account has to agree, not just the total. Two opposite differences summing to zero is a
+        // reconciliation failure that a grand total alone would report as success.
+        $totals['reconciles'] = array_reduce(
+            $rows,
+            static fn (bool $carry, array $row): bool => $carry && $row['reconciles'],
+            true,
+        );
+
+        return [
+            'rows' => $this->sortedByAccountCode($rows),
+            'totals' => $totals,
+            'as_of' => $asOf,
+        ];
+    }
+
+    /**
+     * Every account this company's invoices have posted a receivable to, plus its system account.
+     *
+     * Read from the ledger rather than from `customers`, for the reason set out above: the current setting is
+     * not evidence of where an old invoice posted. Reversal entries carry the same source document and mirror
+     * the original's line order, so they name the same account and `DISTINCT` absorbs them.
+     *
+     * @return list<Account>
+     */
+    private function receivableAccounts(Company $company): array
+    {
+        /** @var list<string> $posted */
+        $posted = DB::table('journal_lines as l')
+            ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
+            ->where('e.company_id', $company->getKey())
+            ->where('e.source_type', SalesInvoice::MORPH_ALIAS)
+            ->where('l.line_number', 1)
+            ->distinct()
+            ->pluck('l.account_id')
+            ->all();
+
+        $systemAccount = Account::query()
+            ->forCompany((string) $company->getKey())
+            ->withSystemKey(Account::TRADE_RECEIVABLES)
+            ->first();
+
+        if ($systemAccount !== null) {
+            $posted[] = (string) $systemAccount->getKey();
+        }
+
+        if ($posted === []) {
+            return [];
+        }
+
+        return array_values(
+            Account::query()
+                ->forCompany((string) $company->getKey())
+                ->whereIn('id', array_values(array_unique($posted)))
+                ->get()
+                ->all()
+        );
+    }
+
+    /**
+     * What is currently owed, grouped by the account each invoice actually posted its receivable to.
+     *
+     * Two queries rather than one join, and the reason is `scopeForCompany()` and `scopeCollectable()`: both
+     * emit unqualified column names, and `journal_entries` carries its own `company_id` and `status`, so
+     * joining them into the same statement makes both references ambiguous. Qualifying would mean either
+     * changing scopes other code depends on or restating the collectable status list here — and restating it
+     * is exactly the drift this service avoids everywhere else.
+     *
+     * So the invoices come back through their own scopes, and a second query maps each posting to its
+     * receivable account. No N+1: one query for the invoices, one for the whole set of entries.
+     *
+     * @return array<string, Money>
+     */
+    private function subledgerByReceivableAccount(Company $company): array
+    {
+        $currency = $company->base_currency_code;
+
+        $invoices = SalesInvoice::query()
+            ->forCompany((string) $company->getKey())
+            ->collectable()
+            ->get(['id', 'journal_entry_id', 'amount_due']);
+
+        if ($invoices->isEmpty()) {
+            return [];
+        }
+
+        /** @var array<string, string> $accountByEntry */
+        $accountByEntry = DB::table('journal_lines')
+            ->whereIn('journal_entry_id', $invoices->pluck('journal_entry_id')->filter()->all())
+            ->where('line_number', 1)
+            ->pluck('account_id', 'journal_entry_id')
+            ->all();
+
+        $byAccount = [];
+
+        foreach ($invoices as $invoice) {
+            $entryId = $invoice->journal_entry_id;
+            $accountId = $entryId === null ? null : ($accountByEntry[$entryId] ?? null);
+
+            // A collectable invoice with no posting cannot exist through any supported path — `issue()` always
+            // writes one, and the status CHECK only permits a null entry on a draft. Left out rather than
+            // guessed at: it would surface as a difference on the ledger side, which is where an operator
+            // should see it.
+            if ($accountId === null) {
+                continue;
+            }
+
+            $owed = Money::of((string) $invoice->amount_due, $currency);
+
+            $byAccount[$accountId] = isset($byAccount[$accountId])
+                ? $byAccount[$accountId]->plus($owed)
+                : $owed;
+        }
+
+        return $byAccount;
+    }
+
+    /**
+     * Orders reconciliation rows by account code, which is how an accountant reads a chart.
+     *
+     * @param  list<array{account: Account, subledger: Money, general_ledger: Money, difference: Money, reconciles: bool}>  $rows
+     * @return list<array{account: Account, subledger: Money, general_ledger: Money, difference: Money, reconciles: bool}>
+     */
+    private function sortedByAccountCode(array $rows): array
+    {
+        usort($rows, static fn (array $a, array $b): int => strcmp(
+            (string) $a['account']->code,
+            (string) $b['account']->code,
+        ));
+
+        return $rows;
     }
 
     /**
