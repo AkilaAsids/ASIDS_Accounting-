@@ -3096,6 +3096,162 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  # ── Sales: receivables reporting ──────────────────────────────────────────
+  /companies/{companyId}/reports/outstanding-receivables:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Sales]
+      operationId: outstandingReceivables
+      summary: What each customer currently owes
+      description: |
+        A live snapshot. Only invoices that represent a collectable receivable are counted, and a
+        customer whose balance has reached zero does not appear at all — a receivables report listing
+        everybody who owes nothing is a customer list.
+
+        Takes no cutoff date. The amount owed is current state with no history behind it, so an
+        as-at parameter would promise something the data cannot support. `meta.as_of` reports the day
+        the figures were read so a printed copy carries it.
+
+        `meta.totals.outstanding` is computed server-side and must be rendered as given.
+
+        Rows are ordered by amount descending, then customer code, so the largest debt leads and two
+        equal balances have a stable order. Do not re-sort on the client.
+      responses:
+        '200':
+          description: One row per customer with something outstanding.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/OutstandingReceivableRow' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          currency: { type: string, example: LKR }
+                          as_of:
+                            type: string
+                            format: date
+                            description: The day the figures were read. Not a parameter — see the description.
+                          totals:
+                            type: object
+                            properties:
+                              outstanding: { $ref: '#/components/schemas/Amount' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /companies/{companyId}/reports/aged-receivables:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Sales]
+      operationId: agedReceivables
+      summary: The debtor book by age, as at a cutoff
+      description: |
+        Aged from each invoice's **due date**, not its invoice date: the due date is what the business
+        committed to, and ageing from the invoice date would report every invoice as overdue from the
+        day it was raised — for thirty-day terms, wrong for a month.
+
+        Buckets are inclusive at both ends, so an invoice falls in exactly one. An invoice due exactly
+        on the cutoff is zero days overdue and lands in `days_0_30`. A future-dated invoice is
+        `not_yet_due` rather than excluded — it is a real receivable that simply is not late.
+
+        `as_of` is optional. Omit it and the **server** defaults to today and returns the date it used
+        in `meta.as_of`; a cutoff taken from the client's clock could not be reproduced from the
+        response it produced, and two users in different timezones would age the same book
+        differently.
+
+        `meta.totals` is the sum of the rows returned, computed server-side. Render it as given.
+      parameters:
+        - $ref: '#/components/parameters/AsOf'
+      responses:
+        '200':
+          description: One row per customer with something outstanding, bucketed by age.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AgedReceivableRow' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          currency: { type: string, example: LKR }
+                          as_of:
+                            type: string
+                            format: date
+                            description: The cutoff actually used, whether supplied or defaulted.
+                          totals:
+                            type: object
+                            properties:
+                              not_yet_due: { $ref: '#/components/schemas/Amount' }
+                              days_0_30: { $ref: '#/components/schemas/Amount' }
+                              days_31_60: { $ref: '#/components/schemas/Amount' }
+                              days_61_90: { $ref: '#/components/schemas/Amount' }
+                              days_over_90: { $ref: '#/components/schemas/Amount' }
+                              total: { $ref: '#/components/schemas/Amount' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/reports/ar-control:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Sales]
+      operationId: arControl
+      summary: Whether the invoice subledger agrees with the general ledger
+      description: |
+        Per receivable account, and in total. The subledger side is what the invoices say is owed; the
+        general ledger side is what the books say. `difference` is `general_ledger - subledger`, so a
+        **positive** value means the books carry more receivable than the invoices account for — the
+        direction a stray manual journal into AR shows up in.
+
+        Negative differences are returned as negatives. The sign says which side is short; do not
+        normalise it, and do not hide a non-zero difference behind an ordinary-looking report.
+
+        `reconciles` is reported per row **and** in `meta.totals`, where it requires *every* account to
+        agree. Two opposite differences of equal size net to zero in the grand total while both
+        accounts are wrong, so a client deriving the verdict from the totals alone would report that as
+        reconciled. Render `meta.totals.reconciles` as given.
+
+        Accepts **no** cutoff date, and that absence is deliberate: the subledger side reads current
+        status and current amounts with no history to reconstruct either from, so a past date would
+        have the two halves answering different questions. `meta.as_of` reports the day the report was
+        produced and is not a parameter — render it as text, never as an editable control.
+      responses:
+        '200':
+          description: One row per receivable account, plus totals carrying the overall verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ArControlRow' } }
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/Meta'
+                      - type: object
+                        properties:
+                          currency: { type: string, example: LKR }
+                          as_of:
+                            type: string
+                            format: date
+                            description: The day the report was produced. Not a parameter — see the description.
+                          totals:
+                            type: object
+                            properties:
+                              subledger: { $ref: '#/components/schemas/Amount' }
+                              general_ledger: { $ref: '#/components/schemas/Amount' }
+                              difference: { $ref: '#/components/schemas/Amount' }
+                              reconciles:
+                                type: boolean
+                                description: True only when every account reconciles, not merely when the totals net to zero.
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -3183,6 +3339,14 @@ components:
       name: to
       in: query
       description: Inclusive end.
+      schema: { type: string, format: date }
+    AsOf:
+      name: as_of
+      in: query
+      description: |
+        The cutoff to age against. Omit it and the server uses today, returning the date it chose in
+        `meta.as_of` — the client's clock never decides the cutoff, because a report aged on it could
+        not be reproduced from the response it produced.
       schema: { type: string, format: date }
   responses:
     ValidationFailed:
@@ -4186,6 +4350,55 @@ components:
         balance:
           $ref: '#/components/schemas/Amount'
           description: Signed in the account's normal direction, so a debit account with a credit balance reports a negative.
+
+    OutstandingReceivableRow:
+      type: object
+      properties:
+        customer_id: { type: string, format: uuid }
+        code: { type: string, example: SILVA }
+        name: { type: string, example: Silva Traders }
+        invoice_count:
+          type: integer
+          description: How many collectable invoices make up the balance.
+        outstanding: { $ref: '#/components/schemas/Amount' }
+
+    AgedReceivableRow:
+      type: object
+      properties:
+        customer_id: { type: string, format: uuid }
+        code: { type: string, example: SILVA }
+        name: { type: string, example: Silva Traders }
+        not_yet_due:
+          $ref: '#/components/schemas/Amount'
+          description: Due after the cutoff. A real receivable that is simply not late.
+        days_0_30: { $ref: '#/components/schemas/Amount' }
+        days_31_60: { $ref: '#/components/schemas/Amount' }
+        days_61_90: { $ref: '#/components/schemas/Amount' }
+        days_over_90: { $ref: '#/components/schemas/Amount' }
+        total:
+          $ref: '#/components/schemas/Amount'
+          description: The row's five buckets summed server-side.
+
+    ArControlRow:
+      type: object
+      properties:
+        account_id: { type: string, format: uuid }
+        code: { type: string, example: '1130' }
+        name: { type: string, example: Trade receivables }
+        subledger:
+          $ref: '#/components/schemas/Amount'
+          description: What the invoices say is owed against this account.
+        general_ledger:
+          $ref: '#/components/schemas/Amount'
+          description: What the books say, signed in the account's normal direction.
+        difference:
+          $ref: '#/components/schemas/Amount'
+          description: |
+            `general_ledger - subledger`. Positive means the books carry more receivable than the
+            invoices account for. Negatives are returned as negatives — do not normalise the sign.
+        reconciles:
+          type: boolean
+          description: Whether this account's two sides agree exactly.
 
     AccountLedgerLine:
       type: object

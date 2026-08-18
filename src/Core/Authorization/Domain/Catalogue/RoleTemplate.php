@@ -111,6 +111,11 @@ final readonly class RoleTemplate
                     'sales.invoices.draft',
                     'sales.invoices.issue',
                     'sales.invoices.cancel',
+
+                    // The receivables reports, for the same reason as `accounting.reports.view` above:
+                    // whoever decides a customer's credit terms is who needs to see what that decision has
+                    // cost so far, and the AR reconciliation is a check on the accountant's own postings.
+                    'sales.reports.view',
                 ],
             ),
 
@@ -153,6 +158,13 @@ final readonly class RoleTemplate
                     // ledger and the customer — or reverses that commitment.
                     'sales.invoices.view',
                     'sales.invoices.draft',
+
+                    // Included on the same reasoning as `accounting.reports.view` above — a bookkeeper who
+                    // cannot see what a customer owes cannot tell whether the invoice they just drafted is
+                    // sensible. This role already holds `sales.customers.manage`, which is marked sensitive
+                    // precisely because it carries the credit limit; withholding a read-only view of the
+                    // resulting balance from someone who sets that limit would be incoherent.
+                    'sales.reports.view',
                 ],
             ),
 
@@ -185,6 +197,11 @@ final readonly class RoleTemplate
                     // Reads invoices and changes none of them, which is the whole of what an auditor
                     // reviewing revenue needs.
                     'sales.invoices.view',
+
+                    // The receivables reports. For this role they are close to the point of it: an auditor
+                    // testing receivables starts at the aged listing and the control reconciliation, and a
+                    // lender assessing the business wants to know how old the debtor book is.
+                    'sales.reports.view',
                 ],
             ),
         ];

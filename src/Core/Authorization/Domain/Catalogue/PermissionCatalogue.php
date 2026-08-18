@@ -260,6 +260,13 @@ final class PermissionCatalogue
             // `.reverse`. A business may well let someone raise invoices without letting them undo one, and a
             // single combined ability could not express that.
             new PermissionDefinition('sales', 'invoices', 'cancel', 'Cancel sales invoices', 'Reverse an issued invoice’s posting, keeping both entries in the ledger.', sensitive: true, sortOrder: 80),
+
+            // Reading a receivables report changes nothing, so not sensitive — the same judgement
+            // `accounting.reports.view` makes about the trial balance. What it does expose is the debtor
+            // book: who owes what, for how long, and whether the subledger agrees with the ledger. That is
+            // why it is a capability of its own rather than folded into `customers.view`, which answers only
+            // *who* the customers are.
+            new PermissionDefinition('sales', 'reports', 'view', 'View receivables reports', 'Read outstanding balances, aged receivables and the AR control reconciliation.', sortOrder: 90),
         ];
     }
 

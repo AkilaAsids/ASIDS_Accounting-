@@ -22,6 +22,7 @@ use Asids\Core\Organization\Presentation\Http\Controllers\BranchController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyMembershipController;
 use Asids\Core\Sales\Presentation\Http\Controllers\CustomerController;
+use Asids\Core\Sales\Presentation\Http\Controllers\ReceivableReportController;
 use Asids\Core\Sales\Presentation\Http\Controllers\TaxCodeController;
 use Asids\Core\Settings\Presentation\Http\Controllers\SettingsController;
 use Asids\Core\Tenancy\Presentation\Http\Controllers\TenantRegistrationController;
@@ -412,6 +413,33 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                     // company with its default scopes plus `active()` and membership, so a trashed
                     // company still fails closed with a 404 regardless of this route's binding.
                     Route::post('{taxCode}/restore', [TaxCodeController::class, 'restore'])->name('restore')->withTrashed();
+                });
+
+                /*
+                 * ── Sales: receivables reporting ────────────────────────────
+                 *
+                 * Nested under the company for the same reason the trial balance is: a receivables figure
+                 * belongs to one legal entity, and a flat route would invite a query that forgets to scope by
+                 * it — which in a workspace holding several companies puts one entity's debtors in another's
+                 * report.
+                 *
+                 * A second group sharing the `{company}/reports` prefix with the Accounting one above, rather
+                 * than routes appended to it. The prefix and name are identical, the route names stay unique,
+                 * and Sales routes stay in the Sales section of this file instead of being filed under a
+                 * comment block about the ledger.
+                 *
+                 * All three are reads with no resource id in the path, so there is no sibling-company binding
+                 * to guard — the caller names a company, the middleware proves membership of it, and
+                 * `ReceivableReportService` scopes every query to it explicitly.
+                 *
+                 * Only `aged-receivables` takes a parameter. `ar-control` deliberately accepts no cutoff: its
+                 * subledger side reads current status and `amount_due`, so a past date would have the two
+                 * halves it compares answering different questions (ADR 0010 D3).
+                 */
+                Route::prefix('{company}/reports')->name('reports.')->middleware('company')->group(function (): void {
+                    Route::get('outstanding-receivables', [ReceivableReportController::class, 'outstandingReceivables'])->name('outstanding-receivables');
+                    Route::get('aged-receivables', [ReceivableReportController::class, 'agedReceivables'])->name('aged-receivables');
+                    Route::get('ar-control', [ReceivableReportController::class, 'arControl'])->name('ar-control');
                 });
 
                 Route::prefix('{company}/members')->name('members.')->middleware('company')->group(function (): void {
