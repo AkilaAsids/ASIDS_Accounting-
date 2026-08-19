@@ -311,6 +311,20 @@ describe('AgedReceivablesPage', () => {
     })
   })
 
+  it('lets a keyboard user reach the table’s horizontal scroll', async () => {
+    signIn()
+    get.mockResolvedValue({ data: [row()], meta: meta() })
+
+    const wrapper = await mountPage()
+    const region = wrapper.find('[role="region"]')
+
+    // Eight columns: this table is guaranteed to overflow on a phone, and without a tab stop the
+    // 90+ and Total columns are unreachable by keyboard.
+    expect(region.exists()).toBe(true)
+    expect(region.attributes('tabindex')).toBe('0')
+    expect(region.attributes('aria-label')).toBe('Aged receivables')
+  })
+
   it('does not call the API when no company is active', async () => {
     await mountPage()
 

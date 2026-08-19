@@ -101,12 +101,28 @@ async function load(): Promise<void> {
       <!--
         Phrased as the good news it usually is. Customers with nothing outstanding are excluded by
         the report, so an empty result means everyone has paid rather than that anything is missing.
+
+        Keyed on `meta` and not on the row count alone, so it only ever speaks for a request that
+        actually succeeded. Keyed on the count, a refusal — which clears the rows — rendered this
+        sentence above the error notice and told an accountant their debtors had all paid.
       -->
-      <p v-else-if="rows.length === 0" class="py-12 text-center text-sm text-content-muted">
+      <p v-else-if="meta && rows.length === 0" class="py-12 text-center text-sm text-content-muted">
         No customer has an outstanding balance.
       </p>
 
-      <div v-else class="overflow-x-auto">
+      <!--
+        Focusable, so the scroll is reachable without a mouse. A plain `overflow-x-auto` div contains
+        no tab stop, which leaves a keyboard-only user unable to scroll to the columns off the right
+        edge — the content is rendered but not operable. `role="region"` with a name is what makes
+        the tab stop meaningful when a screen reader lands on it rather than an unexplained one.
+      -->
+      <div
+        v-else-if="meta"
+        class="overflow-x-auto"
+        role="region"
+        aria-label="Outstanding receivables"
+        tabindex="0"
+      >
         <table class="min-w-full text-sm">
           <caption class="sr-only">
             Outstanding receivables as at {{ meta?.as_of }}, in {{ meta?.currency }}

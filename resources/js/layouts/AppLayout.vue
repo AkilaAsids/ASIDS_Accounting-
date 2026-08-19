@@ -57,7 +57,7 @@ const navigation = computed<NavItem[]>(() =>
       },
       {
         name: 'outstanding-receivables',
-        label: 'Receivables',
+        label: 'Outstanding receivables',
         icon: 'M9 7h6m-6 4h6m-6 4h4M5 4a1 1 0 011-1h12a1 1 0 011 1v16l-3.5-2-3.5 2-3.5-2L5 20V4z',
         permission: 'sales.reports.view',
       },

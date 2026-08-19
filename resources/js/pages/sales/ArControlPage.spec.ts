@@ -336,6 +336,20 @@ describe('ArControlPage', () => {
     expect(get).toHaveBeenLastCalledWith('/companies/company-2/reports/ar-control')
   })
 
+  it('lets a keyboard user reach the table’s horizontal scroll', async () => {
+    signIn()
+    get.mockResolvedValue({ data: [row()], meta: meta() })
+
+    const wrapper = await mountPage()
+    const region = wrapper.find('[role="region"]')
+
+    // The rightmost column carries the per-account verdict, so a keyboard user who cannot scroll
+    // cannot read which account failed — the one thing this report exists to say.
+    expect(region.exists()).toBe(true)
+    expect(region.attributes('tabindex')).toBe('0')
+    expect(region.attributes('aria-label')).toBe('AR control reconciliation')
+  })
+
   it('does not call the API when no company is active', async () => {
     await mountPage()
 

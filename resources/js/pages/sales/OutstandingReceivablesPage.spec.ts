@@ -193,6 +193,11 @@ describe('OutstandingReceivablesPage', () => {
     // No table, and no total — a failed report must not leave a footer implying a figure of zero.
     expect(wrapper.find('table').exists()).toBe(false)
     expect(wrapper.find('tfoot').exists()).toBe(false)
+
+    // And, above all, not the success wording. Keyed on the row count alone this page said "No
+    // customer has an outstanding balance." over a refusal, telling an accountant their debtors had
+    // all paid. The empty state now speaks only for a request that succeeded.
+    expect(wrapper.text()).not.toContain('No customer has an outstanding balance.')
   })
 
   it('falls back to its own wording when the failure carries no problem document', async () => {
@@ -201,12 +206,32 @@ describe('OutstandingReceivablesPage', () => {
     // is no `problem.detail` to show.
     get.mockRejectedValue(new Error('socket hang up'))
 
-    await mountPage()
+    const wrapper = await mountPage()
 
     expect(useUiStore().notices[0]).toMatchObject({
       kind: 'error',
       message: 'Could not load outstanding receivables.',
     })
+
+    // The same distinction as above, for the failure path that carries no problem document.
+    expect(wrapper.text()).not.toContain('No customer has an outstanding balance.')
+  })
+
+  it('lets a keyboard user reach the table’s horizontal scroll', async () => {
+    signIn()
+    get.mockResolvedValue({
+      data: [row()],
+      meta: { currency: 'LKR', as_of: '2026-08-18', totals: { outstanding: '1250.5000' } },
+    })
+
+    const wrapper = await mountPage()
+    const region = wrapper.find('[role="region"]')
+
+    // A plain overflow container holds no tab stop, so columns past the right edge are rendered but
+    // not operable without a mouse. The region needs a name too, or the stop is unexplained.
+    expect(region.exists()).toBe(true)
+    expect(region.attributes('tabindex')).toBe('0')
+    expect(region.attributes('aria-label')).toBe('Outstanding receivables')
   })
 
   it('reloads for the new company when the active one changes', async () => {

@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — engineering handover
 
-**Prepared:** 18 August 2026 · **Branch:** `main` · **HEAD:** `4f98071` · **CI:** green, 5/5 · `main` = `origin/main`
+**Prepared:** 19 August 2026 · **Branch:** `main` · **HEAD:** `2126364` · **CI:** green, 5/5 · `main` = `origin/main`
 
 Where the build stands, the rules it runs on, and the exact line to pick up next.
 
@@ -9,7 +9,7 @@ Where the build stands, the rules it runs on, and the exact line to pick up next
 1. [Where it stands](#1-where-it-stands)
 2. [The rules this project runs on](#2-the-rules-this-project-runs-on)
 3. [Architecture in sixty seconds](#3-architecture-in-sixty-seconds)
-4. [Start here — Milestone 8](#4-start-here--milestone-8)
+4. [Start here — the invoice HTTP surface](#4-start-here--the-invoice-http-surface)
 5. [Decisions that govern this milestone](#5-decisions-that-govern-this-milestone)
 6. [Working alongside another team](#6-working-alongside-another-team)
 7. [Traps that have already cost time](#7-traps-that-have-already-cost-time)
@@ -27,13 +27,13 @@ been that shortcuts become permanent liabilities in a product sold to thousands 
 
 | Metric | Value | |
 | --- | --- | --- |
-| Tests | 1,455 passed | 4,165 assertions; 0 failed, 0 skipped, 0 risky |
+| Tests | 1,499 passed | 4,446 assertions; 0 failed, 0 skipped, 0 risky. Plus 205 Vitest tests |
 | Coverage | 88.3% | CI figure; floor 85%, enforced |
 | PHPStan | Level 8 | clean |
-| Modules | 9 | 359 PHP source files, 53 test files |
-| CI | 5 jobs, all green | run `32123483890` on `4f98071` |
+| Modules | 9 | 360 PHP source files, 54 test files |
+| CI | 5 jobs, all green | run `32224985419` on `2126364` |
 
-A locally run suite reports a slightly lower coverage figure than CI's — 87.7% against 88.3% on the last
+A locally run suite reports a slightly lower coverage figure than CI's — 87.8% against 88.3% on the last
 comparison. That gap is runner variance, which lines a given environment happens to exercise, not a
 difference in the suite. Treat the CI figure as the project's current status.
 
@@ -41,7 +41,7 @@ difference in the suite. Treat the CI figure as the project's current status.
 | --- | --- | --- |
 | **1** — Platform foundation | Multi-tenancy on PostgreSQL with FORCED row level security, companies, branches, users, sessions, devices, two-factor, roles and permissions, settings, append-only audit trail | ✅ Done, tagged `phase-1` |
 | **2** — Accounting core | Fiscal calendar, chart of accounts with a versioned Sri Lankan starter template, immutable double-entry journals enforced by database triggers, gapless document numbering, per-period balances, opening balances, period and year close, trial balance, account ledger | ✅ Done, tagged `phase-2` |
-| **3** — Customers & sales invoicing | Eight milestones. Seven delivered; Milestone 8 remains. | 🔵 In progress |
+| **3** — Customers & sales invoicing | Eight milestones, all eight delivered — but Milestone 8 was narrowed to receivables reporting, so customer and invoice screens and the invoice HTTP surface remain outstanding | 🔵 In progress |
 
 ### Phase 3, milestone by milestone
 
@@ -57,10 +57,15 @@ delivery — Milestone 6 landed first. See [§6](#6-working-alongside-another-te
 | 5 | **Issuing and cancellation** — the posting map, numbering, reversal, immutability, authorization. All six stages complete. | ✅ Done |
 | 6 | HTTP surface — customer and tax-code REST API, `CustomerService` hardening | ✅ Done, merged via PR #1 |
 | 7 | **Receivables reporting** — outstanding balance, aged receivables, AR control reconciliation, plus the two probe seams | ✅ Done |
-| 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
+| 8 | **Receivables reporting, end to end** — three report endpoints, `sales.reports.view`, three Vue pages. Narrowed from "customer and invoice screens"; see below | ✅ Done, with remainder |
 
 Milestone 6 was once blocked on debt item I3. **That block is gone** — I3 was resolved as part of the
 milestone. Nothing in Milestone 6 waits on Milestone 5, and vice versa.
+
+**Milestone 8 does not close Phase 3.** It was deliberately narrowed by an approved decision to the
+receivables-report vertical slice, because the reports were the only finished domain work that nothing at all
+could reach. What its original wording also implied — customer screens, the invoice HTTP surface, invoice
+screens — was **not built**. That is the work waiting in [§4](#4-start-here--the-invoice-http-surface).
 
 ---
 
@@ -151,17 +156,44 @@ database is what enforces the rule.
 
 ---
 
-## 4. Start here — Milestone 8
+## 4. Start here — the invoice HTTP surface
 
-**Nothing is in progress.** Phase 3 Milestones 1 to 7 are complete, so the next work is **Milestone 8 — the
-front end: customer and invoice screens, routing, Vitest.** It has not been designed, and this document
-deliberately says nothing about its scope: every milestone so far has gone through inspection and approval
-before implementation, and inferring requirements from a handover would skip that.
+**Nothing is in progress.** Phase 3 Milestones 1 to 8 are complete, but Milestone 8 was narrowed to
+receivables reporting, so three pieces of work its original wording implied are still outstanding. None has
+been designed, and this document deliberately does not specify them: every milestone so far went through
+inspection and approval before implementation, and inferring requirements from a handover would skip that.
 
-Two things Milestone 8 will find waiting for it. **There is no HTTP surface for invoices** — customers and
-tax codes have one from Milestone 6, invoices do not, so screens for issuing or cancelling need an API layer
-first. **The three receivables reports are service methods only**, with no route and no
-`sales.reports.view` permission, for the same reason: there was nothing to authorize yet.
+| Outstanding | Why it is the state it is |
+| --- | --- |
+| **The invoice HTTP surface** | The largest gap, and the one to start with. **There is no HTTP layer for invoices at all** — no controller, no route, no resource. `SalesInvoiceService` carries `createDraft`, `updateDraft`, `deleteDraft`, `issue` and `cancel`, with 156 tests across five files proving them, and **none of it is reachable over the API.** Screens for issuing or cancelling need this first |
+| **Customer front-end screens** | The API is finished and has been since Milestone 6 — nine endpoints, 54 tests. There is no UI over it. No backend work is needed |
+| **Invoice front-end screens** | List, draft editor, and the issue/cancel lifecycle. Blocked only by the HTTP surface above |
+
+Tax-code screens are in the same position as customer screens — a complete API with no UI — but were never
+named in Milestone 8's scope, so they are a proposal rather than a carried commitment.
+
+**Read [ADR 0011](adr/0011-receivables-reporting-frontend-and-http-surface.md) before adding any
+company-scoped page.** One finding in it will otherwise cost you an afternoon: switching company refreshes the
+session **in place** and never re-mounts the page, so a page that loads only on mount keeps the previous
+company's figures under the new company's name and currency. The three report pages watch the active company
+and reload; `TrialBalancePage` does not, and still has the gap.
+
+### Milestone 8 — receivables reporting, complete
+
+The three Milestone 7 reports are now reachable end to end.
+
+| Layer | What exists |
+| --- | --- |
+| Permission | `sales.reports.view`, sortOrder 90, not sensitive. Granted to accountant, bookkeeper and viewer; administrator inherits it via `tenantGrantableNames()`, owner via `Gate::before`. **No migration** — edit `PermissionCatalogue`, edit `RoleTemplate`, run `asids:sync-permissions --refresh-roles`, which skips roles a customer has customised unless `--force` |
+| HTTP | `GET companies/{company}/reports/outstanding-receivables`, `/aged-receivables` (optional `as_of`), `/ar-control` (no parameters). `ReceivableReportController` — no FormRequest, no Resource, no DTO, following `LedgerReportController` |
+| Front end | `/sales/outstanding-receivables`, `/sales/aged-receivables`, `/sales/ar-control`, three flat navigation items, all gated on `sales.reports.view` |
+| Tests | 44 API tests in `ReceivableReportApiTest`; 43 behavioural page specs — the **first page specs in the codebase**. The `pages/**` coverage floor stays at 0 and no existing page was retrofitted |
+
+Two things about the controller worth knowing. It throws `AuthorizationException` rather than `abort(403)`,
+so a denial renders as `type: …/forbidden` — the code `ProblemCode.Forbidden` in `types/api.ts` branches on.
+`LedgerReportController` uses `abort(403)` and therefore renders `…/http-403`; see §8. And the reports emit
+their verdicts (`meta.totals.reconciles`) rather than leaving a client to infer them, because two opposing
+differences cancel in a total while both accounts are wrong.
 
 ### Milestone 7 — receivables reporting, complete
 
@@ -499,10 +531,19 @@ notes still list them as open.
 | **M7** | `CustomerService::archive()` hardcoded scale 4 | ✅ Uses `Money::SCALE` |
 | **M8** | `applyAttributes()` assigned before validating | ✅ Validates first |
 
+### Resolved by Milestone 8
+
+| Ref | Was | Now |
+| --- | --- | --- |
+| — | The three receivables reports had no route, no controller and no `sales.reports.view` permission | ✅ All three reachable over HTTP, permission in the catalogue and granted to three role templates |
+| — | `OutstandingReceivablesPage` keyed its empty state on the row count, so a refused request rendered "No customer has an outstanding balance." above the error notice — telling an accountant their debtors had all paid | ✅ Keyed on `meta`, so the empty state speaks only for a request that succeeded. All three report pages now do this, and each has a test asserting a failure does not render the success wording |
+
 ### Still open
 
 | Ref | Issue | Note |
 | --- | --- | --- |
+| — | **`abort(403)` renders as `http-403`, not `forbidden`** | `LedgerReportController::authorizeReports()` uses `abort(403)`, which raises a bare Symfony `HttpException` and falls through `ApiExceptionRenderer` to the generic arm. So the Accounting reports return `type: …/http-403` while their OpenAPI documents `Forbidden` and `types/api.ts` makes `forbidden` the code the front end branches on. `AccountingApiTest` only asserts the status number, which is why it went unnoticed. `ReceivableReportController` throws `AuthorizationException` instead and renders correctly — the two report controllers therefore disagree. Deliberately untouched: it is an Accounting file and was outside Milestone 8's scope |
+| — | **`TrialBalancePage` does not reload on company switch** | Same gap the three report pages fix. Switching company refreshes the session in place without re-mounting, so the trial balance keeps the previous company's rows under the new company's currency. Left alone for the same reason as above |
 | **N3** | Same-workspace 403-vs-404 existence oracle | A caller can distinguish "exists but forbidden" from "does not exist". Platform-wide — accounts and journals too — so it should be fixed once across all modules rather than per module. Recorded in [STATUS.md](STATUS.md); note that document cites ADR 0008 for it, but ADR 0008 does not in fact contain an N3 section, so the reasoning lives only in STATUS.md today. |
 | — | `TenantProvisioningService` does five things in one transaction and depends outward on three modules | ADR 0005 predicted the extraction point; every new module adds tables to it |
 | — | Two competing patterns: Phase 1 repositories versus Phase 2 services querying models directly | **Pick one before a third module is written.** The largest architectural decision still open |
@@ -560,8 +601,9 @@ why — including the honest limits of the choice.
 | [0008](adr/0008-sales-http-api-and-customer-update-semantics.md) | The Sales HTTP surface, and attribute-array update semantics for customers (Milestone 6) |
 | [0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) | Sales invoice issuing and cancellation: two number series, one ledger seam (Milestone 5) |
 | [0010](adr/0010-receivables-reporting-and-ar-account-identification.md) | Receivables reporting, and how an invoice's receivable account is identified (Milestone 7) |
+| [0011](adr/0011-receivables-reporting-frontend-and-http-surface.md) | The receivables reporting HTTP surface and its front end (Milestone 8) |
 
-ADRs are sequential through 0010; the next new one is 0011.
+ADRs are sequential through 0011; the next new one is 0012.
 
 ### Also worth reading
 

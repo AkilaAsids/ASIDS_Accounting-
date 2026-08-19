@@ -152,7 +152,19 @@ async function load(): Promise<void> {
         Nothing is outstanding as at {{ meta.as_of }}.
       </p>
 
-      <div v-else-if="meta" class="overflow-x-auto">
+      <!--
+        Focusable, so the scroll is reachable without a mouse. This is the widest table in the
+        application — eight columns, guaranteed to overflow on a phone — and a plain `overflow-x-auto`
+        div contains no tab stop, leaving a keyboard-only user unable to reach the 90+ and Total
+        columns at all. `role="region"` with a name makes the tab stop explicable to a screen reader.
+      -->
+      <div
+        v-else-if="meta"
+        class="overflow-x-auto"
+        role="region"
+        aria-label="Aged receivables"
+        tabindex="0"
+      >
         <table class="min-w-full text-sm">
           <caption class="sr-only">
             Aged receivables as at {{ meta.as_of }}, in {{ meta.currency }}, aged from each invoice's

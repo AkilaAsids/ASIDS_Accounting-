@@ -218,18 +218,55 @@ directly so it cannot be changed silently.
 
 ---
 
+### Milestone 8 — receivables reporting, end to end ✅ complete with remainder
+
+Milestone 8 was **deliberately narrowed** to one vertical slice: taking Milestone 7's three finished report
+services all the way to a screen. The roadmap entry had read "customer and invoice screens, routing, Vitest";
+that wording was broader than what was built, and the milestone was closed against the narrower scope by an
+explicit approved decision rather than by drift. The customer and invoice work it also implied is **not
+done** and is listed under [Current](#-current) below.
+
+The slice was chosen because the reports were the only finished domain work with nothing at all able to reach
+it — no route, no permission, no page.
+
+| Sub-phase | Scope | Commit |
+| --- | --- | --- |
+| 8A | `sales.reports.view`; three report endpoints; `ReceivableReportController`; OpenAPI; 44 API tests | `4ecbae5` |
+| 8B | Outstanding receivables page, route, navigation, first page spec | `efad989` |
+| 8C | Aged receivables page with the as-at control | `07c5381` |
+| 8D | AR control reconciliation page | `2126364` |
+| 8E | Empty-state fix, navigation labels, accessibility, documentation closure | this commit |
+
+**Delivered:** the receivables reporting HTTP surface (three `GET` endpoints under
+`companies/{company}/reports/`, documented in `openapi.yaml` and covered by the bidirectional route check);
+the `sales.reports.view` permission granted to accountant, bookkeeper and viewer; three Vue pages with
+routes, flat navigation and behavioural specs; an accessibility and responsive review of all three.
+
+**Not delivered, and explicitly outstanding:** customer front-end screens, the invoice HTTP surface, and
+invoice front-end screens.
+
+The frontend decisions are recorded in
+[ADR 0011](adr/0011-receivables-reporting-frontend-and-http-surface.md). The one worth knowing before adding
+any company-scoped page: switching company refreshes the session **in place** and never re-mounts the page,
+so a page that loads only on mount will show the previous company's figures under the new company's name.
+
+---
+
 ## 🔵 Current
 
-Nothing is in progress. Milestones 1 to 7 of Phase 3 are complete; **Milestone 8 is the next unstarted
-work.**
+Nothing is in progress. Phase 3 Milestones 1 to 8 are complete, with Milestone 8 closed against the narrowed
+receivables-reporting scope described above.
 
-### Phase 3 — remaining milestones 🟢
+### Phase 3 — carried forward from Milestone 8 🟢
 
-Scope firm; these follow from the approved Phase 3 design.
+Scope firm; each was implied by Milestone 8's original wording and was **not** built. None is blocked.
 
-| Milestone | Scope | State |
+| Work | Scope | State |
 | --- | --- | --- |
-| 8 | Front end — customer and invoice screens, routing, Vitest | Not started |
+| Customer front end | Screens over the customer REST API that Milestone 6 already shipped — list, search, create, edit, archive, restore, deactivate, reactivate, delete. No backend work needed; the API is complete and has 54 tests | Not started |
+| Invoice HTTP surface | There is **no** HTTP layer for invoices at all. `SalesInvoiceService` carries draft, update, delete, issue and cancel, and none of it is reachable over the API. Needs a controller, form requests, resources, routes and OpenAPI entries | Not started |
+| Invoice front end | List, draft editor and the issue/cancel lifecycle. Depends on the HTTP surface above | Not started |
+| Tax-code front end | Screens over the tax-code REST API from Milestone 6. Never named in the original Milestone 8 wording, so listed here rather than as a carried-forward commitment | Proposed |
 
 ---
 
@@ -358,6 +395,7 @@ in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md).
 
 ## What this document is not
 
-It is documentation. Phase 3 Milestones 1 to 7 are built. Nothing exists for anything beyond that, and none
-of it should be created on the strength of being listed here. A 🟡 item in particular carries no authority
-to write code.
+It is documentation. Phase 3 Milestones 1 to 8 are built, with Milestone 8 limited to the receivables
+reporting slice — the customer and invoice front-end work, and the invoice HTTP surface, do **not** exist.
+Nothing exists for anything beyond that either, and none of it should be created on the strength of being
+listed here. A 🟡 item in particular carries no authority to write code.

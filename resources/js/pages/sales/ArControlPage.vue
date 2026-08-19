@@ -138,7 +138,18 @@ async function load(): Promise<void> {
         This company has no receivable account activity yet.
       </p>
 
-      <div v-else-if="meta" class="overflow-x-auto">
+      <!--
+        Focusable, so the scroll is reachable without a mouse. The rightmost column carries the
+        per-account verdict, so a keyboard-only user who cannot scroll cannot read which account
+        failed to reconcile — the one thing this report exists to tell them.
+      -->
+      <div
+        v-else-if="meta"
+        class="overflow-x-auto"
+        role="region"
+        aria-label="AR control reconciliation"
+        tabindex="0"
+      >
         <table class="min-w-full text-sm">
           <caption class="sr-only">
             AR control reconciliation as produced on {{ meta.as_of }}, in {{ meta.currency }},
