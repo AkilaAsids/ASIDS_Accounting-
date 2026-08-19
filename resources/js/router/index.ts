@@ -97,6 +97,17 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/accounting/TrialBalancePage.vue'),
         meta: { permission: 'accounting.reports.view', title: 'Trial balance' },
       },
+      /*
+       * Sales. Receivables reporting arrives first, because the reports were finished before
+       * anything could reach them; the customer and invoice screens the roadmap also names are
+       * still outstanding.
+       */
+      {
+        path: 'sales/outstanding-receivables',
+        name: 'outstanding-receivables',
+        component: () => import('@/pages/sales/OutstandingReceivablesPage.vue'),
+        meta: { permission: 'sales.reports.view', title: 'Outstanding receivables' },
+      },
       {
         path: 'roles',
         name: 'roles',

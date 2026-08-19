@@ -404,3 +404,34 @@ export interface AccountLedgerRow {
   credit: string
   running_balance: string
 }
+
+/*
+|--------------------------------------------------------------------------
+| Sales — receivables reporting
+|--------------------------------------------------------------------------
+|
+| Every amount is a `string`, for the reason stated above the accounting block:
+| a JSON number is an IEEE-754 double by the time any client reads it, and the
+| ledger stores numeric(19,4) precisely so that never happens. Amounts here are
+| formatted for display and never summed — each report carries the totals the
+| server computed, in `meta`.
+*/
+
+export interface OutstandingReceivableRow {
+  customer_id: string
+  code: string
+  name: string
+  /** How many collectable invoices make up the balance. A count, so a real number. */
+  invoice_count: number
+  outstanding: string
+}
+
+export interface OutstandingReceivableMeta {
+  currency: string
+  /**
+   * The day the figures were read, not a parameter. The balance is current state with no
+   * history behind it, so the report offers no as-at date to ask for.
+   */
+  as_of: string
+  totals: { outstanding: string }
+}
