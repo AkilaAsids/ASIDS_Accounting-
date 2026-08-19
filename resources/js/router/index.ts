@@ -115,6 +115,12 @@ const routes: RouteRecordRaw[] = [
         meta: { permission: 'sales.reports.view', title: 'Aged receivables' },
       },
       {
+        path: 'sales/ar-control',
+        name: 'ar-control',
+        component: () => import('@/pages/sales/ArControlPage.vue'),
+        meta: { permission: 'sales.reports.view', title: 'AR control' },
+      },
+      {
         path: 'roles',
         name: 'roles',
         component: () => import('@/pages/roles/RolesPage.vue'),

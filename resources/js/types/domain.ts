@@ -463,3 +463,40 @@ export interface AgedReceivableMeta {
   as_of: string
   totals: AgedReceivableBuckets
 }
+
+/**
+ * One receivable account, and whether the two records of it agree.
+ *
+ * `difference` is `general_ledger - subledger`, so a **positive** value means the books carry more
+ * receivable than the invoices account for — the direction a stray manual journal into AR shows up
+ * in. It arrives already signed and must be rendered that way: the sign is what says which side is
+ * short, and a zero is a meaningful result rather than a cell to blank.
+ */
+export interface ArControlRow {
+  account_id: string
+  code: string
+  name: string
+  subledger: string
+  general_ledger: string
+  difference: string
+  reconciles: boolean
+}
+
+export interface ArControlTotals {
+  subledger: string
+  general_ledger: string
+  difference: string
+  /**
+   * True only when **every** account reconciles, not merely when the differences net to zero. Two
+   * opposite errors of equal size cancel in `difference` while both accounts are wrong, which is
+   * exactly why the server sends the verdict rather than leaving it to be inferred from the total.
+   */
+  reconciles: boolean
+}
+
+export interface ArControlMeta {
+  currency: string
+  /** The day the report was produced. Not a parameter — the reconciliation has no as-at capability. */
+  as_of: string
+  totals: ArControlTotals
+}
