@@ -435,3 +435,31 @@ export interface OutstandingReceivableMeta {
   as_of: string
   totals: { outstanding: string }
 }
+
+/**
+ * The five ageing buckets, in the order a statement is read.
+ *
+ * Aged from each invoice's **due date**, not its invoice date, and inclusive at both ends so an
+ * invoice falls in exactly one. `not_yet_due` is a real receivable that simply is not late.
+ */
+export interface AgedReceivableBuckets {
+  not_yet_due: string
+  days_0_30: string
+  days_31_60: string
+  days_61_90: string
+  days_over_90: string
+  total: string
+}
+
+export interface AgedReceivableRow extends AgedReceivableBuckets {
+  customer_id: string
+  code: string
+  name: string
+}
+
+export interface AgedReceivableMeta {
+  currency: string
+  /** The cutoff actually used, whether supplied by the caller or defaulted by the server. */
+  as_of: string
+  totals: AgedReceivableBuckets
+}
