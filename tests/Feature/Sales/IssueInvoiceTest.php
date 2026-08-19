@@ -12,12 +12,14 @@ use Asids\Core\Accounting\Domain\Enums\JournalEntryStatus;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\Models\FiscalPeriod;
 use Asids\Core\Accounting\Domain\Models\JournalEntry;
+use Asids\Core\Accounting\Domain\Models\JournalLine;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
 use Asids\Core\Sales\Application\DTOs\CustomerData;
 use Asids\Core\Sales\Application\DTOs\SalesInvoiceData;
 use Asids\Core\Sales\Application\DTOs\SalesInvoiceLineData;
 use Asids\Core\Sales\Application\Services\CustomerService;
+use Asids\Core\Sales\Application\Services\LedgerNarration;
 use Asids\Core\Sales\Application\Services\SalesInvoiceService;
 use Asids\Core\Sales\Domain\Enums\SalesInvoiceStatus;
 use Asids\Core\Sales\Domain\Exceptions\InvoiceCannotBeIssued;
@@ -474,6 +476,41 @@ describe('issuing the same invoice twice', function (): void {
         expect(JournalEntry::query()->where('source_id', (string) $invoice->getKey())->count())->toBe(1);
     });
 
+    it('refuses a racing attempt holding a stale draft, without reaching the database', function (): void {
+        // The losing racer, reproduced deterministically and at the layer the service actually owns.
+        //
+        // Two requests read the same draft before either commits. `$stale` is the second one's in-memory copy:
+        // it still says `draft` after the first has issued, so every check `issue()` performs before opening its
+        // transaction passes — which is precisely the window that existed. The loser used to reach the unique
+        // index over `journal_entries.source_id` and come back as a `QueryException`, meaning a 500 for a
+        // condition the domain has an exact answer for.
+        //
+        // `catchPlatformException` is the assertion: it returns only for a domain exception and a QueryException
+        // would propagate straight past it and fail this test. The row lock plus the re-read inside the
+        // transaction is what makes the difference.
+        //
+        // This is not a replacement for the test below or the one above it. The database's protections are what
+        // hold when the application cannot see the conflict at all, and both still have their own coverage.
+        $draft = issuableDraft();
+        $stale = SalesInvoice::query()->whereKey($draft->getKey())->firstOrFail();
+
+        $issued = $this->invoices->issue($draft, $this->owner);
+
+        expect($stale->status)->toBe(SalesInvoiceStatus::Draft);
+
+        $exception = catchPlatformException(fn () => $this->invoices->issue($stale, $this->owner));
+
+        expect($exception->problemCode())->toBe('invoice-not-a-draft');
+
+        // One entry for this invoice, and the invoice still points at it.
+        expect(JournalEntry::query()->where('source_id', (string) $issued->getKey())->count())->toBe(1)
+            ->and($issued->refresh()->journal_entry_id)->not->toBeNull();
+
+        // No document number was burned by the loser: the next invoice takes 0002, not 0003. The refusal now
+        // happens before `DocumentNumberService` is asked for anything at all.
+        expect($this->invoices->issue(issuableDraft(), $this->owner)->number)->toBe('INV-2026-06-0002');
+    });
+
     it('refuses to let an issued invoice be rewound to draft', function (): void {
         $invoice = $this->invoices->issue(issuableDraft(), $this->owner);
 
@@ -486,5 +523,180 @@ describe('issuing the same invoice twice', function (): void {
             'issued_at' => null,
             'journal_entry_id' => null,
         ]))->toThrow(QueryException::class);
+    });
+});
+
+describe('the journal description', function (): void {
+    it('names the invoice and its customer', function (): void {
+        $invoice = $this->invoices->issue(issuableDraft(), $this->owner);
+
+        expect($invoice->journalEntry->description)->toBe('Invoice '.$invoice->number.' — Silva Traders');
+    });
+
+    it('fits the ledger column even for a customer name that fills its own', function (): void {
+        // `customers.name` is varchar(255) and `StoreCustomerRequest` permits all of it, while
+        // `journal_entries.description` is varchar(255) too. Composed naively the two could not both be
+        // satisfied: a name anywhere near its own limit pushed the description over the column and Postgres
+        // raised 22001, so an invoice to a customer the system had happily accepted simply could not be issued.
+        //
+        // A real trading name of this length is unusual but entirely valid — a full legal name with a branch
+        // and a location appended reaches it easily.
+        $longName = mb_substr(str_repeat('Wickramasinghe Trading and General Merchants ', 6), 0, 255);
+
+        // The premise of the whole test: a name that fills its own column exactly. Asserted so the fixture
+        // cannot quietly shrink below the overflow threshold and leave this passing for the wrong reason.
+        expect(mb_strlen($longName))->toBe(255);
+
+        $customer = app(CustomerService::class)->create(
+            $this->company,
+            new CustomerData(name: $longName, code: 'LONGNAME'),
+        );
+
+        $draft = $this->invoices->createDraft($this->company, new SalesInvoiceData(
+            customerId: (string) $customer->getKey(),
+            invoiceDate: CarbonImmutable::parse('2026-06-15'),
+            lines: [new SalesInvoiceLineData(
+                description: 'Consulting services',
+                quantity: '1',
+                unitPrice: '1000.00',
+                revenueAccountId: (string) $this->revenue->getKey(),
+            )],
+        ));
+
+        // Previously a QueryException from the database rather than a returned invoice — and not only on the
+        // entry: `journal_lines.description` is varchar(255) too, and the receivable, revenue and tax lines all
+        // compose their own narration from the same name. All four had to be fixed for this to pass.
+        $invoice = $this->invoices->issue($draft, $this->owner);
+
+        $description = $invoice->journalEntry->description;
+
+        // Measured in characters, which is what varchar counts — the em dash is one character and three bytes.
+        expect(mb_strlen($description))->toBeLessThanOrEqual(255)
+            // The number leads and is never the part that gives way: it is what anyone reconciling works from.
+            ->and($description)->toStartWith('Invoice '.$invoice->number.' — ')
+            // Truncation is visible rather than silent, so nobody reads a clipped name as the whole one.
+            ->and($description)->toEndWith('…')
+            // As much of the name as fits is kept.
+            ->and($description)->toContain('Wickramasinghe Trading');
+
+        // The document and its posting are still correctly tied together.
+        expect($invoice->status)->toBe(SalesInvoiceStatus::Issued)
+            ->and($invoice->journal_entry_id)->not->toBeNull()
+            ->and(JournalEntry::query()->where('source_id', (string) $invoice->getKey())->count())->toBe(1);
+
+        // Every line's narration, not just the entry's. The receivable line composes `Invoice to <name>`, and
+        // the revenue and tax lines compose `<account name> — <name>` — where *both* halves are user-controlled
+        // and each is as wide as the column, so no per-part budget could have worked.
+        $lines = JournalLine::query()
+            ->where('journal_entry_id', $invoice->journal_entry_id)
+            ->orderBy('line_number')
+            ->get();
+
+        foreach ($lines as $line) {
+            expect(mb_strlen((string) $line->description))->toBeLessThanOrEqual(255);
+        }
+
+        // ADR 0010 depends on the receivable being line 1. Asserted here as well as in
+        // `ArControlReconciliationTest`, because this is the test that would notice if a description change had
+        // disturbed the ordering — which is the one thing it must never do.
+        expect($lines->first()->account_id)->toBe((string) $this->receivables->getKey())
+            ->and($lines->first()->line_number)->toBe(1)
+            ->and($lines->first()->debit)->toBe('1000.0000');
+
+        // Grouping and account selection unchanged: one receivable debit and one revenue credit, no tax code on
+        // this draft, and the entry still balances.
+        expect($lines)->toHaveCount(2)
+            ->and($lines->last()->account_id)->toBe((string) $this->revenue->getKey())
+            ->and($lines->last()->credit)->toBe('1000.0000');
+    });
+
+    it('clips a narration composed from two long names, where no per-part budget could work', function (): void {
+        // The revenue and tax narrations are `<account name> — <customer name>`, and `accounts.name` is
+        // varchar(255) as well. With both near their limits there is no way to award each a share of 255, which
+        // is why the rule truncates the composed string rather than budgeting its parts.
+        $longAccountName = mb_substr(str_repeat('Revenue from Wholesale Distribution and Retail Trade ', 6), 0, 255);
+
+        DB::table('accounts')->where('id', $this->revenue->getKey())->update(['name' => $longAccountName]);
+
+        $customer = app(CustomerService::class)->create($this->company, new CustomerData(
+            name: mb_substr(str_repeat('Wickramasinghe Trading and General Merchants ', 6), 0, 255),
+            code: 'BOTHLONG',
+        ));
+
+        $draft = $this->invoices->createDraft($this->company, new SalesInvoiceData(
+            customerId: (string) $customer->getKey(),
+            invoiceDate: CarbonImmutable::parse('2026-06-15'),
+            lines: [new SalesInvoiceLineData(
+                description: 'Consulting services',
+                quantity: '1',
+                unitPrice: '1000.00',
+                revenueAccountId: (string) $this->revenue->getKey(),
+            )],
+        ));
+
+        $invoice = $this->invoices->issue($draft, $this->owner);
+
+        $lines = JournalLine::query()
+            ->where('journal_entry_id', $invoice->journal_entry_id)
+            ->orderBy('line_number')
+            ->get();
+
+        foreach ($lines as $line) {
+            expect(mb_strlen((string) $line->description))->toBeLessThanOrEqual(255);
+        }
+
+        // The account name leads on a revenue line, so that is what survives — which is what a reader needs to
+        // place the posting.
+        expect($lines->last()->description)->toStartWith('Revenue from Wholesale')
+            ->and($lines->last()->description)->toEndWith('…');
+
+        // And the posting itself is unchanged by any of it.
+        expect($lines->first()->line_number)->toBe(1)
+            ->and($lines->first()->account_id)->toBe((string) $this->receivables->getKey())
+            ->and($lines->last()->account_id)->toBe((string) $this->revenue->getKey());
+    });
+});
+
+describe('LedgerNarration', function (): void {
+    it('leaves a narration that already fits exactly as it is', function (): void {
+        expect(LedgerNarration::limit('Invoice INV-2026-06-0001 — Silva Traders'))
+            ->toBe('Invoice INV-2026-06-0001 — Silva Traders');
+    });
+
+    it('leaves a narration of exactly the column width untouched', function (): void {
+        $exact = str_repeat('a', 255);
+
+        // The boundary is inclusive: 255 characters fit a varchar(255), so clipping here would lose a character
+        // for nothing.
+        expect(LedgerNarration::limit($exact))->toBe($exact)
+            ->and(mb_strlen(LedgerNarration::limit($exact)))->toBe(255);
+    });
+
+    it('clips one character over the width down to the width', function (): void {
+        expect(mb_strlen(LedgerNarration::limit(str_repeat('a', 256))))->toBe(255);
+    });
+
+    it('marks a clipped narration so a reader can see it was cut', function (): void {
+        expect(LedgerNarration::limit(str_repeat('a', 300)))->toEndWith('…');
+    });
+
+    it('keeps the leading text, which is what identifies the entry', function (): void {
+        $narration = 'Invoice INV-2026-06-0001 — '.str_repeat('x', 400);
+
+        expect(LedgerNarration::limit($narration))->toStartWith('Invoice INV-2026-06-0001 — ');
+    });
+
+    it('counts characters rather than bytes', function (): void {
+        // Every character here is three bytes. Counting bytes would clip this at a third of the column and throw
+        // away text that fits perfectly well — and the narrations this rule guards all contain an em dash.
+        $multibyte = str_repeat('—', 255);
+
+        expect(mb_strlen($multibyte))->toBe(255)
+            ->and(strlen($multibyte))->toBe(765)
+            ->and(LedgerNarration::limit($multibyte))->toBe($multibyte);
+    });
+
+    it('keeps a clipped multibyte narration inside the column', function (): void {
+        expect(mb_strlen(LedgerNarration::limit(str_repeat('—', 400))))->toBeLessThanOrEqual(255);
     });
 });

@@ -246,23 +246,50 @@ final readonly class SalesInvoiceService
         // 7. Built before the transaction opens: the map writes nothing, so a refusal here costs no lock.
         $lines = $this->postingMap->for($invoice);
 
-        return DB::transaction(function () use ($invoice, $company, $period, $lines, $actor): SalesInvoice {
-            // 8. Gapless, and reserved inside the transaction — `DocumentNumberService` refuses to run outside
+        return DB::transaction(function () use ($invoice, $company, $identifier, $period, $lines, $actor): SalesInvoice {
+            // 8. The row lock, and the only check in this method that holds under concurrency.
+            //
+            // Every refusal above read `$invoice` as it stood before the transaction opened, which is what two
+            // racing requests both do: both see `draft`, both pass, and the loser used to reach the unique index
+            // over `journal_entries.source_id` and come back as a raw `QueryException` — a 500 to any caller,
+            // for a condition the domain has a precise answer for. Locking the row and re-reading it turns the
+            // loser into `invoice-not-a-draft`, the same refusal a sequential second attempt already gets.
+            //
+            // Taken before the document number is reserved, so the loser costs no number and no contention on
+            // `document_sequences`. `cancel()` opens the same way and for the same reason.
+            //
+            // This does not replace the database's protection and must not be read as doing so. The unique
+            // index still decides the case the application cannot see, and the immutability trigger still
+            // refuses to rewind an issued invoice to draft; both are covered by their own tests. The lock is
+            // what makes the ordinary race produce a readable refusal instead of a stack trace.
+            $locked = SalesInvoice::query()
+                ->whereKey($invoice->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($locked->status !== SalesInvoiceStatus::Draft) {
+                throw InvoiceCannotBeIssued::notADraft($locked->number ?? $identifier, $locked->status);
+            }
+
+            // 9. Gapless, and reserved inside the transaction — `DocumentNumberService` refuses to run outside
             // one, precisely so a rollback returns the number instead of leaving a hole.
             $number = $this->numbers->next($company, DocumentType::SalesInvoice, $period);
 
-            // 9. `JournalVoucher` by explicit choice, not by omission — see the note above on the two counters.
+            // 10. `JournalVoucher` by explicit choice, not by omission — see the note above on the two counters.
             // The source document is what ties the entry back, and what stops it being posted twice.
             $entry = $this->posting->postNew($company, new JournalEntryData(
                 entryDate: $invoice->invoice_date->startOfDay(),
-                description: sprintf('Invoice %s — %s', $number, $invoice->customer->name),
+                // Clipped to the ledger's column width. `customers.name` is as wide as
+                // `journal_entries.description`, so a long trading name used to push this past the column and
+                // fail the whole issue with a raw database error — see `LedgerNarration`.
+                description: LedgerNarration::limit(sprintf('Invoice %s — %s', $number, $invoice->customer->name)),
                 lines: $lines,
                 reference: $number,
                 documentType: DocumentType::JournalVoucher,
                 source: SourceDocument::for($invoice),
             ), $actor);
 
-            // 10. One save, carrying the whole issued state. Split across two writes it would momentarily be an
+            // 11. One save, carrying the whole issued state. Split across two writes it would momentarily be an
             // invoice that is issued with no number, and `sales_invoices_number_matches_status_check` refuses
             // exactly that — the constraint is what makes the single save mandatory rather than merely tidy.
             $invoice->status = SalesInvoiceStatus::Issued;

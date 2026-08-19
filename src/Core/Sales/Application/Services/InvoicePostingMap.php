@@ -135,10 +135,13 @@ final readonly class InvoicePostingMap
 
         $account = $this->receivableAccountFor($invoice);
 
-        return [$this->line($account, $total, $invoice->branch_id, sprintf(
+        // Clipped to the ledger's column. `customers.name` is as wide as `journal_lines.description`, so this
+        // narration could exceed it on its own — see `LedgerNarration`. Nothing but the text changes: the
+        // account, the amount, the side and this line's position are all untouched.
+        return [$this->line($account, $total, $invoice->branch_id, LedgerNarration::limit(sprintf(
             'Invoice to %s',
             $invoice->customer->name,
-        ))];
+        )))];
     }
 
     /**
@@ -180,7 +183,9 @@ final readonly class InvoicePostingMap
                 $account,
                 $amount->absolute(),
                 $invoice->branch_id,
-                sprintf('%s — %s', $account->name, $invoice->customer->name),
+                // Both halves are user-controlled and each is as wide as the column, so no per-part budget
+                // could work here — see `LedgerNarration`. Text only; the side, amount and account are unchanged.
+                LedgerNarration::limit(sprintf('%s — %s', $account->name, $invoice->customer->name)),
                 creditSide: $amount->isPositive(),
             );
         }
@@ -247,7 +252,9 @@ final readonly class InvoicePostingMap
                 $account,
                 $amount->absolute(),
                 $invoice->branch_id,
-                sprintf('%s — %s', $account->name, $invoice->customer->name),
+                // Both halves are user-controlled and each is as wide as the column, so no per-part budget
+                // could work here — see `LedgerNarration`. Text only; the side, amount and account are unchanged.
+                LedgerNarration::limit(sprintf('%s — %s', $account->name, $invoice->customer->name)),
                 creditSide: $amount->isPositive(),
             );
         }
