@@ -142,6 +142,15 @@ Recorded so the Security Reviewer sees them as conscious choices:
    to a platform-wide decision (`->scoped()` bindings or a path-company assertion in the base
    controller) applied to every module at once — a one-line-per-route change this ADR recommends as
    a future roadmap debt entry rather than a Sales-only fork.
+
+   > **Added 2026-08-20 (Milestone 9).** This position still stands, and customers, tax codes, accounts
+   > and journal entries are unchanged. Milestone 9 made a narrow, deliberate exception for the **sales
+   > invoice routes only**: `ResolveActiveCompany` publishes the *url* company into `RequestContext`,
+   > which is what stamps `company_id` onto the audit trail, so issuing or cancelling another company's
+   > invoice under this company's URL would post to their ledger while the trail recorded the act against
+   > ours — a misattributed audit record of a ledger write rather than a coherence gap. See
+   > [ADR 0012](0012-sales-invoice-http-surface.md) **D2** for the reasoning and its stated limits. **The
+   > platform-wide fix this section recommends is not superseded and remains the right long-term answer.**
 2. **Index/store authorize `view` on the Company** (`AccountController.php:37,73` pattern), which
    couples the Sales lists to `organization.companies.view` (`CompanyPolicy.php:26-30`) in addition
    to `sales.*.view`. Role templates that grant Sales visibility must also grant company visibility

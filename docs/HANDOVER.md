@@ -1,6 +1,6 @@
 # ASIDS ERP Cloud — engineering handover
 
-**Prepared:** 19 August 2026 · **Branch:** `main` · **HEAD:** `2126364` · **CI:** green, 5/5 · `main` = `origin/main`
+**Prepared:** 20 August 2026 · **Branch:** `main` · **HEAD:** `e28d8e2` · **CI:** green, 5/5 · `main` = `origin/main`
 
 Where the build stands, the rules it runs on, and the exact line to pick up next.
 
@@ -9,7 +9,7 @@ Where the build stands, the rules it runs on, and the exact line to pick up next
 1. [Where it stands](#1-where-it-stands)
 2. [The rules this project runs on](#2-the-rules-this-project-runs-on)
 3. [Architecture in sixty seconds](#3-architecture-in-sixty-seconds)
-4. [Start here — the invoice HTTP surface](#4-start-here--the-invoice-http-surface)
+4. [Start here — the remaining front end](#4-start-here--the-remaining-front-end)
 5. [Decisions that govern this milestone](#5-decisions-that-govern-this-milestone)
 6. [Working alongside another team](#6-working-alongside-another-team)
 7. [Traps that have already cost time](#7-traps-that-have-already-cost-time)
@@ -27,13 +27,13 @@ been that shortcuts become permanent liabilities in a product sold to thousands 
 
 | Metric | Value | |
 | --- | --- | --- |
-| Tests | 1,499 passed | 4,446 assertions; 0 failed, 0 skipped, 0 risky. Plus 205 Vitest tests |
-| Coverage | 88.3% | CI figure; floor 85%, enforced |
+| Tests | 1,573 passed | 5,056 assertions; 0 failed, 0 skipped, 0 risky. Plus 205 Vitest tests |
+| Coverage | 89.0% | CI figure; floor 85%, enforced |
 | PHPStan | Level 8 | clean |
-| Modules | 9 | 360 PHP source files, 54 test files |
-| CI | 5 jobs, all green | run `32224985419` on `2126364` |
+| Modules | 9 | 366 PHP source files, 55 test files |
+| CI | 5 jobs, all green | run `32329047764` on `e28d8e2` |
 
-A locally run suite reports a slightly lower coverage figure than CI's — 87.8% against 88.3% on the last
+A locally run suite reports a slightly lower coverage figure than CI's — 88.4% against 89.0% on the last
 comparison. That gap is runner variance, which lines a given environment happens to exercise, not a
 difference in the suite. Treat the CI figure as the project's current status.
 
@@ -41,7 +41,7 @@ difference in the suite. Treat the CI figure as the project's current status.
 | --- | --- | --- |
 | **1** — Platform foundation | Multi-tenancy on PostgreSQL with FORCED row level security, companies, branches, users, sessions, devices, two-factor, roles and permissions, settings, append-only audit trail | ✅ Done, tagged `phase-1` |
 | **2** — Accounting core | Fiscal calendar, chart of accounts with a versioned Sri Lankan starter template, immutable double-entry journals enforced by database triggers, gapless document numbering, per-period balances, opening balances, period and year close, trial balance, account ledger | ✅ Done, tagged `phase-2` |
-| **3** — Customers & sales invoicing | Eight milestones, all eight delivered — but Milestone 8 was narrowed to receivables reporting, so customer and invoice screens and the invoice HTTP surface remain outstanding | 🔵 In progress |
+| **3** — Customers & sales invoicing | Nine milestones delivered. Milestone 8 was narrowed to receivables reporting; Milestone 9 then added the sales invoice HTTP surface. **The customer, invoice and tax-code front ends remain outstanding** | 🔵 In progress |
 
 ### Phase 3, milestone by milestone
 
@@ -58,14 +58,16 @@ delivery — Milestone 6 landed first. See [§6](#6-working-alongside-another-te
 | 6 | HTTP surface — customer and tax-code REST API, `CustomerService` hardening | ✅ Done, merged via PR #1 |
 | 7 | **Receivables reporting** — outstanding balance, aged receivables, AR control reconciliation, plus the two probe seams | ✅ Done |
 | 8 | **Receivables reporting, end to end** — three report endpoints, `sales.reports.view`, three Vue pages. Narrowed from "customer and invoice screens"; see below | ✅ Done, with remainder |
+| 9 | **The sales invoice HTTP surface** — seven endpoints over `SalesInvoiceService`, the company coherence guard, `LedgerNarration`, issue-race hardening. HTTP only, no front end | ✅ Done |
 
 Milestone 6 was once blocked on debt item I3. **That block is gone** — I3 was resolved as part of the
 milestone. Nothing in Milestone 6 waits on Milestone 5, and vice versa.
 
-**Milestone 8 does not close Phase 3.** It was deliberately narrowed by an approved decision to the
+**Phase 3 is not closed.** Milestone 8 was deliberately narrowed by an approved decision to the
 receivables-report vertical slice, because the reports were the only finished domain work that nothing at all
-could reach. What its original wording also implied — customer screens, the invoice HTTP surface, invoice
-screens — was **not built**. That is the work waiting in [§4](#4-start-here--the-invoice-http-surface).
+could reach. Of the three things its original wording also implied, Milestone 9 delivered one — the invoice
+HTTP surface — and **customer screens and invoice screens were not built.** That, plus tax-code screens, is
+the work waiting in [§4](#4-start-here--the-remaining-front-end).
 
 ---
 
@@ -101,7 +103,7 @@ reviewed against them.
 | Gate | Command | Bar |
 | --- | --- | --- |
 | Tests | `./vendor/bin/pest` | All pass, none skipped |
-| Coverage | `pest --coverage --min=85` | 85% floor, currently 88.3% |
+| Coverage | `pest --coverage --min=85` | 85% floor, currently 89.0% in CI |
 | Static analysis | `composer analyse` | PHPStan level 8, zero errors |
 | Formatting | `composer lint` | Pint clean |
 | Security | `php artisan asids:security-check` | All checks pass |
@@ -156,27 +158,75 @@ database is what enforces the rule.
 
 ---
 
-## 4. Start here — the invoice HTTP surface
+## 4. Start here — the remaining front end
 
-**Nothing is in progress.** Phase 3 Milestones 1 to 8 are complete, but Milestone 8 was narrowed to
-receivables reporting, so three pieces of work its original wording implied are still outstanding. None has
-been designed, and this document deliberately does not specify them: every milestone so far went through
+**Nothing is in progress.** Phase 3 Milestones 1 to 9 are complete. What remains of Phase 3 is **entirely
+front end**: every API those screens need is finished, tested and documented. None of the screens has been
+designed, and this document deliberately does not specify them — every milestone so far went through
 inspection and approval before implementation, and inferring requirements from a handover would skip that.
 
 | Outstanding | Why it is the state it is |
 | --- | --- |
-| **The invoice HTTP surface** | The largest gap, and the one to start with. **There is no HTTP layer for invoices at all** — no controller, no route, no resource. `SalesInvoiceService` carries `createDraft`, `updateDraft`, `deleteDraft`, `issue` and `cancel`, with 156 tests across five files proving them, and **none of it is reachable over the API.** Screens for issuing or cancelling need this first |
+| **Invoice front-end screens** | List, draft editor, and the issue/cancel lifecycle. **No longer blocked** — Milestone 9 delivered the seven endpoints, so this is UI work only. Read [ADR 0012](adr/0012-sales-invoice-http-surface.md) first: the `capabilities` object on each invoice is what a client should build its buttons from, and D9 records a real asymmetry in how out-of-state transitions are refused |
 | **Customer front-end screens** | The API is finished and has been since Milestone 6 — nine endpoints, 54 tests. There is no UI over it. No backend work is needed |
-| **Invoice front-end screens** | List, draft editor, and the issue/cancel lifecycle. Blocked only by the HTTP surface above |
+| **Tax-code front-end screens** | Same position as customer screens — a complete API with no UI. Never named in Milestone 8's scope, so a proposal rather than a carried commitment |
 
-Tax-code screens are in the same position as customer screens — a complete API with no UI — but were never
-named in Milestone 8's scope, so they are a proposal rather than a carried commitment.
+**Two things the invoice list meets first.** `meta.pagination` is emitted by every paginated endpoint and
+**no page in the codebase renders a pagination control** — the invoice list is the first genuinely unbounded
+collection, so it cannot quietly show page one and stop. And an invoice editor cannot compute a live total:
+there is no float arithmetic in the browser by rule and no preview endpoint, so the draft is saved and the
+server's totals read back, which is the precedent `JournalEntriesPage` set for journal entries.
+
+**No browser verification of any invoice screen exists**, because no invoice screen exists.
 
 **Read [ADR 0011](adr/0011-receivables-reporting-frontend-and-http-surface.md) before adding any
 company-scoped page.** One finding in it will otherwise cost you an afternoon: switching company refreshes the
 session **in place** and never re-mounts the page, so a page that loads only on mount keeps the previous
 company's figures under the new company's name and currency. The three report pages watch the active company
 and reload; `TrialBalancePage` does not, and still has the gap.
+
+### Milestone 9 — the sales invoice HTTP surface, complete
+
+The invoice domain had been finished since Milestone 5 with nothing able to reach it. Milestone 9 gave it an
+API and **no front end**.
+
+| Layer | What exists |
+| --- | --- |
+| HTTP | Seven operations under `companies/{company}/sales-invoices` — index, store, show, update, destroy, `/issue`, `/cancel`. `POST` accepts `issue: true` to draft and issue in one transaction |
+| Permissions | **None added.** The four `sales.invoices.*` capabilities and `SalesInvoicePolicy` have existed since Milestone 5. No migration |
+| Requests | `StoreSalesInvoiceRequest`, `UpdateSalesInvoiceRequest` — shape and type only; ownership, postability, tax effectiveness and period state stay in the service, which names the real problem |
+| Resources | `SalesInvoiceResource`, `SalesInvoiceLineResource`, carrying a `capabilities` object |
+| Tests | 63 in `SalesInvoiceApiTest`, on top of the 156 service tests that already existed |
+
+**Three things to know before touching it.**
+
+`assertBelongsToCompany()` guards every route that binds an invoice, and it is a deliberate exception to
+[ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md) D6.1 rather than an oversight in the
+other modules. `ResolveActiveCompany` publishes the *url* company into `RequestContext`, which is what stamps
+`company_id` onto the audit trail — so without the guard, issuing another company's invoice under this
+company's URL posts to their ledger while the trail records it against ours. **The platform-wide binding gap
+is not fixed** and still applies to customers, tax codes, accounts and journal entries.
+
+`capabilities` asks the state **and** the gate, because `Gate::before` grants an owner every ability and
+short-circuits every state guard in the policy. `can_cancel` tests `status === Issued`, not the policy's
+looser `hasBeenIssued()` — a cancelled invoice has historically been issued, so copying the policy predicate
+would offer Cancel on something already cancelled.
+
+**An out-of-state transition answers 403 to a non-owner and 422 to an owner.** Re-issuing an issued invoice is
+`forbidden` to an accountant and `invoice-not-a-draft` to an owner, because the policy's advisory state guards
+resolve before the service for anyone `Gate::before` does not bypass. That is existing Milestone 5 behaviour,
+not something Milestone 9 introduced, and it is recorded in ADR 0012 D9 as an open API-consistency question
+rather than fixed. Both paths are pinned by tests. A client cannot currently tell "you lack the permission"
+from "the invoice is in the wrong state" without knowing whether the user is an owner.
+
+Two prerequisite service fixes landed first, in `60cc8ea`. `LedgerNarration` clips composed journal narrations
+to the ledger's 255-character columns at **all four** sites — the entry description and the three
+`InvoicePostingMap` line descriptions — because `customers.name` and `accounts.name` are as wide as the columns
+they were being written into, and a long trading name made an invoice unissuable with a raw database error.
+Line ordering, grouping, account selection and amounts are untouched, and `IssueInvoiceTest` now asserts the
+receivable is still line 1 so ADR 0010's invariant cannot drift. And `issue()` locks and re-reads the invoice
+before numbering, closing a concurrent double-issue race that used to surface as a 500; the unique index and
+the immutability trigger remain as backstops with their own tests.
 
 ### Milestone 8 — receivables reporting, complete
 
@@ -544,6 +594,10 @@ notes still list them as open.
 | --- | --- | --- |
 | — | **`abort(403)` renders as `http-403`, not `forbidden`** | `LedgerReportController::authorizeReports()` uses `abort(403)`, which raises a bare Symfony `HttpException` and falls through `ApiExceptionRenderer` to the generic arm. So the Accounting reports return `type: …/http-403` while their OpenAPI documents `Forbidden` and `types/api.ts` makes `forbidden` the code the front end branches on. `AccountingApiTest` only asserts the status number, which is why it went unnoticed. `ReceivableReportController` throws `AuthorizationException` instead and renders correctly — the two report controllers therefore disagree. Deliberately untouched: it is an Accounting file and was outside Milestone 8's scope |
 | — | **`TrialBalancePage` does not reload on company switch** | Same gap the three report pages fix. Switching company refreshes the session in place without re-mounting, so the trial balance keeps the previous company's rows under the new company's currency. Left alone for the same reason as above |
+| — | **Out-of-state transitions answer 403 to a non-owner and 422 to an owner** | `SalesInvoicePolicy::issue()` guards on `isDraft()` and `cancel()` on `hasBeenIssued()`, so for anyone `Gate::before` does not bypass the policy answers before the service does. Re-issuing an issued invoice is `forbidden` 403 to an accountant and `invoice-not-a-draft` 422 to an owner. Existing Milestone 5 behaviour, now pinned by tests and recorded in [ADR 0012](adr/0012-sales-invoice-http-surface.md) D9. A client cannot tell "you lack the permission" from "wrong state" without knowing whether the user is an owner — worth deciding before a front end is written against it |
+| — | **The platform-wide route-binding gap** | Nested bindings are not parent-scoped, so a member of two companies can address one company's URL with the other's row. [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md) D6.1 accepted it and recommended one platform-wide fix. Milestone 9 made a narrow exception for the **invoice** routes only, because the audit trail takes its company from the URL — see [ADR 0012](adr/0012-sales-invoice-http-surface.md) D2. Customers, tax codes, accounts and journal entries still carry the gap, and the platform-wide fix is still the right answer |
+| — | **`useMoney` and `useFormat` disagree on money** | Two formatters, both shipped. On `1234567.5` the first renders `LKR 1,234,567.50` and the second `LKR 12,34,567.50`, because only the second selects the lakh grouping this market reads. The three report pages and `TrialBalancePage` use `useMoney`; `DashboardPage`, `UsersPage` and `SecurityPage` use `useFormat`. Whichever an invoice screen picks will disagree with half the application, so unify before building one |
+| — | **No pagination control exists** | `meta.pagination` is emitted by every paginated endpoint and no page renders it. Harmless on the bounded lists shipped so far; the invoice list is the first genuinely unbounded collection |
 | **N3** | Same-workspace 403-vs-404 existence oracle | A caller can distinguish "exists but forbidden" from "does not exist". Platform-wide — accounts and journals too — so it should be fixed once across all modules rather than per module. Recorded in [STATUS.md](STATUS.md); note that document cites ADR 0008 for it, but ADR 0008 does not in fact contain an N3 section, so the reasoning lives only in STATUS.md today. |
 | — | `TenantProvisioningService` does five things in one transaction and depends outward on three modules | ADR 0005 predicted the extraction point; every new module adds tables to it |
 | — | Two competing patterns: Phase 1 repositories versus Phase 2 services querying models directly | **Pick one before a third module is written.** The largest architectural decision still open |
@@ -602,8 +656,9 @@ why — including the honest limits of the choice.
 | [0009](adr/0009-sales-invoice-issuing-cancellation-and-numbering.md) | Sales invoice issuing and cancellation: two number series, one ledger seam (Milestone 5) |
 | [0010](adr/0010-receivables-reporting-and-ar-account-identification.md) | Receivables reporting, and how an invoice's receivable account is identified (Milestone 7) |
 | [0011](adr/0011-receivables-reporting-frontend-and-http-surface.md) | The receivables reporting HTTP surface and its front end (Milestone 8) |
+| [0012](adr/0012-sales-invoice-http-surface.md) | The sales invoice HTTP surface, and the company coherence guard it carries (Milestone 9) |
 
-ADRs are sequential through 0011; the next new one is 0012.
+ADRs are sequential through 0012; the next new one is 0013.
 
 ### Also worth reading
 

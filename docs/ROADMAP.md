@@ -235,15 +235,16 @@ it — no route, no permission, no page.
 | 8B | Outstanding receivables page, route, navigation, first page spec | `efad989` |
 | 8C | Aged receivables page with the as-at control | `07c5381` |
 | 8D | AR control reconciliation page | `2126364` |
-| 8E | Empty-state fix, navigation labels, accessibility, documentation closure | this commit |
+| 8E | Empty-state fix, navigation labels, accessibility, documentation closure | `f72c515` |
 
 **Delivered:** the receivables reporting HTTP surface (three `GET` endpoints under
 `companies/{company}/reports/`, documented in `openapi.yaml` and covered by the bidirectional route check);
 the `sales.reports.view` permission granted to accountant, bookkeeper and viewer; three Vue pages with
 routes, flat navigation and behavioural specs; an accessibility and responsive review of all three.
 
-**Not delivered, and explicitly outstanding:** customer front-end screens, the invoice HTTP surface, and
-invoice front-end screens.
+**Not delivered, and explicitly outstanding at the time:** customer front-end screens, the invoice HTTP
+surface, and invoice front-end screens. The invoice HTTP surface was subsequently delivered by Milestone 9;
+the two front-end items remain outstanding.
 
 The frontend decisions are recorded in
 [ADR 0011](adr/0011-receivables-reporting-frontend-and-http-surface.md). The one worth knowing before adding
@@ -252,20 +253,59 @@ so a page that loads only on mount will show the previous company's figures unde
 
 ---
 
+## ✅ Milestone 9 — the sales invoice HTTP surface
+
+**Complete.** The invoice domain had been finished since Milestone 5 with nothing able to reach it; this
+milestone gave it an API. **No front end was built** — Milestone 9 was HTTP only, by decision C-7.
+
+| Sub-phase | Scope | Commit |
+| --- | --- | --- |
+| 9-pre | Prerequisite service hardening: `LedgerNarration` clipping journal narrations at all four sites (F-1), and `issue()` locking and re-reading before it numbers or posts (F-3) | `60cc8ea` |
+| 9A | Seven endpoints, two form requests, two resources, the company coherence guard, OpenAPI, 63 API tests | `e28d8e2` |
+| 9B | [ADR 0012](adr/0012-sales-invoice-http-surface.md), roadmap and handover closure | this commit |
+
+**Delivered** — seven operations under `companies/{company}/sales-invoices`, all documented in `openapi.yaml`
+and covered by the bidirectional route check:
+
+| Operation | Method and path |
+| --- | --- |
+| `listSalesInvoices` | `GET .../sales-invoices` |
+| `createSalesInvoice` | `POST .../sales-invoices` — accepts `issue: true` to draft and issue in one transaction |
+| `getSalesInvoice` | `GET .../sales-invoices/{invoice}` |
+| `updateSalesInvoice` | `PUT .../sales-invoices/{invoice}` |
+| `deleteSalesInvoice` | `DELETE .../sales-invoices/{invoice}` |
+| `issueSalesInvoice` | `POST .../sales-invoices/{invoice}/issue` |
+| `cancelSalesInvoice` | `POST .../sales-invoices/{invoice}/cancel` |
+
+No new permission — the four `sales.invoices.*` capabilities and `SalesInvoicePolicy` have existed since
+Milestone 5. No migration. No restore route: ADR 0007 B2 gives invoices no soft-delete column.
+
+**Not delivered:** any front end. Customer, invoice and tax-code screens remain outstanding.
+
+The decisions are recorded in [ADR 0012](adr/0012-sales-invoice-http-surface.md). Two worth knowing before
+touching this surface. **D2** — every route binding an invoice asserts it belongs to the url company, a
+deliberate exception to [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md) D6.1 made because
+the audit trail takes its company from the URL; the platform-wide binding gap is *not* fixed and remains the
+right long-term answer. **D9** — an out-of-state transition answers 403 to a non-owner and 422 to an owner,
+because `Gate::before` bypasses the policy's advisory state guards. That is existing Milestone 5 behaviour,
+now pinned by tests, and recorded as an open API-consistency question rather than fixed.
+
+---
+
 ## 🔵 Current
 
-Nothing is in progress. Phase 3 Milestones 1 to 8 are complete, with Milestone 8 closed against the narrowed
-receivables-reporting scope described above.
+Nothing is in progress. Phase 3 Milestones 1 to 9 are complete. **Phase 3 is not finished:** Milestone 8 was
+narrowed to receivables reporting, and the front-end work its original wording implied is still outstanding.
 
 ### Phase 3 — carried forward from Milestone 8 🟢
 
-Scope firm; each was implied by Milestone 8's original wording and was **not** built. None is blocked.
+Scope firm; each was implied by Milestone 8's original wording and was **not** built. None is blocked — the
+invoice HTTP surface that blocked the invoice screens was delivered by Milestone 9.
 
 | Work | Scope | State |
 | --- | --- | --- |
 | Customer front end | Screens over the customer REST API that Milestone 6 already shipped — list, search, create, edit, archive, restore, deactivate, reactivate, delete. No backend work needed; the API is complete and has 54 tests | Not started |
-| Invoice HTTP surface | There is **no** HTTP layer for invoices at all. `SalesInvoiceService` carries draft, update, delete, issue and cancel, and none of it is reachable over the API. Needs a controller, form requests, resources, routes and OpenAPI entries | Not started |
-| Invoice front end | List, draft editor and the issue/cancel lifecycle. Depends on the HTTP surface above | Not started |
+| Invoice front end | List, draft editor and the issue/cancel lifecycle, over the seven endpoints Milestone 9 delivered. No backend work needed. Whoever builds the list meets the pagination question first — `meta.pagination` is emitted and no page renders a control | Not started |
 | Tax-code front end | Screens over the tax-code REST API from Milestone 6. Never named in the original Milestone 8 wording, so listed here rather than as a carried-forward commitment | Proposed |
 
 ---
@@ -395,7 +435,7 @@ in [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md).
 
 ## What this document is not
 
-It is documentation. Phase 3 Milestones 1 to 8 are built, with Milestone 8 limited to the receivables
-reporting slice — the customer and invoice front-end work, and the invoice HTTP surface, do **not** exist.
-Nothing exists for anything beyond that either, and none of it should be created on the strength of being
-listed here. A 🟡 item in particular carries no authority to write code.
+It is documentation. Phase 3 Milestones 1 to 9 are built, with Milestone 8 limited to the receivables
+reporting slice and Milestone 9 delivering the invoice HTTP surface — **the customer, invoice and tax-code
+front-end work does not exist.** Nothing exists for anything beyond that either, and none of it should be
+created on the strength of being listed here. A 🟡 item in particular carries no authority to write code.
