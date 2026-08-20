@@ -262,7 +262,7 @@ milestone gave it an API. **No front end was built** — Milestone 9 was HTTP on
 | --- | --- | --- |
 | 9-pre | Prerequisite service hardening: `LedgerNarration` clipping journal narrations at all four sites (F-1), and `issue()` locking and re-reading before it numbers or posts (F-3) | `60cc8ea` |
 | 9A | Seven endpoints, two form requests, two resources, the company coherence guard, OpenAPI, 63 API tests | `e28d8e2` |
-| 9B | [ADR 0012](adr/0012-sales-invoice-http-surface.md), roadmap and handover closure | this commit |
+| 9B | [ADR 0012](adr/0012-sales-invoice-http-surface.md), roadmap and handover closure | `56e57db` |
 
 **Delivered** — seven operations under `companies/{company}/sales-invoices`, all documented in `openapi.yaml`
 and covered by the bidirectional route check:
