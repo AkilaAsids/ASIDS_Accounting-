@@ -23,6 +23,7 @@ use Asids\Core\Organization\Presentation\Http\Controllers\CompanyController;
 use Asids\Core\Organization\Presentation\Http\Controllers\CompanyMembershipController;
 use Asids\Core\Sales\Presentation\Http\Controllers\CustomerController;
 use Asids\Core\Sales\Presentation\Http\Controllers\ReceivableReportController;
+use Asids\Core\Sales\Presentation\Http\Controllers\SalesInvoiceController;
 use Asids\Core\Sales\Presentation\Http\Controllers\TaxCodeController;
 use Asids\Core\Settings\Presentation\Http\Controllers\SettingsController;
 use Asids\Core\Tenancy\Presentation\Http\Controllers\TenantRegistrationController;
@@ -413,6 +414,34 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                     // company with its default scopes plus `active()` and membership, so a trashed
                     // company still fails closed with a 404 regardless of this route's binding.
                     Route::post('{taxCode}/restore', [TaxCodeController::class, 'restore'])->name('restore')->withTrashed();
+                });
+
+                /*
+                 * ── Sales: invoices ─────────────────────────────────────────
+                 *
+                 * `sales-invoices` rather than `invoices`, because Phase 5 brings purchase invoices and the flat
+                 * name would then be ambiguous or need a breaking rename.
+                 *
+                 * Issuing and cancelling are their own endpoints rather than a status field on the update, for
+                 * the same reason posting and reversing are on journal entries: they are different capabilities
+                 * held by different people, and a PUT that could set `status: issued` would make the
+                 * draft/issue split a matter of what the client chose to send.
+                 *
+                 * No restore route and no `withTrashed()`: `sales_invoices` has no soft-delete column by ADR
+                 * 0007 B2 — a never-issued draft is hard-deleted because it is not an accounting document, and
+                 * an issued invoice cannot be deleted at all.
+                 *
+                 * No `two-factor` step-up on issue or cancel despite both permissions being marked sensitive,
+                 * matching every `accounting.*.manage` route and `accounting.journals.post`/`.reverse`.
+                 */
+                Route::prefix('{company}/sales-invoices')->name('sales-invoices.')->middleware('company')->group(function (): void {
+                    Route::get('/', [SalesInvoiceController::class, 'index'])->name('index');
+                    Route::post('/', [SalesInvoiceController::class, 'store'])->name('store');
+                    Route::get('{invoice}', [SalesInvoiceController::class, 'show'])->name('show');
+                    Route::put('{invoice}', [SalesInvoiceController::class, 'update'])->name('update');
+                    Route::delete('{invoice}', [SalesInvoiceController::class, 'destroy'])->name('destroy');
+                    Route::post('{invoice}/issue', [SalesInvoiceController::class, 'issue'])->name('issue');
+                    Route::post('{invoice}/cancel', [SalesInvoiceController::class, 'cancel'])->name('cancel');
                 });
 
                 /*

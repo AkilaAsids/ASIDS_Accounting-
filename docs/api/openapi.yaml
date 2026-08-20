@@ -3096,6 +3096,264 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  # ── Sales: invoices ───────────────────────────────────────────────────────
+  /companies/{companyId}/sales-invoices:
+    parameters: [{ $ref: '#/components/parameters/CompanyId' }]
+    get:
+      tags: [Sales]
+      operationId: listSalesInvoices
+      summary: The company's sales invoices
+      description: |
+        Paginated, newest first. `q` searches the invoice number and the reference only — filter by
+        `customer_id` to narrow to one customer rather than searching their name.
+
+        `include=lines` adds each invoice's lines. Omitted, only the header and a summary of the
+        customer are returned.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Search'
+        - name: filter[status]
+          in: query
+          schema: { type: string, enum: [draft, issued, partially_paid, paid, cancelled] }
+        - name: filter[customer_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: filter[branch_id]
+          in: query
+          schema: { type: string, format: uuid }
+        - name: include
+          in: query
+          schema: { type: string, enum: [lines] }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [invoice_date, -invoice_date, due_date, -due_date, number, -number, total, -total, created_at, -created_at]
+            default: -invoice_date
+      responses:
+        '200':
+          description: Paginated invoices.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/SalesInvoice' } }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Sales]
+      operationId: createSalesInvoice
+      summary: Draft an invoice, optionally issuing it at once
+      description: |
+        Amounts are **decimal strings**, never JSON numbers: a JSON number becomes a float, and
+        `10.005` is not exactly representable. Up to four decimal places, rejected rather than
+        rounded.
+
+        `lines[].tax_code` is the tax **code**, not an id. Which rate applies depends on the invoice
+        date, and only company plus code plus date identifies the correct effective-dated row — an id
+        would let a caller name an expired or future rate directly.
+
+        `due_date` may be omitted, in which case it is derived from the customer's payment terms.
+
+        Send `issue: true` to draft and issue in one call. Both happen in one transaction: if issuing
+        is refused — a closed period, an archived customer, or a caller who may draft but not issue —
+        **no invoice is left behind**. A caller without `sales.invoices.issue` receives 403 and no
+        draft is created.
+
+        Every domain refusal is a 422 problem document with a specific `type`, among them
+        `customer-not-invoiceable`, `revenue-account-not-postable`, `tax-code-outside-company`,
+        `invoice-line-two-discounts`, `invoice-total-negative` and `due-date-before-invoice-date`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SalesInvoiceInput' }
+      responses:
+        '201':
+          description: The draft, or the issued invoice when `issue` was true.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalesInvoice' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /companies/{companyId}/sales-invoices/{invoiceId}:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/SalesInvoiceId'
+    get:
+      tags: [Sales]
+      operationId: getSalesInvoice
+      summary: One invoice, with its lines
+      responses:
+        '200':
+          description: The invoice.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalesInvoice' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The invoice does not belong to the company in the path (`invoice-company-mismatch`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    put:
+      tags: [Sales]
+      operationId: updateSalesInvoice
+      summary: Change a draft
+      description: |
+        Partial. A field omitted is left untouched; a nullable field sent as `null` is cleared. That
+        distinction matters for `reference`, `branch_id` and `discount_amount`, each of which would
+        otherwise be permanent once set. Sending `due_date: null` re-derives it from the customer's
+        payment terms rather than clearing it.
+
+        Supplying `lines` **replaces every line**; omitting it leaves them, and the totals are
+        recomputed regardless, because a changed `invoice_date` can change which tax rate applies.
+
+        Only a draft may be changed. Anything else is refused with `invoice-not-editable`, and a
+        database trigger refuses the write underneath that.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SalesInvoiceInput' }
+      responses:
+        '200':
+          description: The updated draft.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalesInvoice' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Sales]
+      operationId: deleteSalesInvoice
+      summary: Delete a draft
+      description: |
+        Hard deletion, and only for a draft. A never-issued draft is not an accounting document, so
+        no tombstone is kept and there is no restore counterpart. An issued invoice is a statutory
+        record and cannot be deleted at all — cancel it instead.
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Not a draft (`invoice-not-editable`), or not this company's invoice.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/sales-invoices/{invoiceId}/issue:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/SalesInvoiceId'
+    post:
+      tags: [Sales]
+      operationId: issueSalesInvoice
+      summary: Commit a draft to the ledger and to the customer
+      description: |
+        Takes the next number from a gapless series, posts a balanced journal entry, and freezes the
+        document. None of it can be taken back except by a cancellation that is itself permanent.
+
+        Everything is re-validated at this moment rather than trusted from when the draft was
+        written: a draft raised in March and issued in June has had three months in which its
+        customer could be archived, its revenue account reclassified, or its period closed.
+
+        Refusals are 422 problem documents — `invoice-not-a-draft`, `invoice-has-no-lines-to-issue`,
+        `invoice-total-not-positive`, `invoice-period-not-open`, `receivable-account-missing`,
+        `tax-output-account-missing` among them. A refusal consumes no invoice number.
+      responses:
+        '200':
+          description: The issued invoice, carrying its number and journal entry.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalesInvoice' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The invoice cannot be issued in its current state or configuration.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /companies/{companyId}/sales-invoices/{invoiceId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/CompanyId'
+      - $ref: '#/components/parameters/SalesInvoiceId'
+    post:
+      tags: [Sales]
+      operationId: cancelSalesInvoice
+      summary: Reverse an issued invoice's posting
+      description: |
+        Not an undo. Nothing is deleted and nothing is edited: the invoice keeps its number, its
+        dates and its figures, its original entry stays in the ledger, and a mirror entry is posted
+        alongside — so an auditor sees the document, the posting and the correction.
+
+        Only an issued invoice may be cancelled. The period that must be open is **the reversal's**,
+        not the invoice's, because the mirror is dated today: an invoice from a closed March may
+        still be cancelled today, and what refuses it is today's period being closed.
+
+        No invoice number is consumed — the mirror draws from the journal voucher series.
+
+        The reason is required and recorded against the document permanently. Capped at 255
+        characters because it is written to the journal entry's reversal reason as well.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 255
+                  description: Why the invoice is being cancelled. Recorded permanently.
+      responses:
+        '200':
+          description: The cancelled invoice.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalesInvoice' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            Not issued (`invoice-not-issued`), already cancelled (`invoice-already-cancelled`),
+            partly paid (`invoice-partially-paid`), or today's period is closed
+            (`invoice-reversal-period-not-open`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   # ── Sales: receivables reporting ──────────────────────────────────────────
   /companies/{companyId}/reports/outstanding-receivables:
     parameters: [{ $ref: '#/components/parameters/CompanyId' }]
@@ -3340,6 +3598,11 @@ components:
       in: query
       description: Inclusive end.
       schema: { type: string, format: date }
+    SalesInvoiceId:
+      name: invoiceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     AsOf:
       name: as_of
       in: query
@@ -4350,6 +4613,168 @@ components:
         balance:
           $ref: '#/components/schemas/Amount'
           description: Signed in the account's normal direction, so a debit account with a credit balance reports a negative.
+
+    SalesInvoiceLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        line_number: { type: integer }
+        description: { type: string }
+        quantity:
+          $ref: '#/components/schemas/Amount'
+          description: May be negative for a correction; never zero.
+        unit_price: { $ref: '#/components/schemas/Amount' }
+        discount_percent:
+          oneOf: [{ $ref: '#/components/schemas/Amount' }, { type: 'null' }]
+          description: A percentage — 10 means 10%. Mutually exclusive with `discount_amount`.
+        discount_amount:
+          oneOf: [{ $ref: '#/components/schemas/Amount' }, { type: 'null' }]
+        line_subtotal:
+          $ref: '#/components/schemas/Amount'
+          description: Net of every discount, before tax.
+        tax_code_id: { type: [string, 'null'], format: uuid }
+        tax_code:
+          type: [string, 'null']
+          description: |
+            The code, present when the lines were included. This is what a write accepts back — never
+            the id, because which rate applies depends on the invoice date.
+        tax_rate:
+          $ref: '#/components/schemas/Amount'
+          description: |
+            A snapshot taken when the draft was written, not a live lookup. An invoice issued at 18%
+            still reads 18% after the code's rate changes.
+        tax_amount: { $ref: '#/components/schemas/Amount' }
+        line_total: { $ref: '#/components/schemas/Amount' }
+        revenue_account_id: { type: string, format: uuid }
+        branch_id: { type: [string, 'null'], format: uuid }
+
+    SalesInvoice:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        branch_id: { type: [string, 'null'], format: uuid }
+        customer_id: { type: string, format: uuid }
+        number:
+          type: [string, 'null']
+          description: Null exactly while the invoice is a draft. Retained when cancelled.
+          example: INV-2026-06-0001
+        reference: { type: [string, 'null'] }
+        invoice_date: { type: string, format: date }
+        due_date:
+          type: string
+          format: date
+          description: Derived from the customer's payment terms when the draft did not supply one.
+        currency_code: { type: string, example: LKR }
+        exchange_rate:
+          type: [string, 'null']
+          description: Always null until the FX phase. Present so a client need not change shape later.
+        subtotal: { $ref: '#/components/schemas/Amount' }
+        discount_total: { $ref: '#/components/schemas/Amount' }
+        tax_total: { $ref: '#/components/schemas/Amount' }
+        total:
+          $ref: '#/components/schemas/Amount'
+          description: A database CHECK holds `total = subtotal + tax_total`.
+        amount_paid:
+          $ref: '#/components/schemas/Amount'
+          description: Pinned at zero until the payments phase.
+        amount_due: { $ref: '#/components/schemas/Amount' }
+        status: { type: string, enum: [draft, issued, partially_paid, paid, cancelled] }
+        status_label: { type: string }
+        is_overdue:
+          type: boolean
+          description: |
+            Derived from today, never stored — a stored flag would need a nightly job to stay true and
+            would be wrong between runs.
+        issued_at: { type: [string, 'null'], format: date-time }
+        issued_by_id:
+          type: [string, 'null']
+          format: uuid
+          description: Null when the system issued it without a person.
+        journal_entry_id: { type: [string, 'null'], format: uuid }
+        cancelled_at: { type: [string, 'null'], format: date-time }
+        cancellation_reason: { type: [string, 'null'] }
+        cancelled_by_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'] }
+        terms: { type: [string, 'null'] }
+        created_by_id: { type: [string, 'null'], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        capabilities:
+          type: object
+          description: |
+            What this caller may do with this invoice **right now** — the capability and the state
+            together. Ask neither on its own: a workspace owner holds every capability outright, so a
+            permission check alone reports that they may issue an already-issued invoice. Presentation
+            only; the server refuses every transition regardless of what this says.
+          properties:
+            can_update: { type: boolean }
+            can_delete: { type: boolean }
+            can_issue: { type: boolean }
+            can_cancel:
+              type: boolean
+              description: True only while the status is `issued` — never for a cancelled invoice.
+        lines:
+          type: array
+          description: Present on a single invoice, and on a list only when `include=lines` was sent.
+          items: { $ref: '#/components/schemas/SalesInvoiceLine' }
+        customer:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            name: { type: string }
+
+    SalesInvoiceInput:
+      type: object
+      description: |
+        The write shape for both create and update. On create, `customer_id`, `invoice_date` and
+        `lines` are required. On update every field is optional: omit a field to leave it untouched,
+        or send a nullable field as `null` to clear it.
+      required: [customer_id, invoice_date, lines]
+      properties:
+        customer_id: { type: string, format: uuid }
+        invoice_date: { type: string, format: date }
+        due_date:
+          type: [string, 'null']
+          format: date
+          description: Omit — or send null on update — to derive from the customer's payment terms.
+        reference: { type: [string, 'null'], maxLength: 120 }
+        branch_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'], maxLength: 5000 }
+        terms: { type: [string, 'null'], maxLength: 5000 }
+        discount_amount:
+          oneOf: [{ $ref: '#/components/schemas/Amount' }, { type: 'null' }]
+          description: A header discount, allocated across the lines in proportion to their subtotals.
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: On update, supplying this replaces every line.
+          items:
+            type: object
+            required: [description, quantity, unit_price, revenue_account_id]
+            properties:
+              description: { type: string, minLength: 1, maxLength: 255 }
+              quantity: { $ref: '#/components/schemas/Amount' }
+              unit_price: { $ref: '#/components/schemas/Amount' }
+              revenue_account_id: { type: string, format: uuid }
+              tax_code:
+                type: [string, 'null']
+                maxLength: 32
+                description: The tax **code**, not an id. Resolved against the invoice date.
+              discount_percent:
+                oneOf: [{ $ref: '#/components/schemas/Amount' }, { type: 'null' }]
+                description: Mutually exclusive with the line's `discount_amount`.
+              discount_amount:
+                oneOf: [{ $ref: '#/components/schemas/Amount' }, { type: 'null' }]
+              branch_id: { type: [string, 'null'], format: uuid }
+        issue:
+          type: boolean
+          default: false
+          description: |
+            Create only. Draft and issue in one transaction — a refusal leaves no invoice behind.
+            Requires `sales.invoices.issue`.
 
     OutstandingReceivableRow:
       type: object
