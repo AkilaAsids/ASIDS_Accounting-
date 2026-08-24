@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import TextField from '@/components/ui/TextField.vue'
+import type { CustomerCreatePayload, CustomerUpdatePayload } from '@/api/customers'
 import type { Customer } from '@/types/domain'
 
 /**
@@ -28,7 +29,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  submit: [payload: Record<string, unknown>]
+  submit: [payload: CustomerCreatePayload | CustomerUpdatePayload]
   'update:dirty': [boolean]
 }>()
 
@@ -129,62 +130,93 @@ function clearCreditLimit(): void {
   clearedCreditLimit.value = true
 }
 
-/** Every plain optional string field that follows the ordinary omit-if-unchanged rule — the
- *  three fields with their own "Clear" control (`branch_id`, `receivable_account_id`,
- *  `credit_limit`) are handled separately below since they need the explicit-null path. */
-const STRING_FIELDS = [
-  'legal_name',
-  'tax_identification_number',
-  'vat_registration_number',
-  'email',
-  'phone',
-  'website',
-  'address_line_1',
-  'address_line_2',
-  'city',
-  'district',
-  'postal_code',
-  'country_code',
-  'notes',
-] as const satisfies ReadonlyArray<keyof FormState>
+/** '' means "never filled in" for a plain optional field on create — omit it (`undefined`)
+ *  rather than send an empty string the schema was never asked to accept. */
+function trimmedOrUndefined(value: string): string | undefined {
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
+}
 
-function buildCreatePayload(): Record<string, unknown> {
-  const payload: Record<string, unknown> = { name: form.name.trim() }
+/** Diffs one plain optional string field against its loaded value for the edit payload:
+ *  unchanged (blank-vs-blank counts as unchanged) → `undefined` (omit); changed → the new
+ *  value, blank normalised to `null`. Every field routed through this has no dedicated "Clear"
+ *  control (§2.1.3) — those three (`branch_id`, `receivable_account_id`, `credit_limit`) are
+ *  built explicitly below instead, since only they need the reader's *explicit* clear to be
+ *  distinguishable from an emptied-by-accident box. */
+function diffedOptionalString(current: string, original: string): string | null | undefined {
+  const currentTrimmed = current.trim()
+  const currentOrNull = currentTrimmed === '' ? null : currentTrimmed
+  const originalTrimmed = original.trim()
+  const originalOrNull = originalTrimmed === '' ? null : originalTrimmed
 
-  if (form.code.trim() !== '') {
-    payload.code = form.code.trim()
-  }
+  return currentOrNull === originalOrNull ? undefined : currentOrNull
+}
 
-  for (const field of STRING_FIELDS) {
-    const value = form[field].trim()
-
-    if (value !== '') {
-      payload[field] = value
-    }
-  }
-
-  payload.is_vat_registered = form.is_vat_registered
-
+function buildCreatePayload(): CustomerCreatePayload {
   const days = Number(form.payment_terms_days)
-  payload.payment_terms_days = Number.isFinite(days) ? days : 30
 
-  if (form.credit_limit.trim() !== '') {
-    payload.credit_limit = form.credit_limit.trim()
+  const payload: CustomerCreatePayload = {
+    name: form.name.trim(),
+    is_vat_registered: form.is_vat_registered,
+    payment_terms_days: Number.isFinite(days) ? days : 30,
   }
 
-  if (form.receivable_account_id.trim() !== '') {
-    payload.receivable_account_id = form.receivable_account_id.trim()
-  }
+  const code = trimmedOrUndefined(form.code)
+  if (code !== undefined) payload.code = code
 
-  if (form.branch_id.trim() !== '') {
-    payload.branch_id = form.branch_id.trim()
-  }
+  const legalName = trimmedOrUndefined(form.legal_name)
+  if (legalName !== undefined) payload.legal_name = legalName
+
+  const tin = trimmedOrUndefined(form.tax_identification_number)
+  if (tin !== undefined) payload.tax_identification_number = tin
+
+  const vatNumber = trimmedOrUndefined(form.vat_registration_number)
+  if (vatNumber !== undefined) payload.vat_registration_number = vatNumber
+
+  const email = trimmedOrUndefined(form.email)
+  if (email !== undefined) payload.email = email
+
+  const phone = trimmedOrUndefined(form.phone)
+  if (phone !== undefined) payload.phone = phone
+
+  const website = trimmedOrUndefined(form.website)
+  if (website !== undefined) payload.website = website
+
+  const addressLine1 = trimmedOrUndefined(form.address_line_1)
+  if (addressLine1 !== undefined) payload.address_line_1 = addressLine1
+
+  const addressLine2 = trimmedOrUndefined(form.address_line_2)
+  if (addressLine2 !== undefined) payload.address_line_2 = addressLine2
+
+  const city = trimmedOrUndefined(form.city)
+  if (city !== undefined) payload.city = city
+
+  const district = trimmedOrUndefined(form.district)
+  if (district !== undefined) payload.district = district
+
+  const postalCode = trimmedOrUndefined(form.postal_code)
+  if (postalCode !== undefined) payload.postal_code = postalCode
+
+  const countryCode = trimmedOrUndefined(form.country_code)
+  if (countryCode !== undefined) payload.country_code = countryCode
+
+  const notes = trimmedOrUndefined(form.notes)
+  if (notes !== undefined) payload.notes = notes
+
+  const creditLimit = trimmedOrUndefined(form.credit_limit)
+  if (creditLimit !== undefined) payload.credit_limit = creditLimit
+
+  const receivableAccountId = trimmedOrUndefined(form.receivable_account_id)
+  if (receivableAccountId !== undefined) payload.receivable_account_id = receivableAccountId
+
+  const branchId = trimmedOrUndefined(form.branch_id)
+  if (branchId !== undefined) payload.branch_id = branchId
 
   return payload
 }
 
-function buildUpdatePayload(): Record<string, unknown> {
-  const payload: Record<string, unknown> = {}
+function buildUpdatePayload(): CustomerUpdatePayload {
+  const payload: CustomerUpdatePayload = {}
 
   if (form.name.trim() !== original.value.name) {
     payload.name = form.name.trim()
@@ -194,16 +226,50 @@ function buildUpdatePayload(): Record<string, unknown> {
     payload.code = form.code.trim()
   }
 
-  for (const field of STRING_FIELDS) {
-    const current = form[field].trim()
-    const currentOrNull = current === '' ? null : current
-    const originalTrimmed = original.value[field].trim()
-    const originalOrNull = originalTrimmed === '' ? null : originalTrimmed
+  const legalName = diffedOptionalString(form.legal_name, original.value.legal_name)
+  if (legalName !== undefined) payload.legal_name = legalName
 
-    if (currentOrNull !== originalOrNull) {
-      payload[field] = currentOrNull
-    }
-  }
+  const tin = diffedOptionalString(
+    form.tax_identification_number,
+    original.value.tax_identification_number,
+  )
+  if (tin !== undefined) payload.tax_identification_number = tin
+
+  const vatNumber = diffedOptionalString(
+    form.vat_registration_number,
+    original.value.vat_registration_number,
+  )
+  if (vatNumber !== undefined) payload.vat_registration_number = vatNumber
+
+  const email = diffedOptionalString(form.email, original.value.email)
+  if (email !== undefined) payload.email = email
+
+  const phone = diffedOptionalString(form.phone, original.value.phone)
+  if (phone !== undefined) payload.phone = phone
+
+  const website = diffedOptionalString(form.website, original.value.website)
+  if (website !== undefined) payload.website = website
+
+  const addressLine1 = diffedOptionalString(form.address_line_1, original.value.address_line_1)
+  if (addressLine1 !== undefined) payload.address_line_1 = addressLine1
+
+  const addressLine2 = diffedOptionalString(form.address_line_2, original.value.address_line_2)
+  if (addressLine2 !== undefined) payload.address_line_2 = addressLine2
+
+  const city = diffedOptionalString(form.city, original.value.city)
+  if (city !== undefined) payload.city = city
+
+  const district = diffedOptionalString(form.district, original.value.district)
+  if (district !== undefined) payload.district = district
+
+  const postalCode = diffedOptionalString(form.postal_code, original.value.postal_code)
+  if (postalCode !== undefined) payload.postal_code = postalCode
+
+  const countryCode = diffedOptionalString(form.country_code, original.value.country_code)
+  if (countryCode !== undefined) payload.country_code = countryCode
+
+  const notes = diffedOptionalString(form.notes, original.value.notes)
+  if (notes !== undefined) payload.notes = notes
 
   if (form.is_vat_registered !== original.value.is_vat_registered) {
     payload.is_vat_registered = form.is_vat_registered

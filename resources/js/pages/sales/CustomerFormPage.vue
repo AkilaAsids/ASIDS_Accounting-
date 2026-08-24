@@ -78,7 +78,15 @@ function onDirty(value: boolean): void {
   dirty.value = value
 }
 
-async function onSubmit(payload: Record<string, unknown>): Promise<void> {
+/**
+ * `CustomerForm` emits `CustomerCreatePayload | CustomerUpdatePayload` — it already knows,
+ * from its own `isEdit`, which shape it built. `CustomerCreatePayload` is `CustomerUpdatePayload`
+ * plus a guaranteed `name`, so the union is always assignable to `updateCustomer`'s parameter
+ * with no cast at all; only the create branch below narrows it, and it is a narrowing between
+ * two members of the same declared union — not a blind cast through an unrelated shape — which
+ * is exactly what `isEdit.value` (checked immediately above) already guarantees at runtime.
+ */
+async function onSubmit(payload: CustomerCreatePayload | CustomerUpdatePayload): Promise<void> {
   if (companyId.value === null) {
     return
   }
@@ -88,11 +96,7 @@ async function onSubmit(payload: Record<string, unknown>): Promise<void> {
 
   try {
     if (isEdit.value && customerId.value !== null) {
-      const { data } = await updateCustomer(
-        companyId.value,
-        customerId.value,
-        payload as CustomerUpdatePayload,
-      )
+      const { data } = await updateCustomer(companyId.value, customerId.value, payload)
       dirty.value = false
       ui.notify('success', `${data.name} updated.`)
       await router.push({ name: 'customer-detail', params: { customerId: data.id } })

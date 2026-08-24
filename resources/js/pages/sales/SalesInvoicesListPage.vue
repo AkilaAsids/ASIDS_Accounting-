@@ -204,87 +204,159 @@ async function confirmDelete(): Promise<void> {
         </PermissionGate>
       </div>
 
-      <div v-else class="overflow-x-auto" role="region" aria-label="Invoices" tabindex="0">
-        <table class="min-w-full text-sm">
-          <thead>
-            <tr class="border-b border-surface-border text-left text-xs uppercase tracking-wide text-content-subtle">
-              <th scope="col" class="py-2 pr-4">Number</th>
-              <th scope="col" class="py-2 pr-4">Customer</th>
-              <th scope="col" class="py-2 pr-4">Invoice date</th>
-              <th scope="col" class="py-2 pr-4">Due date</th>
-              <th scope="col" class="py-2 pr-4">Status</th>
-              <th scope="col" class="py-2 pr-4 text-right">Total</th>
-              <th scope="col" class="py-2"><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="invoice in rows"
-              :key="invoice.id"
-              class="border-b border-surface-border/60"
-              :class="invoice.status === 'cancelled' && 'opacity-60'"
-            >
-              <td class="py-2 pr-4">
-                <span v-if="invoice.number" class="font-mono text-xs text-content">{{ invoice.number }}</span>
-                <span v-else class="rounded bg-surface-sunken px-2 py-0.5 text-xs text-content-subtle">Draft</span>
-              </td>
-              <td class="py-2 pr-4 text-content">{{ invoice.customer?.name ?? '—' }}</td>
-              <td class="py-2 pr-4 text-content-muted">{{ invoice.invoice_date }}</td>
-              <td class="py-2 pr-4 text-content-muted">{{ invoice.due_date }}</td>
-              <td class="py-2 pr-4">
-                <InvoiceStatusBadge :status="invoice.status" :status-label="invoice.status_label" />
-              </td>
-              <td class="py-2 pr-4 text-right font-mono tabular-nums text-content">{{ formatPlain(invoice.total) }}</td>
-              <td class="py-2 text-right">
-                <div class="flex items-center justify-end gap-1">
-                  <RouterLink
-                    v-if="invoice.capabilities.can_update"
-                    :to="{ name: 'invoice-edit', params: { invoiceId: invoice.id } }"
-                    class="text-xs text-primary-700 hover:underline dark:text-primary-400"
-                  >
-                    Edit
-                  </RouterLink>
-                  <RouterLink
-                    v-else
-                    :to="{ name: 'invoice-detail', params: { invoiceId: invoice.id } }"
-                    class="text-xs text-primary-700 hover:underline dark:text-primary-400"
-                  >
-                    View
-                  </RouterLink>
+      <template v-else>
+        <div class="hidden overflow-x-auto md:block" role="region" aria-label="Invoices" tabindex="0">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="border-b border-surface-border text-left text-xs uppercase tracking-wide text-content-subtle">
+                <th scope="col" class="py-2 pr-4">Number</th>
+                <th scope="col" class="py-2 pr-4">Customer</th>
+                <th scope="col" class="py-2 pr-4">Invoice date</th>
+                <th scope="col" class="py-2 pr-4">Due date</th>
+                <th scope="col" class="py-2 pr-4">Status</th>
+                <th scope="col" class="py-2 pr-4 text-right">Total</th>
+                <th scope="col" class="py-2"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="invoice in rows"
+                :key="invoice.id"
+                class="border-b border-surface-border/60"
+                :class="invoice.status === 'cancelled' && 'opacity-60'"
+              >
+                <td class="py-2 pr-4">
+                  <span v-if="invoice.number" class="font-mono text-xs text-content">{{ invoice.number }}</span>
+                  <span v-else class="rounded bg-surface-sunken px-2 py-0.5 text-xs text-content-subtle">Draft</span>
+                </td>
+                <td class="py-2 pr-4 text-content">{{ invoice.customer?.name ?? '—' }}</td>
+                <td class="py-2 pr-4 text-content-muted">{{ invoice.invoice_date }}</td>
+                <td class="py-2 pr-4 text-content-muted">{{ invoice.due_date }}</td>
+                <td class="py-2 pr-4">
+                  <InvoiceStatusBadge :status="invoice.status" :status-label="invoice.status_label" />
+                </td>
+                <td class="py-2 pr-4 text-right font-mono tabular-nums text-content">{{ formatPlain(invoice.total) }}</td>
+                <td class="py-2 text-right">
+                  <div class="flex items-center justify-end gap-1">
+                    <RouterLink
+                      v-if="invoice.capabilities.can_update"
+                      :to="{ name: 'invoice-edit', params: { invoiceId: invoice.id } }"
+                      class="text-xs text-primary-700 hover:underline dark:text-primary-400"
+                    >
+                      Edit
+                    </RouterLink>
+                    <RouterLink
+                      v-else
+                      :to="{ name: 'invoice-detail', params: { invoiceId: invoice.id } }"
+                      class="text-xs text-primary-700 hover:underline dark:text-primary-400"
+                    >
+                      View
+                    </RouterLink>
 
-                  <OverflowMenu
-                    v-if="invoice.capabilities.can_cancel || invoice.capabilities.can_delete"
-                    :label="`More actions for invoice ${invoice.number ?? 'draft'}`"
-                  >
-                    <template #default="{ close }">
-                      <button
-                        v-if="invoice.capabilities.can_cancel"
-                        type="button"
-                        role="menuitem"
-                        class="block w-full px-3 py-1.5 text-left text-sm text-content hover:bg-surface-sunken"
-                        :disabled="rowBusy === invoice.id"
-                        @click="openCancel(invoice); close()"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        v-if="invoice.capabilities.can_delete"
-                        type="button"
-                        role="menuitem"
-                        class="block w-full px-3 py-1.5 text-left text-sm text-danger hover:bg-surface-sunken"
-                        :disabled="rowBusy === invoice.id"
-                        @click="openDelete(invoice); close()"
-                      >
-                        Delete
-                      </button>
-                    </template>
-                  </OverflowMenu>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                    <OverflowMenu
+                      v-if="invoice.capabilities.can_cancel || invoice.capabilities.can_delete"
+                      :label="`More actions for invoice ${invoice.number ?? 'draft'}`"
+                    >
+                      <template #default="{ close }">
+                        <button
+                          v-if="invoice.capabilities.can_cancel"
+                          type="button"
+                          role="menuitem"
+                          class="block w-full px-3 py-1.5 text-left text-sm text-content hover:bg-surface-sunken"
+                          :disabled="rowBusy === invoice.id"
+                          @click="openCancel(invoice); close()"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          v-if="invoice.capabilities.can_delete"
+                          type="button"
+                          role="menuitem"
+                          class="block w-full px-3 py-1.5 text-left text-sm text-danger hover:bg-surface-sunken"
+                          :disabled="rowBusy === invoice.id"
+                          @click="openDelete(invoice); close()"
+                        >
+                          Delete
+                        </button>
+                      </template>
+                    </OverflowMenu>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Card fallback below `md` (design §1.8) — a bookkeeper triaging which invoices are
+             drafts is exactly the audience this fallback targets, matching CustomersListPage's
+             precedent. Same row actions, just stacked instead of columned. -->
+        <ul class="space-y-2 md:hidden">
+          <li
+            v-for="invoice in rows"
+            :key="invoice.id"
+            class="rounded-md border border-surface-border p-3"
+            :class="invoice.status === 'cancelled' && 'opacity-60'"
+          >
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <RouterLink
+                  :to="{ name: 'invoice-detail', params: { invoiceId: invoice.id } }"
+                  class="text-sm font-medium text-content hover:underline"
+                >
+                  <span v-if="invoice.number" class="font-mono">{{ invoice.number }}</span>
+                  <span v-else>Draft</span>
+                </RouterLink>
+                <p class="text-xs text-content-muted">
+                  {{ invoice.customer?.name ?? '—' }} · {{ invoice.invoice_date }}
+                </p>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-2">
+                <InvoiceStatusBadge :status="invoice.status" :status-label="invoice.status_label" />
+                <RouterLink
+                  v-if="invoice.capabilities.can_update"
+                  :to="{ name: 'invoice-edit', params: { invoiceId: invoice.id } }"
+                  class="text-xs text-primary-700 hover:underline dark:text-primary-400"
+                >
+                  Edit
+                </RouterLink>
+
+                <OverflowMenu
+                  v-if="invoice.capabilities.can_cancel || invoice.capabilities.can_delete"
+                  :label="`More actions for invoice ${invoice.number ?? 'draft'}`"
+                >
+                  <template #default="{ close }">
+                    <button
+                      v-if="invoice.capabilities.can_cancel"
+                      type="button"
+                      role="menuitem"
+                      class="block w-full px-3 py-1.5 text-left text-sm text-content hover:bg-surface-sunken"
+                      :disabled="rowBusy === invoice.id"
+                      @click="openCancel(invoice); close()"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      v-if="invoice.capabilities.can_delete"
+                      type="button"
+                      role="menuitem"
+                      class="block w-full px-3 py-1.5 text-left text-sm text-danger hover:bg-surface-sunken"
+                      :disabled="rowBusy === invoice.id"
+                      @click="openDelete(invoice); close()"
+                    >
+                      Delete
+                    </button>
+                  </template>
+                </OverflowMenu>
+              </div>
+            </div>
+
+            <p class="mt-2 text-right font-mono text-sm tabular-nums text-content">
+              {{ formatPlain(invoice.total) }}
+            </p>
+          </li>
+        </ul>
+      </template>
 
       <template v-if="pagination && pagination.last_page > 1" #footer>
         <Pagination :pagination="pagination" :disabled="loading" @update:page="load" />

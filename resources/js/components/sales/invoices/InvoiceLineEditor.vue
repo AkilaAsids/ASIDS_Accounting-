@@ -58,6 +58,19 @@ function removeLine(index: number): void {
   lines.value = lines.value.filter((_, candidateIndex) => candidateIndex !== index)
 }
 
+/**
+ * Replaces one line by position. Takes the index explicitly rather than binding
+ * `v-model:line="lines[index]"` directly in the template — reading `lines[index]` is typed
+ * `LineDraft | undefined` under `noUncheckedIndexedAccess`, and `value` here is already
+ * known-`LineDraft` (the child only ever emits a full line), so assigning through a copy is
+ * both the correctly-typed path and avoids mutating the model in place.
+ */
+function updateLine(index: number, value: LineDraft): void {
+  const next = [...lines.value]
+  next[index] = value
+  lines.value = next
+}
+
 async function focusLine(index: number): Promise<void> {
   await nextTick()
   const row = document.querySelector<HTMLElement>(`[data-line-index="${index}"]`)
@@ -101,13 +114,14 @@ async function focusLine(index: number): Promise<void> {
           <InvoiceLineRow
             v-for="(line, index) in lines"
             :key="line.key"
-            v-model:line="lines[index]"
+            :line="line"
             :data-line-index="index"
             :index="index"
             :accounts="accounts"
             :company-id="companyId"
             :errors="lineErrors?.[index]"
             :can-remove="canRemove"
+            @update:line="updateLine(index, $event)"
             @remove="removeLine(index)"
           />
         </tbody>

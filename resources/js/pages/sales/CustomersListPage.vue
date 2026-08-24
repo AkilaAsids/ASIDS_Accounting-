@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ApiError } from '@/api/client'
-import BaseButton from '@/components/ui/BaseButton.vue'
 import Pagination from '@/components/ui/Pagination.vue'
 import SurfaceCard from '@/components/ui/SurfaceCard.vue'
 import TextField from '@/components/ui/TextField.vue'
