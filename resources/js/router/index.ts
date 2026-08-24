@@ -120,6 +120,60 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/sales/ArControlPage.vue'),
         meta: { permission: 'sales.reports.view', title: 'AR control' },
       },
+      /*
+       * Customer and invoice screens (ADR 0013, Phase 3 front end). Editor routes gate on
+       * `.draft`/`.manage` rather than `.view`, so a viewer never reaches a form — the route
+       * guard is necessary but not sufficient: every destructive or state-dependent action
+       * button inside these screens additionally gates on the resource's own `capabilities`.
+       */
+      {
+        path: 'sales/customers',
+        name: 'customers',
+        component: () => import('@/pages/sales/CustomersListPage.vue'),
+        meta: { permission: 'sales.customers.view', title: 'Customers' },
+      },
+      {
+        path: 'sales/customers/new',
+        name: 'customer-new',
+        component: () => import('@/pages/sales/CustomerFormPage.vue'),
+        meta: { permission: 'sales.customers.manage', title: 'Add a customer' },
+      },
+      {
+        path: 'sales/customers/:customerId',
+        name: 'customer-detail',
+        component: () => import('@/pages/sales/CustomerDetailPage.vue'),
+        meta: { permission: 'sales.customers.view', title: 'Customer' },
+      },
+      {
+        path: 'sales/customers/:customerId/edit',
+        name: 'customer-edit',
+        component: () => import('@/pages/sales/CustomerFormPage.vue'),
+        meta: { permission: 'sales.customers.manage', title: 'Edit customer' },
+      },
+      {
+        path: 'sales/invoices',
+        name: 'invoices',
+        component: () => import('@/pages/sales/SalesInvoicesListPage.vue'),
+        meta: { permission: 'sales.invoices.view', title: 'Invoices' },
+      },
+      {
+        path: 'sales/invoices/new',
+        name: 'invoice-new',
+        component: () => import('@/pages/sales/SalesInvoiceEditorPage.vue'),
+        meta: { permission: 'sales.invoices.draft', title: 'New invoice' },
+      },
+      {
+        path: 'sales/invoices/:invoiceId',
+        name: 'invoice-detail',
+        component: () => import('@/pages/sales/SalesInvoiceDetailPage.vue'),
+        meta: { permission: 'sales.invoices.view', title: 'Invoice' },
+      },
+      {
+        path: 'sales/invoices/:invoiceId/edit',
+        name: 'invoice-edit',
+        component: () => import('@/pages/sales/SalesInvoiceEditorPage.vue'),
+        meta: { permission: 'sales.invoices.draft', title: 'Edit invoice' },
+      },
       {
         path: 'roles',
         name: 'roles',

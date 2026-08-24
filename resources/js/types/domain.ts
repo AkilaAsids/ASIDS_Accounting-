@@ -500,3 +500,202 @@ export interface ArControlMeta {
   as_of: string
   totals: ArControlTotals
 }
+
+/*
+|--------------------------------------------------------------------------
+| Sales — customers, tax codes and invoices (Phase 3 front end, ADR 0013)
+|--------------------------------------------------------------------------
+|
+| Built once in the shared pre-step (ADR 0013 §8, P6) so neither the customer lane nor the
+| invoice lane edits this file — both import from here. Grounded one-for-one in
+| `docs/api/openapi.yaml`'s `Customer`, `TaxCode`, `SalesInvoice`, `SalesInvoiceLine` and
+| `SalesInvoiceInput` schemas. Every monetary field stays a decimal `string`, for the same
+| reason as everywhere above: the ledger stores `numeric(19,4)` and a JSON number would not
+| round-trip it exactly.
+*/
+
+export type CustomerStatus = 'active' | 'inactive' | 'archived'
+
+export interface CustomerCapabilities {
+  can_update: boolean
+  can_delete: boolean
+  /** Model state, not a gate — whether a new invoice may name this customer. */
+  accepts_new_invoices: boolean
+}
+
+export interface Customer {
+  id: string
+  company_id: string
+  branch_id: string | null
+  code: string
+  name: string
+  legal_name: string | null
+  tax_identification_number: string | null
+  vat_registration_number: string | null
+  is_vat_registered: boolean
+  email: string | null
+  phone: string | null
+  website: string | null
+  address_line_1: string | null
+  address_line_2: string | null
+  city: string | null
+  district: string | null
+  postal_code: string | null
+  country_code: string | null
+  payment_terms_days: number
+  /** A decimal string at the ledger's scale, or null for no limit. Never a number. */
+  credit_limit: string | null
+  /** Null means the company's system AR default. */
+  receivable_account_id: string | null
+  notes: string | null
+  status: CustomerStatus
+  status_label: string
+  archived_at: string | null
+  deleted_at: string | null
+  capabilities: CustomerCapabilities
+}
+
+export type TaxType = 'vat' | 'svat' | 'exempt' | 'zero_rated'
+
+export interface TaxCode {
+  id: string
+  company_id: string
+  code: string
+  name: string
+  tax_type: TaxType
+  tax_type_label: string
+  /** A **percentage** as a decimal string — `18.0000` means 18%, never 0.18. */
+  rate: string
+  output_account_id: string | null
+  input_account_id: string | null
+  is_active: boolean
+  effective_from: string
+  effective_to: string | null
+  /** Whether this row's range is still open — the ordinary state of a company's current rate. */
+  is_open_ended: boolean
+  notes: string | null
+  deleted_at: string | null
+  capabilities: {
+    can_update: boolean
+    can_delete: boolean
+    /** Whether this rate is above zero — model state, not a gate. */
+    charges_tax: boolean
+  }
+}
+
+export type SalesInvoiceStatus = 'draft' | 'issued' | 'partially_paid' | 'paid' | 'cancelled'
+
+export interface SalesInvoiceLine {
+  id: string
+  line_number: number
+  description: string
+  /** May be negative for a correction; never zero. */
+  quantity: string
+  unit_price: string
+  /** A percentage — 10 means 10%. Mutually exclusive with `discount_amount`. */
+  discount_percent: string | null
+  discount_amount: string | null
+  /** Net of every discount, before tax. */
+  line_subtotal: string
+  tax_code_id: string | null
+  /**
+   * The code, present when the lines were included. This is what a write accepts back —
+   * never the id, because which rate applies depends on the invoice date.
+   */
+  tax_code: string | null
+  /** A snapshot taken when the draft was written, not a live lookup. */
+  tax_rate: string
+  tax_amount: string
+  line_total: string
+  revenue_account_id: string
+  branch_id: string | null
+}
+
+export interface SalesInvoiceCapabilities {
+  can_update: boolean
+  can_delete: boolean
+  can_issue: boolean
+  /** True only while the status is `issued` — never for a cancelled invoice. */
+  can_cancel: boolean
+}
+
+export interface SalesInvoice {
+  id: string
+  company_id: string
+  branch_id: string | null
+  customer_id: string
+  /** Null exactly while the invoice is a draft. Retained when cancelled. */
+  number: string | null
+  reference: string | null
+  invoice_date: string
+  /** Derived from the customer's payment terms when the draft did not supply one. */
+  due_date: string
+  currency_code: string
+  /** Always null until the FX phase. */
+  exchange_rate: string | null
+  subtotal: string
+  discount_total: string
+  tax_total: string
+  /** A database CHECK holds `total = subtotal + tax_total`. */
+  total: string
+  /** Pinned at zero until the payments phase. */
+  amount_paid: string
+  amount_due: string
+  status: SalesInvoiceStatus
+  status_label: string
+  /** Derived from today, never stored. */
+  is_overdue: boolean
+  issued_at: string | null
+  issued_by_id: string | null
+  journal_entry_id: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  cancelled_by_id: string | null
+  notes: string | null
+  terms: string | null
+  created_by_id: string | null
+  created_at: string
+  updated_at: string
+  capabilities: SalesInvoiceCapabilities
+  /** Present on a single invoice, and on a list only when `include=lines` was sent. */
+  lines?: SalesInvoiceLine[]
+  customer?: { id: string; code: string; name: string }
+}
+
+export interface SalesInvoiceLineInput {
+  description: string
+  quantity: string
+  unit_price: string
+  revenue_account_id: string
+  /** The tax **code**, not an id. Resolved against the invoice date. */
+  tax_code?: string | null
+  /** Mutually exclusive with the line's `discount_amount`. */
+  discount_percent?: string | null
+  discount_amount?: string | null
+  branch_id?: string | null
+}
+
+/**
+ * The write shape for both create and update. On create, `customer_id`, `invoice_date` and
+ * `lines` are required. On update every field is optional: omit a field to leave it untouched,
+ * or send a nullable field as `null` to clear it — and supplying `lines` at all replaces every
+ * line (ADR 0013 §7.5).
+ */
+export interface SalesInvoiceInput {
+  customer_id: string
+  invoice_date: string
+  /** Omit — or send null on update — to derive from the customer's payment terms. */
+  due_date?: string | null
+  reference?: string | null
+  branch_id?: string | null
+  notes?: string | null
+  terms?: string | null
+  /** A header discount, allocated across the lines in proportion to their subtotals. */
+  discount_amount?: string | null
+  lines: SalesInvoiceLineInput[]
+  /**
+   * Create only. Draft and issue in one transaction — a refusal leaves no invoice behind.
+   * Requires `sales.invoices.issue`.
+   */
+  issue?: boolean
+}
