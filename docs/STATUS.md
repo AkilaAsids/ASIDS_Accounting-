@@ -12,8 +12,8 @@ in scope).
 |---|---|
 | 1 · Intake | ✅ scope (Phase 3 FE, then roll on), ASAP/critical, Balanced budget, feature-branch+push+PR — confirmed |
 | 2 · Requirements | ✅ [PHASE-3-FRONTEND-REQUIREMENTS.md](PHASE-3-FRONTEND-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-24 (§9) |
-| 3 · Architecture ∥ Design | ✅ [ADR 0013](adr/0013-phase3-frontend-architecture.md) + [DESIGN](PHASE-3-FRONTEND-DESIGN.md) — **Gate 2 AWAITING APPROVAL** |
-| 4 · Build (Customer ∥ Invoice lanes) | ⏳ pending Gate 2 |
+| 3 · Architecture ∥ Design | ✅ [ADR 0013](adr/0013-phase3-frontend-architecture.md) + [DESIGN](PHASE-3-FRONTEND-DESIGN.md) — **Gate 2 APPROVED** 2026-08-24 (A: plain select · B: shared overflow menu · C: conditional journal link) |
+| 4 · Build | 🔵 in progress — shared pre-step → Customer ∥ Invoice lanes (test-first) |
 | 5 · Review (QA ∥ Security) | ⏳ |
 | Delivery | ⏳ PR for human merge |
 
@@ -29,8 +29,8 @@ in scope).
 - `meta.pagination` rendered (first time in this codebase).
 
 ## What you (the human) need to do next
-Review **Gate 2** — architecture (ADR 0013) + design spec + 3 reconciliation decisions — and approve
-before the build lanes start.
+Nothing right now — the build is running (shared pre-step, then two parallel lanes, then review).
+Next human touch point is the **PR** for review/merge (autonomy ends there; no staging/prod deploy).
 
 ## Note on prior status
 This file previously tracked the Milestone 6 Sales HTTP API run (Minions Team 17, merged via PR #1);
