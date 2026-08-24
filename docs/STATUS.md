@@ -11,8 +11,8 @@ in scope).
 | Stage | State |
 |---|---|
 | 1 · Intake | ✅ scope (Phase 3 FE, then roll on), ASAP/critical, Balanced budget, feature-branch+push+PR — confirmed |
-| 2 · Requirements | ✅ [PHASE-3-FRONTEND-REQUIREMENTS.md](PHASE-3-FRONTEND-REQUIREMENTS.md) — **Gate 1 AWAITING APPROVAL** |
-| 3 · Architecture ∥ Design | ⏳ pending Gate 1 |
+| 2 · Requirements | ✅ [PHASE-3-FRONTEND-REQUIREMENTS.md](PHASE-3-FRONTEND-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-24 (§9) |
+| 3 · Architecture ∥ Design | 🔵 in progress — Solution Architect ∥ UI/UX Designer |
 | 4 · Build (Customer ∥ Invoice lanes) | ⏳ |
 | 5 · Review (QA ∥ Security) | ⏳ |
 | Delivery | ⏳ PR for human merge |
@@ -29,7 +29,8 @@ in scope).
 - `meta.pagination` rendered (first time in this codebase).
 
 ## What you (the human) need to do next
-Review **Gate 1** (requirements + the open questions the Delivery Manager raised) and approve, adjust, or reject before architecture/design begins.
+Nothing right now — Stage 3 (architecture + design) is running. Next human checkpoint is **Gate 2**
+(architecture + design sign-off) before any build begins.
 
 ## Note on prior status
 This file previously tracked the Milestone 6 Sales HTTP API run (Minions Team 17, merged via PR #1);

@@ -550,3 +550,17 @@ coverage percentage demands one. Key behaviours each lane's specs must assert:
   enforces it" per that ADR's own Consequences section — a forgotten `watch` fails silently (wrong
   company's data shown), not loudly (no test failure), so QA's red-spec-first discipline (§6) is the only
   mechanism catching an omission before review.
+
+## 9. Gate 1 decisions — APPROVED 2026-08-24
+
+Scope and requirements approved by the human. Resolutions to the §7 open questions (binding for
+architecture, design and build):
+
+1. **Pagination** — one shared `Pagination` component under `components/ui`, driven by `meta.pagination`, used by both list screens. Do not build two.
+2. **Hard-delete** — behind a secondary control (overflow menu) with a typed/explicit confirm dialog; never a primary button.
+3. **Money formatting** — use `useMoney` (matches the existing receivables pages). Do not introduce `useFormat` here.
+4. **i18n** — match the existing Sales pages (English strings), authored so they are cleanly extractable later; do NOT half-migrate. Full i18n is a deferred fast-follow, out of scope for this wave.
+5. **Live invoice-line totals** — the UI performs NO money arithmetic. Show authoritative totals returned by the API on save, with a subtle "totals finalise on save" hint. No preview endpoint is added (no backend work).
+6. **Company switch mid-edit** — confirm-and-discard ("switching company discards unsaved changes"), then reload per ADR 0011 D3.
+7. **Tax-code picker** — read-only picker inside the invoice line editor only; no tax-code CRUD.
+8. **Per-line 422 errors** — map indexed keys (`lines.0.tax_code`, etc.) to the exact line and field; QA asserts this.
