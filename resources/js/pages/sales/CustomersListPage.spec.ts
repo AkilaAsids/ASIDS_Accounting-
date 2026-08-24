@@ -387,19 +387,20 @@ describe('CustomersListPage', () => {
     expect(deleteItem).toBeDefined()
     await deleteItem?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    expect(dialog.exists()).toBe(true)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
 
-    const buttons = dialog.findAll('button')
-    const confirmButton = buttons.at(-1)
     // Disabled until the customer's own code is typed verbatim (the typed-token variant, since a
-    // customer always has a stable `code`).
-    expect(confirmButton?.attributes('disabled')).toBeDefined()
+    // customer always has a stable `code`). Every reference below is re-queried fresh from the
+    // stable top-level `wrapper` rather than cached across a `setValue`/click: the dialog renders
+    // through a `<Teleport>`, stubbed globally as `true` in `tests/Support/vitest.setup.ts`, and a
+    // DOMWrapper captured before a reactive update does not reliably reflect one made afterwards
+    // (the same caveat `ConfirmDialog.spec.ts` states explicitly for this exact component).
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
 
-    await dialog.find('input[type="text"]').setValue('C-0001')
-    expect(confirmButton?.attributes('disabled')).toBeUndefined()
+    await wrapper.find('[role="dialog"]').find('input[type="text"]').setValue('C-0001')
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
 
-    await confirmButton?.trigger('click')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     expect(del).toHaveBeenCalledWith('/companies/company-1/customers/cus-1')

@@ -33,7 +33,7 @@ const emit = defineEmits<{
   'update:dirty': [boolean]
 }>()
 
-const isEdit = computed(() => props.customer != null)
+const isEdit = computed(() => props.customer !== null)
 
 interface FormState {
   code: string

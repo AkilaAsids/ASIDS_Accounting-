@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@/api/client'
 import SurfaceCard from '@/components/ui/SurfaceCard.vue'
@@ -48,8 +48,21 @@ const fieldErrors = ref<Record<string, string>>({})
 const dirty = ref(false)
 
 // Company-switch-mid-edit (Gate-1 #6) is handled at the choke point that can still abort the
-// switch — `CompanySwitcher.select()` — via this registry, not by a `watch` here.
+// switch — `CompanySwitcher.select()` — via this registry: it asks "discard unsaved changes?"
+// before the switch commits.
 useUnsavedGuard(() => dirty.value)
+
+// Once a switch HAS committed, this page still has nothing sensible left to show — a create
+// form would silently post a new customer into the wrong company, and an edit form is showing
+// company A's customer (TIN, VAT, address, credit limit, notes) under company B's banner, the
+// exact stale-cross-company-display case ADR 0011 D3 names. Mirrors
+// `SalesInvoiceEditorPage.vue`'s own `watch(companyId, …)` — leaves for the list rather than
+// staying on a now-meaningless form, for both create and edit.
+watch(companyId, (id, previous) => {
+  if (previous !== undefined && id !== previous) {
+    void router.push({ name: 'customers' })
+  }
+})
 
 onMounted(load)
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -257,12 +257,25 @@ function mockPickerLookups(): void {
   })
 }
 
+/**
+ * Every wrapper mounted this test, unmounted in `afterEach` below.
+ *
+ * `useUnsavedGuard` registers into a module-level `Set` that outlives any one test (by design —
+ * it is the same registry `CompanySwitcher.select()` consults in the running app). A wrapper left
+ * mounted at the end of a test that made the form dirty leaves that guard function in the `Set`
+ * for every test that runs afterward in this file, so `hasUnsavedChanges()` reads `true` from the
+ * very first assertion of an unrelated, later test — never unmounting is a leak into the *next*
+ * test's result, not a failure of the test that caused it.
+ */
+const mountedWrappers: Array<ReturnType<typeof mount>> = []
+
 async function mountCreatePage() {
   const router = testRouter()
   await router.push('/new')
   await router.isReady()
 
   const wrapper = mount(SalesInvoiceEditorPage, { global: { plugins: [router] } })
+  mountedWrappers.push(wrapper)
   await flushPromises()
 
   return { wrapper, router }
@@ -274,6 +287,7 @@ async function mountEditPage(invoiceId = 'inv-1') {
   await router.isReady()
 
   const wrapper = mount(SalesInvoiceEditorPage, { global: { plugins: [router] } })
+  mountedWrappers.push(wrapper)
   await flushPromises()
 
   return { wrapper, router }
@@ -288,6 +302,22 @@ function labelledField(wrapper: ReturnType<typeof mount>, candidates: string[]) 
     }
   }
   return wrapper.find('[data-qa-not-found]')
+}
+
+/**
+ * Every input/select/textarea's *value*, for every label matching `text` — one line editor has
+ * several rows each carrying their own "Description" field, and a value typed into an `<input>`
+ * lives in its `value` property, never in `textContent`. `wrapper.text()` only ever inspects
+ * `textContent`, so asserting a line's description "renders" by looking for it there is a
+ * false negative waiting to happen — it would fail even when the field is correctly pre-filled.
+ */
+function allLabelledValues(wrapper: ReturnType<typeof mount>, text: string): string[] {
+  return wrapper
+    .findAll('label')
+    .filter((label) => label.text().includes(text))
+    .map((label) => label.attributes('for'))
+    .filter((forId): forId is string => Boolean(forId))
+    .map((forId) => (wrapper.find(`#${forId}`).element as HTMLInputElement).value)
 }
 
 async function fillMinimalDraft(wrapper: ReturnType<typeof mount>): Promise<void> {
@@ -310,6 +340,20 @@ beforeEach(() => {
   post.mockReset()
   put.mockReset()
   mockPickerLookups()
+})
+
+afterEach(() => {
+  // See the docblock on `mountedWrappers`: this is what keeps `useUnsavedGuard`'s module-level
+  // registry from carrying one test's dirty state into the next. Guarded because one test below
+  // unmounts its own wrapper directly (to assert the guard clears immediately) — unmounting it a
+  // second time here is a harmless no-op, not a second failure to surface.
+  while (mountedWrappers.length > 0) {
+    try {
+      mountedWrappers.pop()?.unmount()
+    } catch {
+      // Already unmounted by the test itself.
+    }
+  }
 })
 
 describe('SalesInvoiceEditorPage — draft create (§4.7)', () => {
@@ -498,8 +542,11 @@ describe('SalesInvoiceEditorPage — draft edit (§4.8)', () => {
     const { wrapper } = await mountEditPage()
 
     expect(get).toHaveBeenCalledWith('/companies/company-1/sales-invoices/inv-1')
-    expect(wrapper.text()).toContain('Consulting')
-    expect(wrapper.text()).toContain('Delivery')
+    // Each line's description lives in an <input>'s `value`, not in the page's `textContent` —
+    // asserted against the element's own value rather than `wrapper.text()` for that reason.
+    const descriptions = allLabelledValues(wrapper, 'Description')
+    expect(descriptions).toContain('Consulting')
+    expect(descriptions).toContain('Delivery')
   })
 
   it('resubmits the full line set on any line-level change, never a partial patch', async () => {
@@ -556,8 +603,20 @@ describe('SalesInvoiceEditorPage — draft edit (§4.8)', () => {
   it('re-renders totals and per-line tax figures from the save response, not the pre-edit values', async () => {
     signIn()
     mockInvoiceGet(invoice())
+
+    // A changed invoice date can move a line outside its tax code's effective range (§4.8.5), so
+    // the save response is built as a fully self-consistent, *different* invoice — never the
+    // pre-edit fixture with only the header patched, which would leave line 1's pre-edit
+    // `line_total` ("236.00") legitimately present in the response and make an assertion that it
+    // must NOT render a false failure (Gate-1 #5 requires rendering exactly what the API returns,
+    // never hiding a number the API actually sent).
+    const baseline = invoice()
+    const recomputedLines = [
+      { ...baseline.lines![0]!, tax_rate: '2.5000', tax_amount: '5.0000', line_total: '205.0000' },
+      baseline.lines![1]!,
+    ]
     put.mockResolvedValue({
-      data: invoice({ total: '500.0000', tax_total: '75.0000' }),
+      data: invoice({ subtotal: '250.0000', tax_total: '5.0000', total: '255.0000', lines: recomputedLines }),
       meta: apiMeta(),
     })
 
@@ -565,7 +624,13 @@ describe('SalesInvoiceEditorPage — draft edit (§4.8)', () => {
     await labelledField(wrapper, ['Invoice date']).setValue('2026-07-15')
     await submit(wrapper)
 
-    expect(wrapper.text()).toContain('500.00')
+    // The new, authoritative figures from the save response — never recomputed, and never left
+    // showing what was on screen before the save.
+    expect(wrapper.text()).toContain('255.00')
+    expect(wrapper.text()).toContain('205.00')
+    // 236.00 was line 1's pre-edit total; it is not part of this response at all (line 1's new
+    // total is 205.00), so its absence here reflects the response replacing the view — it is not
+    // an assertion that the UI hid a number the API sent.
     expect(wrapper.text()).not.toContain('236.00')
   })
 })

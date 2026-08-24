@@ -287,14 +287,17 @@ describe('CustomerDetailPage — lifecycle (§4.5)', () => {
     const deleteItem = wrapper.findAll('[role="menuitem"]').find((el) => el.text().includes('Delete'))
     await deleteItem?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    expect(dialog.exists()).toBe(true)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
 
-    const confirmButton = dialog.findAll('button').at(-1)
-    expect(confirmButton?.attributes('disabled')).toBeDefined()
+    // Re-queried fresh after every reactive step rather than cached: the dialog renders through
+    // a `<Teleport>`, stubbed globally as `true` in `tests/Support/vitest.setup.ts`, and a
+    // DOMWrapper captured before a reactive update does not reliably reflect one made afterwards
+    // (the same caveat `ConfirmDialog.spec.ts` states explicitly for this exact component).
+    await wrapper.find('[role="dialog"]').find('input[type="text"]').setValue('C-0001')
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
 
-    await dialog.find('input[type="text"]').setValue('C-0001')
-    await confirmButton?.trigger('click')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     expect(del).toHaveBeenCalledWith('/companies/company-1/customers/cus-1')
@@ -321,9 +324,9 @@ describe('CustomerDetailPage — lifecycle (§4.5)', () => {
     const deleteItem = wrapper.findAll('[role="menuitem"]').find((el) => el.text().includes('Delete'))
     await deleteItem?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    await dialog.find('input[type="text"]').setValue('C-0001')
-    await dialog.findAll('button').at(-1)?.trigger('click')
+    // Re-queried fresh at each step — see the note in the previous test.
+    await wrapper.find('[role="dialog"]').find('input[type="text"]').setValue('C-0001')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     const notice = useUiStore().notices.at(-1)

@@ -274,11 +274,10 @@ describe('SalesInvoiceDetailPage — issue (§4.10)', () => {
     expect(issueButton).toBeDefined()
     await issueButton?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    expect(dialog.exists()).toBe(true)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
     expect(post).not.toHaveBeenCalled()
 
-    await dialog.findAll('button').at(-1)?.trigger('click')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     expect(post).toHaveBeenCalledWith('/companies/company-1/sales-invoices/inv-1/issue')
@@ -337,15 +336,18 @@ describe('SalesInvoiceDetailPage — cancel (§4.11)', () => {
     expect(cancelButton).toBeDefined()
     await cancelButton?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    const confirmButton = dialog.findAll('button').at(-1)
-    expect(confirmButton?.attributes('disabled')).toBeDefined()
+    // Re-queried fresh from the stable top-level `wrapper` at every step rather than cached
+    // across a `setValue`: the dialog renders through a `<Teleport>`, stubbed globally as `true`
+    // in `tests/Support/vitest.setup.ts`, and a DOMWrapper captured before a reactive update does
+    // not reliably reflect one made afterwards (the same caveat `ConfirmDialog.spec.ts` states
+    // explicitly for this exact component).
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
 
-    await dialog.find('textarea').setValue('no')
-    expect(confirmButton?.attributes('disabled')).toBeDefined()
+    await wrapper.find('[role="dialog"]').find('textarea').setValue('no')
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
 
-    await dialog.find('textarea').setValue('Customer requested cancellation.')
-    expect(confirmButton?.attributes('disabled')).toBeUndefined()
+    await wrapper.find('[role="dialog"]').find('textarea').setValue('Customer requested cancellation.')
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
   })
 
   it('posts the reason to the cancel sub-route on confirmation', async () => {
@@ -360,9 +362,8 @@ describe('SalesInvoiceDetailPage — cancel (§4.11)', () => {
     const cancelButton = wrapper.findAll('a, button').find((el) => el.text().trim() === 'Cancel invoice')
     await cancelButton?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    await dialog.find('textarea').setValue('Customer requested cancellation.')
-    await dialog.findAll('button').at(-1)?.trigger('click')
+    await wrapper.find('[role="dialog"]').find('textarea').setValue('Customer requested cancellation.')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     expect(post).toHaveBeenCalledWith(
@@ -389,9 +390,8 @@ describe('SalesInvoiceDetailPage — cancel (§4.11)', () => {
     const wrapper = await mountPage()
     const cancelButton = wrapper.findAll('a, button').find((el) => el.text().trim() === 'Cancel invoice')
     await cancelButton?.trigger('click')
-    const dialog = wrapper.find('[role="dialog"]')
-    await dialog.find('textarea').setValue('Customer requested cancellation.')
-    await dialog.findAll('button').at(-1)?.trigger('click')
+    await wrapper.find('[role="dialog"]').find('textarea').setValue('Customer requested cancellation.')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     const message = useUiStore().notices.at(-1)?.message ?? ''
@@ -441,17 +441,16 @@ describe('SalesInvoiceDetailPage — delete (§4.12)', () => {
     expect(deleteItem).toBeDefined()
     await deleteItem?.trigger('click')
 
-    const dialog = wrapper.find('[role="dialog"]')
-    // A draft has no `number` yet, so the checkbox variant is used, never a typed token.
-    expect(dialog.find('input[type="text"]').exists()).toBe(false)
+    // A draft has no `number` yet, so the checkbox variant is used, never a typed token. Every
+    // reference below is re-queried fresh from the stable top-level `wrapper` rather than cached
+    // across a `setValue`/click — see the note in the cancel-reason test above.
+    expect(wrapper.find('[role="dialog"]').find('input[type="text"]').exists()).toBe(false)
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
 
-    const confirmButton = dialog.findAll('button').at(-1)
-    expect(confirmButton?.attributes('disabled')).toBeDefined()
+    await wrapper.find('[role="dialog"]').find('input[type="checkbox"]').setValue(true)
+    expect(wrapper.find('[role="dialog"]').findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
 
-    await dialog.find('input[type="checkbox"]').setValue(true)
-    expect(confirmButton?.attributes('disabled')).toBeUndefined()
-
-    await confirmButton?.trigger('click')
+    await wrapper.find('[role="dialog"]').findAll('button').at(-1)?.trigger('click')
     await flushPromises()
 
     expect(del).toHaveBeenCalledWith('/companies/company-1/sales-invoices/inv-1')
