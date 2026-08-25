@@ -81,7 +81,7 @@ function receivableDraft(string $unitPrice = '1000.00', ?Customer $customer = nu
 /**
  * An issued invoice for the acme customer.
  */
-function receivableInvoice(string $unitPrice = '1000.00', ?Customer $customer = null): SalesInvoice
+function probeReceivableInvoice(string $unitPrice = '1000.00', ?Customer $customer = null): SalesInvoice
 {
     return app(SalesInvoiceService::class)->issue(receivableDraft($unitPrice, $customer), test()->owner);
 }
@@ -99,7 +99,7 @@ describe('what a customer owes', function (): void {
     });
 
     it('counts an issued invoice in full', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
 
         // 1,000 with no tax, so the whole total is due.
         expect($invoice->amount_due)->toBe('1000.0000')
@@ -107,12 +107,12 @@ describe('what a customer owes', function (): void {
     });
 
     it('counts what is left on a partially paid invoice, not its total', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
 
         // Phase 4 territory reached the only way it can be today: `amount_paid` is pinned at zero by a
         // phase-scoped CHECK, so the constraint comes off to move it. What matters is that the probe reads
         // `amount_due` rather than recomputing `total - amount_paid` itself.
-        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT sales_invoices_no_payments_until_payments_phase');
+        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT IF EXISTS sales_invoices_no_payments_until_payments_phase');
         DB::table('sales_invoices')->where('id', $invoice->getKey())->update([
             'status' => SalesInvoiceStatus::PartiallyPaid->value,
             'amount_paid' => '400.0000',
@@ -123,9 +123,9 @@ describe('what a customer owes', function (): void {
     });
 
     it('sums several collectable invoices', function (): void {
-        receivableInvoice('1000.00');
-        receivableInvoice('250.50');
-        receivableInvoice('99.49');
+        probeReceivableInvoice('1000.00');
+        probeReceivableInvoice('250.50');
+        probeReceivableInvoice('99.49');
 
         expect($this->probe->outstandingBalance($this->customer))->toBe('1349.9900');
     });
@@ -137,16 +137,16 @@ describe('what a customer owes', function (): void {
     });
 
     it('ignores a cancelled invoice, whose posting was reversed', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
         app(SalesInvoiceService::class)->cancel($invoice, 'Customer cancelled the order', $this->owner);
 
         expect($this->probe->outstandingBalance($this->customer))->toBe('0.0000');
     });
 
     it('ignores a paid invoice, which is settled', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
 
-        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT sales_invoices_no_payments_until_payments_phase');
+        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT IF EXISTS sales_invoices_no_payments_until_payments_phase');
         DB::table('sales_invoices')->where('id', $invoice->getKey())->update([
             'status' => SalesInvoiceStatus::Paid->value,
             'amount_paid' => '1000.0000',
@@ -157,7 +157,7 @@ describe('what a customer owes', function (): void {
     });
 
     it('returns a decimal string at the ledger scale, never a float', function (): void {
-        receivableInvoice('1000.00');
+        probeReceivableInvoice('1000.00');
 
         $balance = $this->probe->outstandingBalance($this->customer);
 
@@ -188,15 +188,15 @@ describe('whether a customer has ever been invoiced', function (): void {
     });
 
     it('is true for an issued invoice', function (): void {
-        receivableInvoice();
+        probeReceivableInvoice();
 
         expect($this->probe->hasAnyInvoice($this->customer))->toBeTrue();
     });
 
     it('is true for a partially paid invoice', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
 
-        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT sales_invoices_no_payments_until_payments_phase');
+        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT IF EXISTS sales_invoices_no_payments_until_payments_phase');
         DB::table('sales_invoices')->where('id', $invoice->getKey())->update([
             'status' => SalesInvoiceStatus::PartiallyPaid->value,
             'amount_paid' => '400.0000',
@@ -207,9 +207,9 @@ describe('whether a customer has ever been invoiced', function (): void {
     });
 
     it('is true for a paid invoice', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
 
-        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT sales_invoices_no_payments_until_payments_phase');
+        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT IF EXISTS sales_invoices_no_payments_until_payments_phase');
         DB::table('sales_invoices')->where('id', $invoice->getKey())->update([
             'status' => SalesInvoiceStatus::Paid->value,
             'amount_paid' => '1000.0000',
@@ -222,7 +222,7 @@ describe('whether a customer has ever been invoiced', function (): void {
     });
 
     it('is true for a cancelled invoice', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
         app(SalesInvoiceService::class)->cancel($invoice, 'Ordered in error', $this->owner);
 
         expect($this->probe->hasAnyInvoice($this->customer))->toBeTrue()
@@ -271,7 +271,7 @@ describe('company and tenant isolation', function (): void {
     });
 
     it('cannot see another tenant’s invoices', function (): void {
-        receivableInvoice('1000.00');
+        probeReceivableInvoice('1000.00');
 
         $other = $this->createWorkspace('other');
         $this->withinTenant($other['tenant']);
@@ -288,7 +288,7 @@ describe('company and tenant isolation', function (): void {
 
 describe('the rules this activates', function (): void {
     it('refuses to archive a customer who still owes', function (): void {
-        receivableInvoice('1000.00');
+        probeReceivableInvoice('1000.00');
 
         // Live for the first time. `CustomerService::archive()` has carried this rule since Milestone 2 and
         // could never fire it, because the stub reported a balance of zero for everybody.
@@ -300,7 +300,7 @@ describe('the rules this activates', function (): void {
     });
 
     it('allows archiving once the balance is cleared', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
         app(SalesInvoiceService::class)->cancel($invoice, 'Ordered in error', $this->owner);
 
         // The rule is about money owed, not about having been invoiced — so a cancelled invoice releases it.
@@ -310,7 +310,7 @@ describe('the rules this activates', function (): void {
     });
 
     it('refuses to change the code of an invoiced customer', function (): void {
-        receivableInvoice('1000.00');
+        probeReceivableInvoice('1000.00');
 
         $exception = catchPlatformException(
             fn () => app(CustomerService::class)->update($this->customer->fresh(), ['code' => 'SILVA2'])
@@ -320,7 +320,7 @@ describe('the rules this activates', function (): void {
     });
 
     it('refuses to delete an invoiced customer, even after cancellation', function (): void {
-        $invoice = receivableInvoice('1000.00');
+        $invoice = probeReceivableInvoice('1000.00');
         app(SalesInvoiceService::class)->cancel($invoice, 'Ordered in error', $this->owner);
 
         // `hasAnyInvoice()` rather than the balance: the document names them whatever became of it.

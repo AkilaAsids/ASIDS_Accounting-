@@ -112,6 +112,11 @@ final readonly class RoleTemplate
                     'sales.invoices.issue',
                     'sales.invoices.cancel',
 
+                    // Recording and allocating a customer receipt — the receiving-side mirror of issuing, and
+                    // accountant-only for the same reason: it moves money and posts to the ledger. A bookkeeper
+                    // drafts invoices but does not commit money to the books.
+                    'sales.receipts.manage',
+
                     // The receivables reports, for the same reason as `accounting.reports.view` above:
                     // whoever decides a customer's credit terms is who needs to see what that decision has
                     // cost so far, and the AR reconciliation is a check on the accountant's own postings.

@@ -671,6 +671,7 @@ describe('AC-3.2: allocations spanning more than one receivable account', functi
         DB::table('receipt_allocations')->insert([
             [
                 'id' => (string) Str::uuid(),
+                'tenant_id' => $this->company->tenant_id,
                 'company_id' => $this->company->getKey(),
                 'customer_receipt_id' => $receipt->getKey(),
                 'sales_invoice_id' => $invoiceA->getKey(),
@@ -680,6 +681,7 @@ describe('AC-3.2: allocations spanning more than one receivable account', functi
             ],
             [
                 'id' => (string) Str::uuid(),
+                'tenant_id' => $this->company->tenant_id,
                 'company_id' => $this->company->getKey(),
                 'customer_receipt_id' => $receipt->getKey(),
                 'sales_invoice_id' => $invoiceB->getKey(),

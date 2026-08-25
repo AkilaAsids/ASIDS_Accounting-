@@ -267,6 +267,12 @@ final class PermissionCatalogue
             // why it is a capability of its own rather than folded into `customers.view`, which answers only
             // *who* the customers are.
             new PermissionDefinition('sales', 'reports', 'view', 'View receivables reports', 'Read outstanding balances, aged receivables and the AR control reconciliation.', sortOrder: 90),
+
+            // Recording a receipt allocates it across issued invoices and posts it to the ledger in one atomic
+            // operation — so, unlike the invoice's issue/cancel split, there is one action to gate this wave.
+            // Sensitive because it moves money and posts to the ledger; the deferred reversal sub-slice adds a
+            // second `sales.receipts.cancel` when it lands, exactly as `cancel` arrived separately for invoices.
+            new PermissionDefinition('sales', 'receipts', 'manage', 'Manage customer receipts', 'Record a customer receipt and allocate it across issued invoices, posting it to the ledger.', sensitive: true, sortOrder: 100),
         ];
     }
 

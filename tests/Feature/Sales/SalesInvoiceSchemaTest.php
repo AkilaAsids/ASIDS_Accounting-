@@ -257,10 +257,16 @@ describe('the money invariants', function (): void {
         expect(DB::table('sales_invoices')->count())->toBe(1);
     });
 
-    it('holds payments at zero until the payments phase', function (): void {
-        // A phase-scoped constraint the payments phase drops. The columns ship now so Phase 4 adds behaviour
-        // rather than a migration to a populated table, and this makes it impossible to half-use them meanwhile.
-        expect(fn () => insertInvoice(['amount_paid' => '100.0000', 'amount_due' => '1080.0000']))
+    it('permits payments now the payments phase has arrived, but never an oversell', function (): void {
+        // The phase-scoped `amount_paid = 0` CHECK shipped in Milestone 4 so the columns could exist before the
+        // behaviour did; Phase 4 drops it, so a partial payment is now representable on the total of 1,180.
+        insertInvoice(['amount_paid' => '100.0000', 'amount_due' => '1080.0000']);
+
+        expect(DB::table('sales_invoices')->where('amount_paid', '100.0000')->count())->toBe(1);
+
+        // Its replacement, the AC-5.2 backstop `amount_paid <= total`, refuses driving amount_paid past the
+        // total (equivalently amount_due below zero) whatever the service does.
+        expect(fn () => insertInvoice(['amount_paid' => '1200.0000', 'amount_due' => '-20.0000']))
             ->toThrow(QueryException::class);
     });
 

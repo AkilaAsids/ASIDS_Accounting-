@@ -91,12 +91,15 @@ describe('the document type', function (): void {
     });
 
     it('leaves the existing families untouched', function (): void {
-        // The change to the Accounting enum is additive. Asserted because it is the one place Milestone 5
-        // reaches into proven ledger code.
+        // The change to the Accounting enum is additive, in Milestone 5 and again in Phase 4. Asserted because
+        // it is the one place these waves reach into proven ledger code. Phase 4 added `CustomerReceipt` (RCT)
+        // alongside Milestone 5's `SalesInvoice` (INV), so the count is now five — the original three families
+        // remain exactly as they were.
         expect(DocumentType::JournalVoucher->prefix())->toBe('JV')
             ->and(DocumentType::OpeningBalance->prefix())->toBe('OB')
             ->and(DocumentType::YearEndClose->prefix())->toBe('YEC')
-            ->and(DocumentType::cases())->toHaveCount(4);
+            ->and(DocumentType::CustomerReceipt->prefix())->toBe('RCT')
+            ->and(DocumentType::cases())->toHaveCount(5);
     });
 });
 
@@ -291,12 +294,20 @@ describe('the transitions an issued invoice may still make', function (): void {
         SalesInvoiceStatus::Paid->value,
     ]);
 
-    it('still holds payment figures at zero until the payments phase', function (): void {
-        // The trigger permits these columns so Phase 4 adds behaviour rather than loosening a trigger; the
-        // phase-scoped CHECK is what stops them moving in the meantime. Both are needed, and this proves the
-        // trigger has not accidentally superseded the CHECK.
+    it('lets the payment figures move now the payments phase has arrived, but never past the total', function (): void {
+        // Milestone 4 pinned these columns at zero with a phase-scoped CHECK, permitting them on the trigger so
+        // Phase 4 would add behaviour rather than loosen a trigger. Phase 4 has arrived: it dropped that CHECK,
+        // so a partial payment on an issued invoice is now representable.
+        DB::table('sales_invoices')->where('id', $this->id)
+            ->update(['amount_paid' => '100.0000', 'amount_due' => '900.0000']);
+
+        expect(DB::table('sales_invoices')->where('id', $this->id)->value('amount_paid'))->toBe('100.0000');
+
+        // Its replacement is the AC-5.2 backstop `amount_paid <= total`, which refuses driving an invoice past
+        // its total (equivalently `amount_due` negative) regardless of what any service does — the guard that
+        // stops two racing receipts overselling one invoice.
         expect(fn () => DB::table('sales_invoices')->where('id', $this->id)
-            ->update(['amount_paid' => '100.0000', 'amount_due' => '900.0000']))
+            ->update(['amount_paid' => '1100.0000', 'amount_due' => '-100.0000']))
             ->toThrow(QueryException::class);
     });
 
