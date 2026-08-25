@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+
+let attachedWrapper: VueWrapper | undefined
+
+afterEach(() => {
+  attachedWrapper?.unmount()
+  attachedWrapper = undefined
+})
 
 /**
  * The shared confirm dialog, covering the two tiers above `window.confirm` (Gate-1 decision
@@ -163,6 +170,103 @@ describe('ConfirmDialog', () => {
 
       expect(button(wrapper, 'Delete draft')?.attributes('disabled')).toBeUndefined()
     })
+  })
+
+  it('uses a caller-supplied typed label instead of the generated "Type X to confirm" one', () => {
+    const wrapper = mount(ConfirmDialog, {
+      props: {
+        open: true,
+        title: 'Delete?',
+        mode: 'typed',
+        confirmToken: 'C-0001',
+        typedLabel: 'Type the customer code to confirm deletion',
+      },
+    })
+
+    expect(wrapper.text()).toContain('Type the customer code to confirm deletion')
+    expect(wrapper.text()).not.toContain('Type C-0001 to confirm')
+  })
+
+  it('ignores keys other than Escape and Tab', async () => {
+    const wrapper = mount(ConfirmDialog, { props: { open: true, title: 'Archive?' } })
+
+    await wrapper.find('[role="dialog"]').trigger('keydown', { key: 'a' })
+
+    expect(wrapper.emitted('cancel')).toBeFalsy()
+  })
+
+  it('never emits confirm if it is somehow invoked while invalid — a purely defensive guard, since the button is disabled in that state', async () => {
+    const wrapper = mount(ConfirmDialog, {
+      props: { open: true, title: 'Cancel?', mode: 'reason', confirmLabel: 'Confirm' },
+    })
+
+    const confirmButton = button(wrapper, 'Confirm')!
+    expect(confirmButton.attributes('disabled')).toBeDefined()
+
+    // The browser itself would refuse to deliver a click to a disabled button — this bypasses
+    // only that native protection, at the DOM level, to exercise the component's own redundant
+    // guard directly, without touching the reactive state the guard actually reads.
+    ;(confirmButton.element as HTMLButtonElement).disabled = false
+    await confirmButton.trigger('click')
+
+    expect(wrapper.emitted('confirm')).toBeUndefined()
+  })
+
+  it('traps Tab at the last focusable element, wrapping focus back to the first', async () => {
+    attachedWrapper = mount(ConfirmDialog, {
+      attachTo: document.body,
+      props: { open: true, title: 'Archive?', mode: 'simple', confirmLabel: 'Confirm', cancelLabel: 'Cancel' },
+    })
+
+    const confirm = button(attachedWrapper, 'Confirm')!
+    ;(confirm.element as HTMLElement).focus()
+    expect(document.activeElement).toBe(confirm.element)
+
+    await attachedWrapper.find('[role="dialog"]').trigger('keydown', { key: 'Tab' })
+
+    const cancel = button(attachedWrapper, 'Cancel')!
+    expect(document.activeElement).toBe(cancel.element)
+  })
+
+  it('traps Shift+Tab at the first focusable element, wrapping focus to the last', async () => {
+    attachedWrapper = mount(ConfirmDialog, {
+      attachTo: document.body,
+      props: { open: true, title: 'Archive?', mode: 'simple', confirmLabel: 'Confirm', cancelLabel: 'Cancel' },
+    })
+
+    const cancel = button(attachedWrapper, 'Cancel')!
+    ;(cancel.element as HTMLElement).focus()
+    expect(document.activeElement).toBe(cancel.element)
+
+    await attachedWrapper.find('[role="dialog"]').trigger('keydown', { key: 'Tab', shiftKey: true })
+
+    const confirm = button(attachedWrapper, 'Confirm')!
+    expect(document.activeElement).toBe(confirm.element)
+  })
+
+  it('does not move focus on Tab when it is not at either edge of the focus trap', async () => {
+    attachedWrapper = mount(ConfirmDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        title: 'Cancel?',
+        mode: 'reason',
+        confirmLabel: 'Cancel invoice',
+        cancelLabel: 'Go back',
+      },
+    })
+
+    const textarea = attachedWrapper.find('textarea')
+    ;(textarea.element as HTMLElement).focus()
+    expect(document.activeElement).toBe(textarea.element)
+
+    await attachedWrapper.find('[role="dialog"]').trigger('keydown', { key: 'Tab' })
+
+    // Focus is neither at the first nor the last item, so the trap leaves it exactly where it
+    // was — the browser's own default Tab handling would move it, but jsdom/happy-dom performs
+    // no default action for a synthetic keydown, so "unchanged" here just confirms the trap
+    // itself did not forcibly relocate it.
+    expect(document.activeElement).toBe(textarea.element)
   })
 
   it('emits cancel on Escape', async () => {

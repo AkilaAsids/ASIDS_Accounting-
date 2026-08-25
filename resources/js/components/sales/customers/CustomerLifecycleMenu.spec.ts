@@ -110,6 +110,66 @@ describe('CustomerLifecycleMenu', () => {
     expect(wrapper.emitted('archive')).toHaveLength(1)
   })
 
+  it('does not emit restore when the Tier-1 confirm is declined', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = mount(CustomerLifecycleMenu, { props: { customer: customer({ status: 'archived' }) } })
+
+    const restoreButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Restore')
+    await restoreButton?.trigger('click')
+
+    expect(wrapper.emitted('restore')).toBeUndefined()
+  })
+
+  it('emits restore naming the customer once the Tier-1 confirm is accepted', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(CustomerLifecycleMenu, { props: { customer: customer({ status: 'archived' }) } })
+
+    const restoreButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Restore')
+    await restoreButton?.trigger('click')
+
+    expect(confirmSpy.mock.calls[0]?.[0]).toContain('Silva Traders')
+    expect(wrapper.emitted('restore')).toHaveLength(1)
+  })
+
+  it('does not emit deactivate when the Tier-1 confirm is declined, and does once accepted', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    const wrapper = mount(CustomerLifecycleMenu, { props: { customer: customer() } })
+    const deactivateButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Deactivate')
+
+    await deactivateButton?.trigger('click')
+    expect(wrapper.emitted('deactivate')).toBeUndefined()
+
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    await deactivateButton?.trigger('click')
+    expect(wrapper.emitted('deactivate')).toHaveLength(1)
+  })
+
+  it('emits reactivate naming the customer once the Tier-1 confirm is accepted', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(CustomerLifecycleMenu, { props: { customer: customer({ status: 'inactive' }) } })
+
+    const reactivateButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Reactivate')
+    await reactivateButton?.trigger('click')
+
+    expect(confirmSpy.mock.calls[0]?.[0]).toContain('Silva Traders')
+    expect(wrapper.emitted('reactivate')).toHaveLength(1)
+  })
+
+  it('closes the delete dialog without emitting delete when the reader cancels it', async () => {
+    const wrapper = mount(CustomerLifecycleMenu, { props: { customer: customer() } })
+
+    await wrapper.find('button[aria-haspopup="menu"]').trigger('click')
+    await wrapper.find('[role="menuitem"]').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+
+    // The Cancel button is the first of the two — re-queried fresh, not cached, per this
+    // file's own documented Teleport caveat.
+    await wrapper.find('[role="dialog"]').findAll('button')[0]?.trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.emitted('delete')).toBeUndefined()
+  })
+
   it('only emits delete once the typed-confirm token matches the customer code', async () => {
     // Every lookup below is freshly re-queried from `wrapper` rather than cached, per this
     // project's own documented `ConfirmDialog.spec.ts` note: the dialog renders through a

@@ -1,9 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import type * as ApiClientModule from '@/api/client'
 import InvoiceLineEditor from '@/components/sales/invoices/InvoiceLineEditor.vue'
+import InvoiceLineRow from '@/components/sales/invoices/InvoiceLineRow.vue'
 import { blankLine, type LineDraft } from '@/components/sales/invoices/lineDraft'
+
+let attachedWrapper: VueWrapper | undefined
+
+afterEach(() => {
+  attachedWrapper?.unmount()
+  attachedWrapper = undefined
+})
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof ApiClientModule>('@/api/client')
@@ -68,5 +76,47 @@ describe('InvoiceLineEditor', () => {
 
     expect(wrapper.find('[role="alert"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Line 1: tax code — That tax code does not belong to this company.')
+  })
+
+  it('falls back to the raw field name in the error summary when it has no friendly label', () => {
+    const wrapper = mountEditor([blankLine()], { 0: { some_unrecognised_field: 'Bad value.' } })
+
+    expect(wrapper.text()).toContain('Line 1: some_unrecognised_field — Bad value.')
+  })
+
+  it('treats a missing lineErrors prop as no errors at all', () => {
+    const wrapper = mount(InvoiceLineEditor, {
+      props: { lines: [blankLine()], accounts: [], companyId: null },
+    })
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('ignores a remove attempt when only one line remains, even if triggered directly (the button is disabled in that state)', async () => {
+    const wrapper = mountEditor([blankLine()])
+
+    await wrapper.findComponent(InvoiceLineRow).vm.$emit('remove')
+
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+  })
+
+  it('focuses and scrolls the offending line into view when its error summary entry is clicked', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+
+    const Harness = defineComponent({
+      components: { InvoiceLineEditor },
+      setup() {
+        const lines = ref<LineDraft[]>([blankLine(), blankLine()])
+        return { lines }
+      },
+      template: `<InvoiceLineEditor v-model:lines="lines" :accounts="[]" company-id="company-1" :line-errors="{ 1: { description: 'Required.' } }" />`,
+    })
+    attachedWrapper = mount(Harness, { attachTo: document.body })
+
+    await attachedWrapper.find('[role="alert"] button').trigger('click')
+    await flushPromises()
+
+    const secondRowInput = attachedWrapper.findAll('tbody tr')[1]?.find('input, select')
+    expect(document.activeElement).toBe(secondRowInput?.element)
   })
 })

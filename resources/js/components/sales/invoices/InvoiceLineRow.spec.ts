@@ -24,15 +24,15 @@ function button(wrapper: ReturnType<typeof mountRow>, text: string) {
   return wrapper.findAll('button').find((candidate) => candidate.text().trim() === text)
 }
 
-function mountRow(initial: LineDraft = blankLine()) {
+function mountRow(initial: LineDraft = blankLine(), errors?: Record<string, string>) {
   const Harness = defineComponent({
     components: { InvoiceLineRow },
     setup() {
       const line = ref<LineDraft>(initial)
-      return { line }
+      return { line, errors }
     },
     template: `<table><tbody>
-      <InvoiceLineRow v-model:line="line" :index="0" :accounts="[]" company-id="company-1" :can-remove="true" />
+      <InvoiceLineRow v-model:line="line" :index="0" :accounts="[]" company-id="company-1" :can-remove="true" :errors="errors" />
     </tbody></table>`,
   })
   return mount(Harness)
@@ -137,6 +137,19 @@ describe('InvoiceLineRow — discount mutual exclusion', () => {
     expect(wrapper.find('input[aria-label="Discount amount"]').exists()).toBe(false)
   })
 
+  it('clicking the already-active discount type is a no-op', async () => {
+    const wrapper = mountRow()
+    const vm = wrapper.vm as unknown as { line: LineDraft }
+    const before = vm.line
+
+    await button(wrapper, 'None')?.trigger('click')
+
+    // `blankLine()` already starts as `discountType: 'none'` — the toggle's own early
+    // return means the model is never reassigned, so the object identity is unchanged.
+    expect(vm.line).toBe(before)
+    expect(vm.line.discountType).toBe('none')
+  })
+
   it('a line loaded with both discounts non-null keeps only the percentage, with a note explaining why', () => {
     const draft = lineFromApi(invoiceLine({ discount_percent: '10.0000', discount_amount: '5.0000' }))
 
@@ -149,5 +162,30 @@ describe('InvoiceLineRow — discount mutual exclusion', () => {
 
     expect(wrapper.text()).toContain(draft.discountConflictNote)
     expect(wrapper.find('input[aria-label="Discount amount"]').exists()).toBe(false)
+  })
+
+  it('shows a field-error under the discount value when discount_percent is invalid', () => {
+    const wrapper = mountRow({ ...blankLine(), discountType: 'percent' }, {
+      discount_percent: 'Must be between 0 and 100.',
+    })
+
+    expect(wrapper.find('[role="alert"]').text()).toBe('Must be between 0 and 100.')
+  })
+
+  it('shows a field-error under the discount value when discount_amount is invalid', () => {
+    const wrapper = mountRow({ ...blankLine(), discountType: 'amount' }, {
+      discount_amount: 'Must not exceed the line subtotal.',
+    })
+
+    expect(wrapper.find('[role="alert"]').text()).toBe('Must not exceed the line subtotal.')
+  })
+
+  it('marks the revenue account select invalid and shows its field-error', () => {
+    const wrapper = mountRow(blankLine(), {
+      revenue_account_id: 'That account does not accept postings.',
+    })
+
+    expect(wrapper.find('select[id$="-revenue-account"]').classes().join(' ')).toContain('border-danger')
+    expect(wrapper.text()).toContain('That account does not accept postings.')
   })
 })

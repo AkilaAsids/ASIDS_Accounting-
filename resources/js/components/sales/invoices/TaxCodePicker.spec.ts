@@ -76,4 +76,37 @@ describe('TaxCodePicker', () => {
 
     expect(wrapper.text()).toContain('That tax code does not belong to this company.')
   })
+
+  it('does not call the API and leaves only "No tax" selectable when there is no company yet', async () => {
+    get.mockClear()
+    const wrapper = mount(TaxCodePicker, { props: { companyId: null, modelValue: '' } })
+    await flushPromises()
+
+    expect(get).not.toHaveBeenCalled()
+    expect(wrapper.findAll('option')).toHaveLength(1)
+    expect(wrapper.findAll('option')[0]?.text()).toBe('No tax')
+  })
+
+  it('re-loads, and again offers only "No tax", once companyId is cleared after having had one', async () => {
+    get.mockResolvedValue({ data: [taxCode()], meta: { request_id: 'r', api_version: '1' } })
+
+    const wrapper = mount(TaxCodePicker, { props: { companyId: 'company-1', modelValue: '' } })
+    await flushPromises()
+    expect(wrapper.findAll('option')).toHaveLength(2)
+
+    await wrapper.setProps({ companyId: null })
+    await flushPromises()
+
+    expect(wrapper.findAll('option')).toHaveLength(1)
+  })
+
+  it('leaves only "No tax" selectable, without throwing, when the lookup fails', async () => {
+    get.mockRejectedValueOnce(new Error('network error'))
+
+    const wrapper = mount(TaxCodePicker, { props: { companyId: 'company-1', modelValue: '' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('option')).toHaveLength(1)
+    expect(wrapper.findAll('option')[0]?.text()).toBe('No tax')
+  })
 })

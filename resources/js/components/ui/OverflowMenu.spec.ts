@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import OverflowMenu from '@/components/ui/OverflowMenu.vue'
+
+let attachedWrapper: VueWrapper | undefined
+
+afterEach(() => {
+  attachedWrapper?.unmount()
+  attachedWrapper = undefined
+})
 
 /**
  * The shared overflow ("⋯") menu (Gate-2 decision B), reused by the customer lifecycle menu
@@ -61,6 +68,77 @@ describe('OverflowMenu', () => {
 
     const items = wrapper.findAll('[role="menuitem"]')
     expect(items.map((item) => item.text())).toEqual(['Archive', 'Delete'])
+  })
+
+  it('does nothing on Escape while already closed', async () => {
+    const wrapper = mountMenu()
+
+    await wrapper.find('.relative').trigger('keydown', { key: 'Escape' })
+
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false)
+  })
+
+  it('does nothing on Tab while closed — there is no panel to trap focus within', async () => {
+    const wrapper = mountMenu()
+
+    await wrapper.find('.relative').trigger('keydown', { key: 'Tab' })
+
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false)
+  })
+
+  it('ignores keys other than Escape and Tab', async () => {
+    const wrapper = mountMenu()
+    await wrapper.find('button[aria-haspopup="menu"]').trigger('click')
+
+    await wrapper.find('.relative').trigger('keydown', { key: 'a' })
+
+    expect(wrapper.find('[role="menu"]').exists()).toBe(true)
+  })
+
+  it('traps Tab at the last menu item, wrapping focus back to the first', async () => {
+    attachedWrapper = mount(OverflowMenu, {
+      attachTo: document.body,
+      props: { label: 'More actions for Silva Traders' },
+      slots: {
+        default: `<template #default="{ close }">
+          <button role="menuitem" @click="close">Archive</button>
+          <button role="menuitem" @click="close">Delete</button>
+        </template>`,
+      },
+    })
+
+    await attachedWrapper.find('button[aria-haspopup="menu"]').trigger('click')
+    const items = attachedWrapper.findAll('[role="menuitem"]')
+    ;(items[1]!.element as HTMLElement).focus()
+    expect(document.activeElement).toBe(items[1]!.element)
+
+    await attachedWrapper.find('.relative').trigger('keydown', { key: 'Tab' })
+
+    const refreshedItems = attachedWrapper.findAll('[role="menuitem"]')
+    expect(document.activeElement).toBe(refreshedItems[0]!.element)
+  })
+
+  it('traps Shift+Tab at the first menu item, wrapping focus to the last', async () => {
+    attachedWrapper = mount(OverflowMenu, {
+      attachTo: document.body,
+      props: { label: 'More actions for Silva Traders' },
+      slots: {
+        default: `<template #default="{ close }">
+          <button role="menuitem" @click="close">Archive</button>
+          <button role="menuitem" @click="close">Delete</button>
+        </template>`,
+      },
+    })
+
+    await attachedWrapper.find('button[aria-haspopup="menu"]').trigger('click')
+    const items = attachedWrapper.findAll('[role="menuitem"]')
+    ;(items[0]!.element as HTMLElement).focus()
+    expect(document.activeElement).toBe(items[0]!.element)
+
+    await attachedWrapper.find('.relative').trigger('keydown', { key: 'Tab', shiftKey: true })
+
+    const refreshedItems = attachedWrapper.findAll('[role="menuitem"]')
+    expect(document.activeElement).toBe(refreshedItems[1]!.element)
   })
 
   it('closes on Escape', async () => {

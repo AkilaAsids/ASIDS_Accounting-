@@ -139,6 +139,71 @@ describe('InvoiceActionsMenu', () => {
     expect(wrapper.emitted('delete')).toBeTruthy()
   })
 
+  it('falls back to "this customer" in the issue message when no customer is loaded on the invoice', async () => {
+    const wrapper = mount(InvoiceActionsMenu, {
+      props: {
+        invoice: invoice({
+          customer: undefined,
+          capabilities: { can_update: false, can_delete: false, can_issue: true, can_cancel: false },
+        }),
+      },
+    })
+
+    const issueButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Issue invoice')
+    await issueButton?.trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').text()).toContain('this customer')
+  })
+
+  it('closes the issue dialog without emitting "issue" when it is cancelled', async () => {
+    const wrapper = mount(InvoiceActionsMenu, {
+      props: { invoice: invoice({ capabilities: { can_update: false, can_delete: false, can_issue: true, can_cancel: false } }) },
+    })
+
+    const issueButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Issue invoice')
+    await issueButton?.trigger('click')
+
+    await wrapper.find('[role="dialog"]').findAll('button')[0]?.trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.emitted('issue')).toBeUndefined()
+  })
+
+  it('closes the cancel dialog without emitting "cancel" when "Go back" is clicked', async () => {
+    const wrapper = mount(InvoiceActionsMenu, {
+      props: { invoice: invoice({ capabilities: { can_update: false, can_delete: false, can_issue: false, can_cancel: true } }) },
+    })
+
+    const cancelButton = wrapper.findAll('button').find((b) => b.text().trim() === 'Cancel invoice')
+    await cancelButton?.trigger('click')
+
+    await wrapper.find('[role="dialog"]').findAll('button').find((b) => b.text() === 'Go back')?.trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.emitted('cancel')).toBeUndefined()
+  })
+
+  it('closes the delete dialog without emitting "delete" when it is cancelled', async () => {
+    const wrapper = mount(InvoiceActionsMenu, {
+      props: {
+        invoice: invoice({
+          number: null,
+          status: 'draft',
+          capabilities: { can_update: true, can_delete: true, can_issue: true, can_cancel: false },
+        }),
+      },
+    })
+
+    await wrapper.find('button[aria-haspopup="menu"]').trigger('click')
+    const deleteItem = wrapper.findAll('[role="menuitem"]').find((el) => el.text().includes('Delete'))
+    await deleteItem?.trigger('click')
+
+    await wrapper.find('[role="dialog"]').findAll('button')[0]?.trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.emitted('delete')).toBeUndefined()
+  })
+
   it('shows Edit only when capabilities.can_update is true', () => {
     const withEdit = mount(InvoiceActionsMenu, {
       props: { invoice: invoice({ capabilities: { can_update: true, can_delete: false, can_issue: false, can_cancel: false } }) },

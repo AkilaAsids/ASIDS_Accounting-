@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import CancelInvoiceDialog from '@/components/sales/invoices/CancelInvoiceDialog.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 describe('CancelInvoiceDialog', () => {
   it('frames cancellation as not an undo, and never labels its own dismiss button "Cancel"', () => {
@@ -39,5 +40,17 @@ describe('CancelInvoiceDialog', () => {
     await wrapper.findAll('button').find((b) => b.text() === 'Go back')?.trigger('click')
 
     expect(wrapper.emitted('cancel')).toBeTruthy()
+  })
+
+  it('defaults to an empty-string reason if the underlying ConfirmDialog ever confirms without one', async () => {
+    // `ConfirmDialog`'s own emit type allows `reason: string | undefined` (its `simple`/`typed`
+    // modes emit `undefined`) — this dialog only ever uses `mode="reason"`, so the real
+    // `ConfirmDialog` never actually takes this path, but the fallback exists for exactly this
+    // defensive reason and is worth pinning directly.
+    const wrapper = mount(CancelInvoiceDialog, { props: { open: true } })
+
+    await wrapper.findComponent(ConfirmDialog).vm.$emit('confirm')
+
+    expect(wrapper.emitted('confirm')?.[0]).toEqual([''])
   })
 })
