@@ -12,8 +12,8 @@ and post to the ledger (Dr Bank/Cash, Cr Trade Receivables) through the existing
 |---|---|
 | 1 · Intake | ✅ carried forward (ASAP/critical, Balanced) + slice scope confirmed |
 | 2 · Requirements | ✅ [PHASE-4-RECEIPTS-REQUIREMENTS.md](PHASE-4-RECEIPTS-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-25 |
-| 3 · Architecture | 🔵 in progress — Solution Architect (Opus) |
-| 4 · Build | ⏳ |
+| 3 · Architecture | ✅ [ADR 0014](adr/0014-customer-receipts-and-allocation.md) — **Gate 2 APPROVED** 2026-08-25 |
+| 4 · Build | 🔵 in progress — 4 staged stages, test-first (Backend Engineer, Opus) |
 | 5 · Review (QA ∥ Security) | ⏳ |
 | Delivery | ⏳ PR for human merge |
 
