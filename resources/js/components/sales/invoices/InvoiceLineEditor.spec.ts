@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent, ref, type PropType } from 'vue'
 import type * as ApiClientModule from '@/api/client'
 import InvoiceLineEditor from '@/components/sales/invoices/InvoiceLineEditor.vue'
 import InvoiceLineRow from '@/components/sales/invoices/InvoiceLineRow.vue'
@@ -21,16 +21,30 @@ vi.mock('@/api/client', async () => {
   }
 })
 
-function mountEditor(initialLines: LineDraft[] = [blankLine()], lineErrors: Record<number, Record<string, string>> = {}) {
-  const Harness = defineComponent({
-    components: { InvoiceLineEditor },
-    setup() {
-      const lines = ref<LineDraft[]>(initialLines)
-      return { lines, lineErrors }
-    },
-    template: `<InvoiceLineEditor v-model:lines="lines" :accounts="[]" company-id="company-1" :line-errors="lineErrors" />`,
-  })
-  return mount(Harness)
+/**
+ * A single host component definition, reused by every test — `vue/one-component-per-file`
+ * flags a second inline component literal in the same test file, so this is the one seam
+ * every test mounts through (matching the convention in `useCompanyReload.spec.ts`).
+ */
+const Harness = defineComponent({
+  components: { InvoiceLineEditor },
+  props: {
+    initialLines: { type: Array as PropType<LineDraft[]>, required: true },
+    lineErrors: { type: Object as PropType<Record<number, Record<string, string>>>, default: () => ({}) },
+  },
+  setup(props) {
+    const lines = ref<LineDraft[]>(props.initialLines)
+    return { lines }
+  },
+  template: `<InvoiceLineEditor v-model:lines="lines" :accounts="[]" company-id="company-1" :line-errors="lineErrors" />`,
+})
+
+function mountEditor(
+  initialLines: LineDraft[] = [blankLine()],
+  lineErrors: Record<number, Record<string, string>> = {},
+  options: Record<string, unknown> = {},
+) {
+  return mount(Harness, { props: { initialLines, lineErrors }, ...options })
 }
 
 describe('InvoiceLineEditor', () => {
@@ -103,15 +117,11 @@ describe('InvoiceLineEditor', () => {
   it('focuses and scrolls the offending line into view when its error summary entry is clicked', async () => {
     Element.prototype.scrollIntoView = vi.fn()
 
-    const Harness = defineComponent({
-      components: { InvoiceLineEditor },
-      setup() {
-        const lines = ref<LineDraft[]>([blankLine(), blankLine()])
-        return { lines }
-      },
-      template: `<InvoiceLineEditor v-model:lines="lines" :accounts="[]" company-id="company-1" :line-errors="{ 1: { description: 'Required.' } }" />`,
-    })
-    attachedWrapper = mount(Harness, { attachTo: document.body })
+    attachedWrapper = mountEditor(
+      [blankLine(), blankLine()],
+      { 1: { description: 'Required.' } },
+      { attachTo: document.body },
+    )
 
     await attachedWrapper.find('[role="alert"] button').trigger('click')
     await flushPromises()
