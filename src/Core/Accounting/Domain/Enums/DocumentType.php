@@ -20,6 +20,7 @@ enum DocumentType: string
     case OpeningBalance = 'opening_balance';
     case YearEndClose = 'year_end_close';
     case SalesInvoice = 'sales_invoice';
+    case CustomerReceipt = 'customer_receipt';
 
     public function label(): string
     {
@@ -28,6 +29,7 @@ enum DocumentType: string
             self::OpeningBalance => 'Opening balance',
             self::YearEndClose => 'Year-end close',
             self::SalesInvoice => 'Sales invoice',
+            self::CustomerReceipt => 'Customer receipt',
         };
     }
 
@@ -41,6 +43,7 @@ enum DocumentType: string
             self::OpeningBalance => 'OB',
             self::YearEndClose => 'YEC',
             self::SalesInvoice => 'INV',
+            self::CustomerReceipt => 'RCT',
         };
     }
 
@@ -49,9 +52,9 @@ enum DocumentType: string
      *
      * Gapless numbering costs a row lock per document, serialising issuance within a company. It is
      * worth that for anything a tax authority may audit for completeness, and not worth it otherwise.
-     * Every family so far is auditable, so all four qualify — sales invoices most of all, since Sri Lankan
-     * e-invoicing demands completeness. The distinction exists because later phases will add internal
-     * document types where it does not.
+     * Every family so far is auditable, so all of them qualify — sales invoices and customer receipts most
+     * of all, since Sri Lankan e-invoicing demands completeness. The distinction exists because later phases
+     * will add internal document types where it does not.
      */
     public function requiresGaplessNumbering(): bool
     {

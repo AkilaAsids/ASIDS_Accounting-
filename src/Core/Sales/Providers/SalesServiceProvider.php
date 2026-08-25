@@ -7,6 +7,8 @@ namespace Asids\Core\Sales\Providers;
 use Asids\Core\Sales\Application\Services\CustomerService;
 use Asids\Core\Sales\Application\Services\InvoicePostingMap;
 use Asids\Core\Sales\Application\Services\InvoiceTotalsCalculator;
+use Asids\Core\Sales\Application\Services\ReceiptPostingMap;
+use Asids\Core\Sales\Application\Services\ReceiptService;
 use Asids\Core\Sales\Application\Services\ReceivableReportService;
 use Asids\Core\Sales\Application\Services\SalesInvoiceService;
 use Asids\Core\Sales\Application\Services\TaxCodeService;
@@ -14,6 +16,7 @@ use Asids\Core\Sales\Application\Services\TaxRateResolver;
 use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
 use Asids\Core\Sales\Domain\Models\Customer;
+use Asids\Core\Sales\Domain\Models\CustomerReceipt;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Asids\Core\Sales\Domain\Models\TaxCode;
 use Asids\Core\Sales\Infrastructure\EloquentReceivableBalanceProbe;
@@ -21,6 +24,7 @@ use Asids\Core\Sales\Infrastructure\EloquentTaxRateUsageProbe;
 use Asids\Core\Sales\Infrastructure\NoReceivables;
 use Asids\Core\Sales\Infrastructure\NoTaxRateUsage;
 use Asids\Core\Sales\Policies\CustomerPolicy;
+use Asids\Core\Sales\Policies\CustomerReceiptPolicy;
 use Asids\Core\Sales\Policies\SalesInvoicePolicy;
 use Asids\Core\Sales\Policies\TaxCodePolicy;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -61,6 +65,11 @@ final class SalesServiceProvider extends ServiceProvider
         $this->app->singleton(SalesInvoiceService::class);
         $this->app->singleton(ReceivableReportService::class);
 
+        // The receipt map reuses `InvoicePostingMap::receivableAccountFor()`, so the receivable account is
+        // resolved the same way for both sides of the ledger — bound as singletons like the invoice pair.
+        $this->app->singleton(ReceiptPostingMap::class);
+        $this->app->singleton(ReceiptService::class);
+
         /*
          * The rate-usage seam, now answered for real — same shape and same reasoning as the receivables
          * probe above.
@@ -84,6 +93,7 @@ final class SalesServiceProvider extends ServiceProvider
         Gate::policy(Customer::class, CustomerPolicy::class);
         Gate::policy(TaxCode::class, TaxCodePolicy::class);
         Gate::policy(SalesInvoice::class, SalesInvoicePolicy::class);
+        Gate::policy(CustomerReceipt::class, CustomerReceiptPolicy::class);
     }
 
     /**
@@ -104,6 +114,7 @@ final class SalesServiceProvider extends ServiceProvider
             Customer::MORPH_ALIAS => Customer::class,
             TaxCode::MORPH_ALIAS => TaxCode::class,
             SalesInvoice::MORPH_ALIAS => SalesInvoice::class,
+            CustomerReceipt::MORPH_ALIAS => CustomerReceipt::class,
         ]);
     }
 }

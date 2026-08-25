@@ -355,7 +355,7 @@ describe('what cancelling refuses', function (): void {
 
         // Phase 4 territory: `amount_paid` is held at zero by a phase-scoped CHECK, so the column has to be
         // moved with the constraint lifted. The rule is asserted now so it exists before payments do.
-        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT sales_invoices_no_payments_until_payments_phase');
+        DB::statement('ALTER TABLE sales_invoices DROP CONSTRAINT IF EXISTS sales_invoices_no_payments_until_payments_phase');
         DB::table('sales_invoices')->where('id', $invoice->getKey())
             ->update(['amount_paid' => '400.0000', 'amount_due' => bcsub($invoice->total, '400.0000', 4)]);
 
