@@ -13,8 +13,8 @@ existing invoice-cancel pattern (ADR 0009). Backend wave.
 |---|---|
 | 1 · Intake | ✅ carried forward (ASAP/critical, Balanced) + slice scope confirmed |
 | 2 · Requirements | ✅ [PHASE-4-CANCELLATION-REQUIREMENTS.md](PHASE-4-CANCELLATION-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-25 (delta restoration) |
-| 3 · Architecture | 🔵 in progress — Solution Architect (Opus) |
-| 4 · Build | ⏳ |
+| 3 · Architecture | ✅ [ADR 0015](adr/0015-customer-receipt-cancellation.md) — **Gate 2 APPROVED** 2026-08-25 |
+| 4 · Build | 🔵 in progress — 3 stages, test-first (Backend Engineer, Opus) |
 | 5 · Review (QA ∥ Security) | ⏳ |
 | Delivery | ⏳ stacked PR (base `feature/phase4-payments`) |
 
