@@ -49,4 +49,18 @@ final class CustomerReceiptPolicy
     {
         return $user->can('sales.receipts.manage');
     }
+
+    /**
+     * Cancelling a posted receipt.
+     *
+     * A capability of its own, `sales.receipts.cancel`, never riding on `sales.receipts.manage` — the same
+     * issue/cancel split invoices make. Permission and company access both required, matching `view()` and
+     * `SalesInvoicePolicy::cancel()`. No status check: `Gate::before` short-circuits this for a tenant owner,
+     * so any state rule here would be advisory only — `ReceiptService::cancel()` is the authoritative boundary.
+     */
+    public function cancel(User $user, CustomerReceipt $receipt): bool
+    {
+        return $user->can('sales.receipts.cancel')
+            && $user->canAccessCompany($receipt->company_id);
+    }
 }

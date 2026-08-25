@@ -273,6 +273,10 @@ final class PermissionCatalogue
             // Sensitive because it moves money and posts to the ledger; the deferred reversal sub-slice adds a
             // second `sales.receipts.cancel` when it lands, exactly as `cancel` arrived separately for invoices.
             new PermissionDefinition('sales', 'receipts', 'manage', 'Manage customer receipts', 'Record a customer receipt and allocate it across issued invoices, posting it to the ledger.', sensitive: true, sortOrder: 100),
+            // The deferred reversal capability, arriving separately from `manage` exactly as `cancel` arrived
+            // separately from `issue` for invoices. Sensitive because it reverses a posting and restores the
+            // invoices a receipt paid — it moves money and posts to the ledger.
+            new PermissionDefinition('sales', 'receipts', 'cancel', 'Cancel customer receipts', 'Reverse a posted receipt\'s posting and restore the invoices it paid, keeping both ledger entries.', sensitive: true, sortOrder: 110),
         ];
     }
 

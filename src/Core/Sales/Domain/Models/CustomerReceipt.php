@@ -50,6 +50,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $bank_account_id
  * @property string $status
  * @property string|null $journal_entry_id
+ * @property CarbonImmutable|null $cancelled_at
+ * @property string|null $cancellation_reason
+ * @property string|null $cancelled_by_id
  * @property CarbonImmutable|null $posted_at
  * @property string|null $posted_by_id
  * @property string|null $created_by_id
@@ -161,8 +164,8 @@ final class CustomerReceipt extends Model
      * Columns worth recording a change to.
      *
      * The money, the method and the account it landed in — what a customer disputes and an auditor
-     * reconciles against a bank statement. `status` is here for the deferred reversal sub-slice, where a
-     * posted → cancelled transition becomes the entry this trail most needs to hold.
+     * reconciles against a bank statement. `status` and the three cancellation columns record the posted →
+     * cancelled transition: who reversed it, when, and why — the entry this trail most needs to hold.
      *
      * @return list<string>
      */
@@ -177,6 +180,9 @@ final class CustomerReceipt extends Model
             'payment_method',
             'bank_account_id',
             'status',
+            'cancelled_at',
+            'cancellation_reason',
+            'cancelled_by_id',
         ];
     }
 
@@ -195,6 +201,7 @@ final class CustomerReceipt extends Model
     {
         return [
             'receipt_date' => 'immutable_date',
+            'cancelled_at' => 'immutable_datetime',
             'posted_at' => 'immutable_datetime',
             'amount' => 'decimal:4',
             'payment_method' => PaymentMethod::class,
