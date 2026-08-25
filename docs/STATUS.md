@@ -1,46 +1,52 @@
-# Project status — Sales HTTP API (Minions Team 17)
+# Project status — Phase 3 front end (Minions Team 1)
 
-**Last updated:** 2026-08-12 · **Branch:** `feature/sales-http-api` · **Base:** `main` @ `552a25c`
+**Last updated:** 2026-08-24 · **Branch:** `feature/phase3-frontend` · **Base:** `main`
 
 ## Where we are
-Delivering the Sales module's REST surface (customers + tax codes) **in parallel with
-Milestone 5** (issuing/ledger posting, owned by Akila). The Minions do not touch the ledger.
+Building the **Phase 3 front-end** — Customer screens and Sales-invoice screens — over the
+REST APIs that Milestones 6 and 9 already delivered and tested. **UI only: no backend changes,
+no new endpoints, no migrations.** Autonomy ends at a PR for human review (no staging/prod deploy
+in scope).
 
 | Stage | State |
 |---|---|
-| 1 · Intake | ✅ scope, team, git strategy, urgency confirmed by Isuru |
-| 2 · Requirements | ✅ [SALES-HTTP-API-REQUIREMENTS.md](SALES-HTTP-API-REQUIREMENTS.md) · **Gate 1 APPROVED** 2026-08-12 |
-| 3 · Architecture | ✅ [DESIGN](SALES-HTTP-API-DESIGN.md) + [ADR 0008](adr/0008-sales-http-api-and-customer-update-semantics.md) · **Gate 2 APPROVED** 2026-08-12 (keep DELETE, same-409 I4) |
-| 4 · Task files | ✅ [docs/tasks/](tasks/) — Lanes A/B/C |
-| 5 · Build | ✅ Lane C (`7e4c695`), Lane B (`af8f9dc`), Lane A (`1d82cc6`) + shared 403 fix (`29d0907`) + test-cache fix (`24146d2`) |
-| 6 · Review | ✅ Security (Fable) **PASS-WITH-FIXES, 0 blockers**; fixes S1/S2/N1/N2 applied (`62d39f6`) |
-| Delivery | ✅ **PR opened for Akila** — autonomy ends here (no staging/prod deploy in scope) |
+| 1 · Intake | ✅ scope (Phase 3 FE, then roll on), ASAP/critical, Balanced budget, feature-branch+push+PR — confirmed |
+| 2 · Requirements | ✅ [PHASE-3-FRONTEND-REQUIREMENTS.md](PHASE-3-FRONTEND-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-24 (§9) |
+| 3 · Architecture ∥ Design | ✅ [ADR 0013](adr/0013-phase3-frontend-architecture.md) + [DESIGN](PHASE-3-FRONTEND-DESIGN.md) — **Gate 2 APPROVED** 2026-08-24 (A: plain select · B: shared overflow menu · C: conditional journal link) |
+| 4 · Build | ✅ shared pre-step + Customer ∥ Invoice lanes (test-first) |
+| 5 · Review (QA ∥ Security) | ✅ QA 388 green, 0 defects · Security PASS, 0 blockers, 1 should (fixed) |
+| Delivery | ✅ **PR opened for review/merge** — autonomy ends here (no staging/prod deploy in scope) |
 
-## Merge with latest main (2026-08-12)
-`origin/main` (`d781c80` — Akila's M5 Stage 2 posting map) merged into this branch — **clean, no conflicts**; 3 new M5 migrations applied. Validated together: **Sales + Accounting 790/790 green**. `origin/main` is an ancestor, so the PR merges cleanly.
+## Scope (two lanes, UI-only)
+- **Customer lane** — list/search/filter/paginate, create, edit (clear-vs-omit), view, archive/restore, deactivate/reactivate, delete. Over the 9-endpoint customer API (Milestone 6).
+- **Invoice lane** — list/filter/paginate, draft create, draft edit (line editor), view, issue, cancel, delete draft. Over the 7-endpoint sales-invoice API (Milestone 9).
+- **Deferred:** Tax-code front-end (a read-only tax-code picker inside the invoice line editor is in scope; tax-code CRUD screens are not).
+
+## Non-negotiable constraints carried into the build
+- The UI **never computes money** — every total/tax figure comes from the API (ADR 0011 D5).
+- Every page **refetches on company switch** (ADR 0011 D3) — silent failure mode, QA red-specs are the backstop.
+- Destructive/sensitive actions gated on the resource `capabilities` (permission **and** state), not permission alone.
+- `meta.pagination` rendered (first time in this codebase).
 
 ## Result
-Sales module REST surface delivered: **Customer API + Tax-code API + CustomerService hardening**, plus two incidental shared fixes (app-wide 403 rendering, test-cache isolation).
-- **Tests:** full Sales suite **453/453**; Accounting suite green (403 fix, no regression). OpenAPI 113/113 routes documented.
-- **Security:** no blockers; isolation/authz airtight; ADR D6 confirmed pre-existing.
+Phase 3 front-end delivered: **Customer screens** (list/search/paginate, create, edit, view,
+archive/restore/deactivate/reactivate, delete) and **Sales-invoice screens** (list, draft editor
+with line editor, view, issue, cancel, delete-draft) over the existing Milestone 6 / Milestone 9
+REST APIs. UI-only — no backend changes.
+- **Tests:** full front-end suite **388 passing / 0 failing**; typecheck, lint and production build all clean.
+- **Security:** PASS, 0 blockers; 1 should-fix applied (CustomerFormPage company-switch isolation); money-integrity / capability gating / XSS / secrets / route guards all verified clean.
 
-## Known issues / for Akila's roadmap (NOT introduced by this work — verified pre-existing on `main`)
-- `tests/Feature/Tenancy` — 11 failures from a rate-limiter/cache test-isolation gap in workspace registration (identical with main's `TestCase`).
-- N3 — same-workspace 403-vs-404 existence oracle; platform-wide pattern (accounts/journals too), per ADR 0008 should be fixed once across all modules, not forked here.
-- Stale `// EXPERIMENT: temporarily disabled` comment above an *active* `RecordRequestContext` in `bootstrap/app.php`.
+## Known limitations / fast-follows (not blockers)
+- Customer/invoice filter and account/customer pickers are plain inputs/`<select>`s (design-sanctioned placeholder); a searchable typeahead is a fast-follow.
+- Invoice line editor is desktop-focused (list has the mobile card fallback).
+- "Try archiving" delete hint matches on server error wording — cosmetic brittleness.
+- i18n: new screens use inline English (matches existing Sales pages); full i18n deferred.
+- Tax-code CRUD front-end deferred (read-only tax-code picker in the invoice editor is included).
 
 ## What you (the human) need to do next
-Review + merge the PR (or hand to Akila). Optionally decide on the roadmap items above.
+Review and merge **[the PR](https://github.com/AkilaAsids/ASIDS_Accounting-/pulls)** (link in chat).
+Autonomy ended at the PR — no staging/production deploy was in scope.
 
-## Scope (3 firm lanes)
-- **Lane C** — CustomerService hardening (I3 clear-vs-omit, I4 409, debt M6/M7/M8). Gates Lane A.
-- **Lane A** — Customer REST API (`companies/{company}/customers`).
-- **Lane B** — Tax-code REST API (`companies/{company}/tax-codes`). Independent.
-
-## Known issues
-_None yet._
-
-## Where the full plan lives
-- Requirements: [docs/SALES-HTTP-API-REQUIREMENTS.md](SALES-HTTP-API-REQUIREMENTS.md)
-- Roadmap context: [docs/ROADMAP.md](ROADMAP.md) (this is the M6 customer/tax-code slice)
-- Portal: Minions Team 17
+## Note on prior status
+This file previously tracked the Milestone 6 Sales HTTP API run (Minions Team 17, merged via PR #1);
+that record lives in git history and in [ROADMAP.md](ROADMAP.md).

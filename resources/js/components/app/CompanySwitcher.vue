@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
+import { hasUnsavedChanges } from '@/composables/useUnsavedGuard'
 
 /**
  * Switches which company's books the session is working in.
@@ -10,6 +11,14 @@ import { useUiStore } from '@/stores/ui'
  * one option is noise. Switching reloads the session rather than only updating a header,
  * because the company determines the base currency and fiscal calendar that every figure on
  * screen is formatted against.
+ *
+ * This is also the one choke point that can abort a switch before it commits server-side
+ * (ADR 0013 §6, Gate-1 decision #6). A customer/invoice editor mid-edit registers itself via
+ * `useUnsavedGuard`; if any registered editor is dirty when a switch is attempted, this asks
+ * before discarding it — `window.confirm`, the established destructive-action prompt already
+ * used by `ChartOfAccountsPage.vue` / `UsersPage.vue`, rather than a new pattern for this one
+ * case. Declining leaves the switch aborted entirely: no `selectCompany` call, current company
+ * unchanged.
  */
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -18,6 +27,14 @@ const switching = ref(false)
 
 async function select(companyId: string): Promise<void> {
   if (companyId === auth.activeCompany?.id) {
+    open.value = false
+    return
+  }
+
+  if (
+    hasUnsavedChanges() &&
+    !window.confirm('Switching company discards unsaved changes. Continue?')
+  ) {
     open.value = false
     return
   }
