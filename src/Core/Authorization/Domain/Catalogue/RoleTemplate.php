@@ -117,6 +117,10 @@ final readonly class RoleTemplate
                     // drafts invoices but does not commit money to the books.
                     'sales.receipts.manage',
 
+                    // Reversing a receipt is the accountant's call for the same reason cancelling an invoice
+                    // is: undoing a posting is part of keeping the record, not day-to-day entry.
+                    'sales.receipts.cancel',
+
                     // The receivables reports, for the same reason as `accounting.reports.view` above:
                     // whoever decides a customer's credit terms is who needs to see what that decision has
                     // cost so far, and the AR reconciliation is a check on the accountant's own postings.

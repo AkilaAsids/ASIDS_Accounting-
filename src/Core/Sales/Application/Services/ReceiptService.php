@@ -10,6 +10,7 @@ use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
 use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Enums\AccountType;
 use Asids\Core\Accounting\Domain\Enums\DocumentType;
+use Asids\Core\Accounting\Domain\Enums\JournalEntryStatus;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
@@ -20,11 +21,13 @@ use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
 use Asids\Core\Sales\Application\DTOs\ReceiptData;
 use Asids\Core\Sales\Domain\Enums\SalesInvoiceStatus;
 use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeAllocated;
+use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeCancelled;
 use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeRecorded;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\CustomerReceipt;
 use Asids\Core\Sales\Domain\Models\ReceiptAllocation;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 
@@ -234,6 +237,166 @@ final readonly class ReceiptService
             }
 
             return $receipt->refresh();
+        });
+    }
+
+    /**
+     * Cancel a posted receipt, reversing its posting and restoring the invoices it paid.
+     *
+     * The counterpart to `record()`, and deliberately not its undo. Nothing is deleted and nothing about the
+     * receipt header is edited beyond the transition itself: it keeps its number, its dates and its figures,
+     * its allocation rows stay as permanent history, its original entry stays in the ledger, and a mirror entry
+     * is posted alongside. An auditor sees the document, the posting and the correction.
+     *
+     * WHICH PERIOD HAS TO BE OPEN
+     * ---------------------------
+     * The reversal's, not the receipt's. `PostingService::reverse()` dates the mirror today rather than at the
+     * original's date, because backdating a correction into a closed period is precisely what closing prevents.
+     * So a receipt from a closed month may still be cancelled today; what refuses a cancellation is today's
+     * period being closed. Checked here as well as inside the posting service so the caller is told about the
+     * *receipt* rather than about a journal entry they never asked about.
+     *
+     * BALANCE RESTORATION IS A DELTA, NEVER A SNAPSHOT (ADR 0015 §C, the correctness pivot)
+     * ------------------------------------------------------------------------------------
+     * For each invoice this receipt allocated to, its own allocation amount is subtracted from the invoice's
+     * *current* `amount_paid`, re-read through the lock — never a remembered "what the invoice looked like
+     * before this receipt". A later receipt's still-live contribution to the same invoice is therefore
+     * preserved: cancelling A when A(400)+B(600) took an invoice to Paid leaves it at 600/PartiallyPaid with B
+     * intact, not zeroed. This is `record()`'s forward `plus` run in reverse as `minus`.
+     *
+     * WHAT HOLDS UNDER CONCURRENCY
+     * ----------------------------
+     * The receipt row is locked first, then every allocated invoice in ascending id order — the same total
+     * order `record()` uses, so a cancel racing a record cannot deadlock. A second cancellation of the same
+     * receipt queues on the receipt lock, re-reads a now-cancelled row, and is refused by `alreadyCancelled()`
+     * before it can reach `PostingService::reverse()`. The lock produces the readable refusal; the finality
+     * trigger and `reverse()`'s own already-reversed guard are the backstops.
+     */
+    public function cancel(CustomerReceipt $receipt, string $reason, ?User $actor = null): CustomerReceipt
+    {
+        $reason = trim($reason);
+
+        if ($reason === '') {
+            throw ReceiptCannotBeCancelled::withoutReason($receipt->number ?? (string) $receipt->getKey());
+        }
+
+        return DB::transaction(function () use ($receipt, $reason, $actor): CustomerReceipt {
+            // Locked before anything is read, so a concurrent attempt queues here rather than racing to the
+            // finality trigger. Re-read through the lock: the in-memory instance may predate another request.
+            $locked = CustomerReceipt::query()
+                ->whereKey($receipt->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $locked->loadMissing(['company', 'journalEntry', 'allocations']);
+
+            $identifier = $locked->number ?? (string) $locked->getKey();
+
+            if ($locked->status === 'cancelled') {
+                throw ReceiptCannotBeCancelled::alreadyCancelled($identifier);
+            }
+
+            // Defensive: no third status is reachable under the two-value CHECK (Gate-1 #5).
+            if ($locked->status !== 'posted') {
+                throw ReceiptCannotBeCancelled::notPosted($identifier, $locked->status);
+            }
+
+            $entry = $locked->journalEntry;
+
+            if ($entry === null) {
+                throw ReceiptCannotBeCancelled::withoutJournalEntry($identifier);
+            }
+
+            // Two companies in one workspace share a `tenant_id`, so row level security is satisfied by either
+            // one's entries. Only this comparison stops a reversal landing in a sibling's ledger.
+            if ((string) $entry->company_id !== (string) $locked->company_id) {
+                throw ReceiptCannotBeCancelled::journalEntryOutsideCompany($identifier);
+            }
+
+            // Compared to `Posted` explicitly rather than asking `isPosted()`, which is true for a reversed
+            // entry too. Using it here would let a second cancellation reach `PostingService`, which refuses it
+            // — but with a message about a journal entry rather than about this receipt.
+            if ($entry->status !== JournalEntryStatus::Posted) {
+                throw ReceiptCannotBeCancelled::journalEntryNotReversible(
+                    $identifier,
+                    $entry->number ?? (string) $entry->getKey(),
+                    $entry->status->value,
+                );
+            }
+
+            $reversalDate = CarbonImmutable::now()->startOfDay();
+            $period = $this->calendar->periodFor($locked->company, $reversalDate);
+
+            if (! $period->acceptsPostings()) {
+                throw ReceiptCannotBeCancelled::intoClosedPeriod($identifier, $period->label, $period->status);
+            }
+
+            $currency = $locked->currency_code;
+
+            // This receipt's own allocation against each invoice, read from the untouched allocation rows —
+            // never recomputed. These are the deltas the restore subtracts.
+            /** @var array<string, Money> $allocationByInvoice */
+            $allocationByInvoice = [];
+
+            foreach ($locked->allocations as $allocation) {
+                $allocationByInvoice[(string) $allocation->sales_invoice_id] = Money::of($allocation->amount, $currency);
+            }
+
+            // Lock and re-read every allocated invoice in deterministic id order — `record()`'s ordering, run
+            // in the reverse direction, so a cancel racing a record cannot deadlock.
+            $ids = array_keys($allocationByInvoice);
+            sort($ids);
+
+            /** @var array<string, SalesInvoice> $lockedInvoices */
+            $lockedInvoices = [];
+
+            foreach ($ids as $invoiceId) {
+                $lockedInvoices[$invoiceId] = SalesInvoice::query()
+                    ->whereKey($invoiceId)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+            }
+
+            // Reverse the posting: a mirror JV, the original marked Reversed, the RCT untouched (§F).
+            $this->posting->reverse($entry, $reason, $reversalDate, $actor);
+
+            // Delta-restore each locked invoice (§C). `amount_paid` and `amount_due` are written together in
+            // one save — the `amount_due = total - amount_paid` invariant means neither can be written without
+            // the other — and these are the only mutable columns the invoice's immutability trigger permits.
+            foreach ($ids as $invoiceId) {
+                $invoice = $lockedInvoices[$invoiceId];
+                $currentPaid = Money::of($invoice->amount_paid, $currency);
+                $allocation = $allocationByInvoice[$invoiceId];
+
+                $newPaid = $currentPaid->minus($allocation);
+
+                if ($newPaid->isNegative()) {
+                    throw ReceiptCannotBeCancelled::wouldReverseBelowZero(
+                        $invoice->number ?? $invoiceId,
+                        $currentPaid->toDecimalString(),
+                        $allocation->toDecimalString(),
+                    );
+                }
+
+                $newDue = Money::of($invoice->total, $currency)->minus($newPaid);
+
+                $invoice->amount_paid = $this->decimal($newPaid);
+                $invoice->amount_due = $this->decimal($newDue);
+                $invoice->status = $newPaid->isZero()
+                    ? SalesInvoiceStatus::Issued
+                    : SalesInvoiceStatus::PartiallyPaid;
+                $invoice->save();
+            }
+
+            // One save, like recording. The tie-to-status CHECK means a status written without the metadata —
+            // or metadata without the status — is refused by the database rather than merely avoided here.
+            $locked->status = 'cancelled';
+            $locked->cancelled_at = now();
+            $locked->cancellation_reason = $reason;
+            $locked->cancelled_by_id = $actor?->getKey();
+            $locked->save();
+
+            return $locked->refresh();
         });
     }
 
