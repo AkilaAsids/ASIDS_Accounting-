@@ -218,11 +218,23 @@ describe('numbering', function (): void {
     it('numbers its journal entry from the journal voucher series, independently of the receipt series', function (): void {
         $invoice = receivableInvoice('1000.00');
 
+        // The setup invoice's own issuance already posts to the ledger, taking JV-…0001 for itself — the
+        // receipt's posting is not the first journal voucher ever, it is the next one from the *same* shared
+        // counter. (Fixed from an earlier version of this test that wrongly assumed the receipt would be
+        // JV-0001, contradicted by this file's own "counters independent" test below, which documents the
+        // shared counter explicitly.)
+        $invoiceEntryNumber = JournalEntry::query()->findOrFail($invoice->journal_entry_id)->number;
+
         $receipt = recordReceipt([(string) $invoice->getKey() => '1000.00'], '1000.00');
 
         $entry = JournalEntry::query()->findOrFail($receipt->journal_entry_id);
 
-        expect($entry->number)->toBe('JV-2026-06-0001')
+        expect($invoiceEntryNumber)->toBe('JV-2026-06-0001')
+            // The receipt is the first of its own series (RCT), but the *second* journal voucher overall —
+            // proving the two series are genuinely independent rather than the receipt secretly reusing the
+            // RCT counter for its ledger entry too.
+            ->and($receipt->number)->toBe('RCT-2026-06-0001')
+            ->and($entry->number)->toBe('JV-2026-06-0002')
             ->and($entry->document_type)->toBe(DocumentType::JournalVoucher);
     });
 
@@ -238,20 +250,34 @@ describe('numbering', function (): void {
     });
 
     it('stays gapless across several receipts, on both its own series and the journal voucher series', function (): void {
-        $numbers = [];
+        // Fixed from an earlier version that assumed each receipt's posting would be the only journal
+        // voucher in its iteration (JV-0001, 0002, 0003). Each iteration actually posts *two* journal
+        // vouchers — the setup invoice's own issuance, then the receipt — so the JV series the test must
+        // assert gaplessness over is the interleaved run of both, not a receipt-only sub-series.
+        $receiptNumbers = [];
+        $journalVoucherNumbers = [];
 
         for ($i = 0; $i < 3; $i++) {
             $invoice = receivableInvoice('100.00', date: '2026-06-'.(10 + $i));
-            $receipt = recordReceipt([(string) $invoice->getKey() => '100.00'], '100.00', date: '2026-06-'.(10 + $i));
-            $entry = JournalEntry::query()->findOrFail($receipt->journal_entry_id);
+            $journalVoucherNumbers[] = JournalEntry::query()->findOrFail($invoice->journal_entry_id)->number;
 
-            $numbers[] = [$receipt->number, $entry->number];
+            $receipt = recordReceipt([(string) $invoice->getKey() => '100.00'], '100.00', date: '2026-06-'.(10 + $i));
+            $journalVoucherNumbers[] = JournalEntry::query()->findOrFail($receipt->journal_entry_id)->number;
+
+            $receiptNumbers[] = $receipt->number;
         }
 
-        expect($numbers)->toBe([
-            ['RCT-2026-06-0001', 'JV-2026-06-0001'],
-            ['RCT-2026-06-0002', 'JV-2026-06-0002'],
-            ['RCT-2026-06-0003', 'JV-2026-06-0003'],
+        // The property this test exists to catch: the RCT series is gapless on its own, which it would not
+        // be if it secretly shared a counter with anything else.
+        expect($receiptNumbers)->toBe(['RCT-2026-06-0001', 'RCT-2026-06-0002', 'RCT-2026-06-0003']);
+
+        // The JV series is shared between invoice postings and receipt postings (Gate-1 #4: a receipt's
+        // entry reuses `JournalVoucher`), and the six postings together — three invoices, three receipts —
+        // leave *that* series gapless too.
+        expect($journalVoucherNumbers)->toBe([
+            'JV-2026-06-0001', 'JV-2026-06-0002',
+            'JV-2026-06-0003', 'JV-2026-06-0004',
+            'JV-2026-06-0005', 'JV-2026-06-0006',
         ]);
     });
 
@@ -336,16 +362,21 @@ describe('the full-allocation invariant', function (): void {
     it('refuses a receipt under-allocated against its own amount', function (): void {
         $invoice = receivableInvoice('1000.00');
 
+        // Fixed: the setup invoice's own issuance already posted one journal entry, so the invariant under
+        // test is "the refused receipt posts nothing *more*", not "the ledger is empty" — the ledger already
+        // holds the invoice's posting by the time the receipt is attempted.
+        $entriesBeforeAttempt = JournalEntry::query()->count();
+
         $exception = catchPlatformException(
             fn () => recordReceipt([(string) $invoice->getKey() => '400.00'], '1000.00')
         );
 
         expect($exception)->toBeInstanceOf(ReceiptCannotBeRecorded::class);
 
-        // Nothing written: no receipt row, no invoice movement, no posting.
+        // Nothing written by the refusal itself: no receipt row, no invoice movement, no new posting.
         expect(DB::table('customer_receipts')->count())->toBe(0)
             ->and($invoice->refresh()->amount_paid)->toBe('0.0000')
-            ->and(JournalEntry::query()->count())->toBe(0);
+            ->and(JournalEntry::query()->count())->toBe($entriesBeforeAttempt);
     });
 
     it('refuses a receipt over-allocated beyond its own amount', function (): void {
@@ -520,6 +551,10 @@ describe('refusals: the receipt itself', function (): void {
     it('refuses recording into a closed fiscal period', function (): void {
         $invoice = receivableInvoice('1000.00');
 
+        // Fixed: same setup-invoice-already-posted correction as the under-allocation test above — the
+        // baseline is captured after the invoice exists, not asserted as zero.
+        $entriesBeforeAttempt = JournalEntry::query()->count();
+
         FiscalPeriod::query()
             ->forCompany($this->company->getKey())
             ->containing(CarbonImmutable::parse('2026-06-20'))
@@ -530,7 +565,8 @@ describe('refusals: the receipt itself', function (): void {
         );
 
         expect($exception)->toBeInstanceOf(ReceiptCannotBeRecorded::class);
-        expect(JournalEntry::query()->count())->toBe(0);
+        // No new posting beyond the setup invoice's own — the refusal happens before any number is reserved.
+        expect(JournalEntry::query()->count())->toBe($entriesBeforeAttempt);
     });
 });
 
@@ -598,6 +634,10 @@ describe('refusals: which invoices may be allocated to', function (): void {
     it('refuses an invoice belonging to a different company than the receipt', function (): void {
         $second = app(CompanyService::class)->create(new CreateCompanyData(name: 'Second Books'), $this->owner);
         app(ChartTemplateService::class)->apply($second);
+        // Fixed: the second company needs its own open fiscal year before an invoice can be issued into it —
+        // without this, `issue()` refuses with `NoFiscalPeriod` before the cross-company case under test is
+        // even reached.
+        app(FiscalCalendarService::class)->openYearContaining($second, CarbonImmutable::parse('2026-06-15'));
 
         $secondCustomer = app(CustomerService::class)->create($second, new CustomerData(name: 'X', code: 'X1'));
 
@@ -652,6 +692,10 @@ describe('AC-3.2: allocations spanning more than one receivable account', functi
         $invoiceA = receivableInvoice('500.00', customerId: (string) $this->customer->getKey());
         $invoiceB = receivableInvoice('500.00', customerId: (string) $customerB->getKey());
 
+        // Fixed: issuing the two setup invoices already posts two journal entries of their own — the
+        // invariant under test is that the *map* posts nothing beyond them, not that the ledger is empty.
+        $entriesBeforeMapCall = JournalEntry::query()->count();
+
         // `$invoiceA` resolves to the system Trade Receivables account (1130); `$invoiceB`'s customer overrides
         // to 1140. Feeding both into one receipt's allocation set — bypassing the cross-customer check that
         // `ReceiptService::record()` performs earlier, by talking to the posting layer beneath it — is the
@@ -694,14 +738,19 @@ describe('AC-3.2: allocations spanning more than one receivable account', functi
         expect(fn () => app(ReceiptPostingMap::class)->for($receipt->fresh()))
             ->toThrow(ReceiptCannotBePosted::class);
 
-        // Refused rather than posted at all, on either account.
-        expect(JournalEntry::query()->count())->toBe(0);
+        // Refused rather than posted at all, on either account: no journal entry beyond the two invoices'
+        // own postings.
+        expect(JournalEntry::query()->count())->toBe($entriesBeforeMapCall);
     });
 });
 
 describe('a failed record-and-allocate leaves nothing behind', function (): void {
     it('rolls back the whole operation when posting fails after the number is reserved', function (): void {
         $invoice = receivableInvoice('1000.00');
+
+        // Fixed: the setup invoice's own issuance already posted one journal entry, so the rollback
+        // invariant is "no *new* entry survives", not "the ledger is empty".
+        $entriesBeforeAttempt = JournalEntry::query()->count();
 
         // Made to fail at the ledger, after a receipt number would already have been reserved — the
         // rollback case, mirroring `IssueInvoiceTest`'s "returns the number when the failure happens after
@@ -712,7 +761,7 @@ describe('a failed record-and-allocate leaves nothing behind', function (): void
 
         expect(DB::table('customer_receipts')->count())->toBe(0)
             ->and($invoice->refresh()->amount_paid)->toBe('0.0000')
-            ->and(JournalEntry::query()->count())->toBe(0);
+            ->and(JournalEntry::query()->count())->toBe($entriesBeforeAttempt);
 
         $sequences = DB::table('document_sequences')
             ->where('company_id', $this->company->getKey())

@@ -191,6 +191,15 @@ describe('the accountant', function (): void {
 
         expect($receipt->status)->toBe('posted');
     });
+
+    it('passes CustomerReceiptPolicy::viewAny and ::create through the gate', function (): void {
+        // Exercises the policy methods themselves, not just the raw permission string — `viewAny()` and
+        // `create()` are what a controller or a form request actually calls.
+        $accountant = receiptMemberWithRole('accountant', 'rcpt-policy-acct@acme.test');
+
+        expect($accountant->can('viewAny', CustomerReceipt::class))->toBeTrue()
+            ->and($accountant->can('create', CustomerReceipt::class))->toBeTrue();
+    });
 });
 
 describe('the bookkeeper and the viewer', function (): void {
@@ -204,6 +213,13 @@ describe('the bookkeeper and the viewer', function (): void {
         $viewer = receiptMemberWithRole('viewer', 'rcpt-view@acme.test');
 
         expect($viewer->can('sales.receipts.manage'))->toBeFalse();
+    });
+
+    it('refuses both viewAny and create through the gate', function (): void {
+        $viewer = receiptMemberWithRole('viewer', 'rcpt-policy-view@acme.test');
+
+        expect($viewer->can('viewAny', CustomerReceipt::class))->toBeFalse()
+            ->and($viewer->can('create', CustomerReceipt::class))->toBeFalse();
     });
 });
 
