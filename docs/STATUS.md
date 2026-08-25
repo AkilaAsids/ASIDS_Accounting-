@@ -11,8 +11,8 @@ and post to the ledger (Dr Bank/Cash, Cr Trade Receivables) through the existing
 | Stage | State |
 |---|---|
 | 1 · Intake | ✅ carried forward (ASAP/critical, Balanced) + slice scope confirmed |
-| 2 · Requirements | ✅ [PHASE-4-RECEIPTS-REQUIREMENTS.md](PHASE-4-RECEIPTS-REQUIREMENTS.md) — **Gate 1 AWAITING APPROVAL** |
-| 3 · Architecture | ⏳ pending Gate 1 |
+| 2 · Requirements | ✅ [PHASE-4-RECEIPTS-REQUIREMENTS.md](PHASE-4-RECEIPTS-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-25 |
+| 3 · Architecture | 🔵 in progress — Solution Architect (Opus) |
 | 4 · Build | ⏳ |
 | 5 · Review (QA ∥ Security) | ⏳ |
 | Delivery | ⏳ PR for human merge |

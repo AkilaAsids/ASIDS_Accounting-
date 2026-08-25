@@ -409,3 +409,15 @@ prose references — comments anticipating this phase, `payment_terms_days` on `
 `amount_paid`/`amount_due` columns already discussed above. There is no `Receipt`, `Payment`,
 `ReceiptAllocation`, or similar model, migration, service, policy, or controller anywhere in
 `src/Core`. This slice starts from nothing, not from a partial scaffold.
+
+## Gate 1 decisions — APPROVED 2026-08-25
+
+Human-approved resolutions to the open questions (binding for architecture and build):
+
+1. **Receipt cancellation/reversal — DEFERRED** to a follow-up sub-slice. This wave is record + allocate + post; a posted receipt is immutable for now. (Prepare the structural boundary but do not implement reversal, mirroring how M5 prepared issuing before wiring it.)
+2. **Under-allocated receipts — REJECTED.** A receipt must be fully allocated (Σ allocations = receipt amount). Over- and under-allocation both refuse. Accepting a remainder would implicitly create unallocated credit-on-account, which is deferred.
+3. **Bank/cash account — pick an existing GL asset account** (e.g. 1110/1120) per receipt; validate it is a postable asset account in the company. No new bank-account entity (that belongs to the deferred Banking phase).
+4. **Ledger posting — mirror ADR 0009.** Add `DocumentType::CustomerReceipt` for the receipt's own gapless number; the journal entry reuses `JournalVoucher`; traceability via `source_type`/`source_id` → the receipt; the existing single-post uniqueness guard prevents double posting.
+5. **HTTP surface — NONE this wave.** Domain + service layer + tests only (as invoice issuing shipped before its API). API and front-end come later.
+6. **Permission — one `sales.receipts.manage`**, granted to the accountant (matching issue/cancel being accountant-only).
+7. Concurrency: row-lock-and-re-read (as `issue()`/`cancel()`) + a DB CHECK backstop so racing receipts cannot oversell one invoice — Architect to design.
