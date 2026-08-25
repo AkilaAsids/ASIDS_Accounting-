@@ -419,3 +419,13 @@ same moment to never leave that invoice's balance wrong, in either direction.*
 6. **Risk — cross-team/file collision**, following the receipts ADR's own risk item: if another lane
    is concurrently touching `ReceiptService`, `SalesServiceProvider`, or the receipt migrations,
    coordinate before this wave's schema and service changes land.
+
+## Gate 1 decisions — APPROVED 2026-08-25
+
+1. **Balance restoration = DELTA subtraction** against the invoice's current locked state (subtract only this receipt's own allocation), NOT a snapshot restore — so a later receipt's contribution to the same invoice is preserved (cancelling A leaves B intact → PartiallyPaid, not zero). This is the binding policy.
+2. **Permission = new `sales.receipts.cancel`** (separate from `sales.receipts.manage`), accountant-only.
+3. **Cancellation reason REQUIRED** (mirror invoice cancel).
+4. **No time-window limit** beyond requiring an open reversal period (closed-period cancel refuses).
+5. **Write the dormant "not posted" defensive refusal now** (mirrors the invoice pattern).
+6. **No extra business rules** beyond the negative-balance defensive guard; **extend `CustomerReceipt::auditOnly()`** to the new metadata columns.
+7. `receipt_allocations` stay permanent history — read, never written/deleted on cancel.
