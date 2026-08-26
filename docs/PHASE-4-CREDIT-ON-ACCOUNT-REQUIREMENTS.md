@@ -400,3 +400,18 @@ intend to change to keep holding exactly as it does today.*
   absence of a fourth for this feature (§5, OQ-1).
 - `src/Core/Accounting/Domain/Catalogue/ChartTemplate.php` (`:96-109`) — today's Current Liabilities
   leaves, confirming no "Advances from Customers"/"Customer Deposits" account ships today.
+
+## Gate 1 decisions — APPROVED 2026-08-26
+
+The human approved the following, which are now **binding** on the architecture (ADR 0016) and build:
+
+1. **Accounting treatment = a NEW liability account "Customer Advances"** (a new `Account` system key + a Current-Liabilities leaf in `ChartTemplate`). The remainder posts to it: **Dr Bank = Cr Trade Receivables (allocated) + Cr Customer Advances (remainder)** — the receipt posting becomes variable-line, not the fixed two-line contract of ADR 0014 §C. (OQ-1 → Option A.)
+2. **Apply-credit IS IN SCOPE this wave** — full end-to-end: record → hold → **apply held credit to a later invoice**. Applying reclassifies **Dr Customer Advances / Cr Trade Receivables** and restores the target invoice's balance forward, the mirror of the record-side split. (OQ-2 → include now.) The apply operation's posting shape and permission are for the Architect to design (see below) and confirm at Gate 2.
+3. **A receipt must still name ≥1 invoice** — the existing empty-allocation refusal (`ReceiptCannotBeRecorded::withoutAllocations()`) stays; only a *remainder* on an otherwise-allocated receipt is newly permitted. No fully-unallocated (pure-prepayment) receipts this wave. (OQ-3 → require ≥1 invoice.)
+4. **Held credit is tracked PER-RECEIPT** (each receipt's remainder is its own credit record), consumed specifically/FIFO on apply, and delta-unwound per-record on cancel. (OQ-4 → per-receipt.)
+5. **Over-allocation stays refused** (Σ allocations > amount), unchanged from ADR 0014. (OQ-5 → confirmed.)
+6. **Cash refund of held credit is OUT of scope** (a disbursement, not an allocation). (OQ-8 → confirmed out.)
+
+**Deferred to Gate 2 (Architect proposes, human confirms):** OQ-6 the apply-credit **permission** (recommendation: a new accountant-only `sales.receipts.apply-credit` capability, following the `manage`/`cancel` split of ADR 0015 §D — not broadening `manage`); OQ-7 the apply-credit **posting/document shape** (reclassification entry drawing a `JV`, mirror of the record-side split).
+
+**Cancellation interaction (binding):** cancelling a receipt that left held credit must delta-unwind that credit record too (reverse the Customer-Advances credit), and — because apply-credit is in scope — a receipt whose held credit has since been (partly) applied needs a defensive guard analogous to `wouldReverseBelowZero()` so cancellation cannot drive a credit balance negative.
