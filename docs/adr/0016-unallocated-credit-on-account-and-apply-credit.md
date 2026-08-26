@@ -416,3 +416,15 @@ The build does not start until the human approves the following. Items are label
     - Plus confirmation of every Gate-2 PROPOSED value above (account code/name/key, table shapes, permission name, FIFO order, service placement).
 
 **STOP — Stage 4 (build) does not begin until these are approved.**
+
+## Gate 2 decision — APPROVED 2026-08-26
+
+The human approved the architecture package **as proposed** and resolved the three unresolved forks:
+
+- **(a) Backfill:** a dedicated **raw-SQL RLS-bypass migration** creates `2180 Customer Advances` for every existing company, mirroring the `2026_03_05_000003` "statement about the past" pattern with its two-assertion discipline. (NOT the `ensureSystemAccounts()` iteration.)
+- **(b) HTTP:** **deferred** to a later slice. This wave is backend domain + service + tests only; no controller/route/OpenAPI.
+- **(c) `reverseApplication()`:** **not this wave.** Known limitation accepted: once credit is applied, neither the source receipt nor the target invoice can be cancelled via the service; a mistaken application is undone by a manual JV (the interim the project accepted before ADR 0015). Document this limitation in the wave's STATUS/handover.
+
+All Gate-2 PROPOSED values are confirmed: account `2180 Customer Advances` / key `customer_advances`; the two-table `receipt_held_credits` + `credit_applications` model; variable-line receipt posting; `ReceiptService::applyCredit()` with FIFO (`receipt_date` then `number`, multi-record, explicit-source override); lock order receipts → held-credits → invoices; permission `sales.receipts.apply-credit` (accountant-only, sensitive); and the error contract (reuse `ReceiptCannotBeAllocated`/`ReceiptCannotBeRecorded`; add `insufficientCredit`, `withoutCustomerAdvancesAccount()`, `heldCreditAlreadyApplied()`).
+
+Build proceeds strictly within this ADR. Any implementation discovery that would change a decision above returns to Gate 2.
