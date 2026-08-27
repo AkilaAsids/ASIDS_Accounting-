@@ -37,7 +37,7 @@ final class ChartTemplate
      * or a removal. Companies store the version they were created from, so a correction can find
      * them.
      */
-    public const string VERSION = '2026.08-lk-sme-2';
+    public const string VERSION = '2026.08-lk-sme-3';
 
     /**
      * Shown wherever the template is offered or applied. Not optional, and not abbreviated.
@@ -104,6 +104,10 @@ final class ChartTemplate
             self::leaf('2150', 'PAYE / APIT Payable', AccountType::Liability, parent: '2100'),
             self::leaf('2160', 'EPF Payable', AccountType::Liability, parent: '2100'),
             self::leaf('2170', 'ETF Payable', AccountType::Liability, parent: '2100'),
+            // Where a customer overpayment's remainder is held: money received but not yet earned against
+            // a document. A system account, resolved by key rather than code (ADR 0016). `2180` is the
+            // first free leaf under Current Liabilities and renumbers nothing above it.
+            self::leaf('2180', 'Customer Advances', AccountType::Liability, parent: '2100', system: Account::CUSTOMER_ADVANCES),
 
             self::heading('2200', 'Non-Current Liabilities', AccountType::Liability, parent: '2000'),
             self::leaf('2210', 'Long-Term Borrowings', AccountType::Liability, parent: '2200'),
@@ -162,6 +166,9 @@ final class ChartTemplate
             // Added by Phase 3 Milestone 5. Every sales invoice debits it unless the customer names an
             // account of its own, so a company that skipped the starter chart must still receive it.
             self::leaf('1130', 'Trade Receivables', AccountType::Asset, system: Account::TRADE_RECEIVABLES),
+            // Added by ADR 0016. A company that skipped the starter chart must still be able to hold an
+            // overpayment, so the remainder account is required whether or not the template was applied.
+            self::leaf('2180', 'Customer Advances', AccountType::Liability, system: Account::CUSTOMER_ADVANCES),
         ];
     }
 

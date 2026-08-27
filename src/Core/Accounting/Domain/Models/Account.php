@@ -70,6 +70,16 @@ final class Account extends Model
      */
     public const string TRADE_RECEIVABLES = 'trade_receivables';
 
+    /**
+     * Where a receipt's excess lands when a customer pays more than the invoices it names clear.
+     *
+     * The remainder is money the company holds but has not yet earned against a document — a liability
+     * to the customer, not a reduction of the receivable. It is resolved by key rather than by code for
+     * the same reason as the others: a company may renumber freely, and the remainder still has to find
+     * its home account afterwards. Added by ADR 0016 (unallocated credit on account).
+     */
+    public const string CUSTOMER_ADVANCES = 'customer_advances';
+
     protected $table = 'accounts';
 
     /** @var list<string> */
