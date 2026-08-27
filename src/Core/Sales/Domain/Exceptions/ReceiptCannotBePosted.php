@@ -110,4 +110,20 @@ final class ReceiptCannotBePosted extends BusinessRuleViolation
             ['distinct' => $distinct],
         );
     }
+
+    /**
+     * The company has no Customer Advances account to hold a remainder (ADR 0016 §A).
+     *
+     * A receipt that leaves a remainder credits `Customer Advances`, resolved by system key. Every company gets
+     * one from the template or the backfill, so this is reachable only if that account was removed or never
+     * provisioned — the mirror of `InvoiceCannotBePosted::withoutReceivableAccount()` on the receipt side.
+     */
+    public static function withoutCustomerAdvancesAccount(): self
+    {
+        return new self(
+            'This company has no Customer Advances account, so the unallocated remainder of this receipt has '
+            .'nowhere to land. Provision the Customer Advances system account, then record the receipt.',
+            'receipt-without-customer-advances-account',
+        );
+    }
 }

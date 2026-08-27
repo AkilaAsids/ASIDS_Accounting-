@@ -26,6 +26,7 @@ use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeRecorded;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\CustomerReceipt;
 use Asids\Core\Sales\Domain\Models\ReceiptAllocation;
+use Asids\Core\Sales\Domain\Models\ReceiptHeldCredit;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -81,6 +82,7 @@ final readonly class ReceiptService
     public function record(Company $company, ReceiptData $data, ?User $actor = null): CustomerReceipt
     {
         $currency = $company->base_currency_code;
+        $precision = $company->currency_precision;
 
         // 1. The amount, as money. Positive, or refused as a domain error rather than a raw CHECK (AC-1.2).
         $amount = Money::of($data->amount, $currency);
@@ -89,6 +91,10 @@ final readonly class ReceiptService
             throw ReceiptCannotBeRecorded::zeroOrNegativeAmount($data->amount);
         }
 
+        // The amount must already be at the company's currency precision (ADR 0016 Gate-2 amendment). A finer
+        // value would create a remainder the ledger — which posts at currency_precision — could never match.
+        $this->assertAtCurrencyPrecision($amount, $precision);
+
         // 2. The customer, provided it belongs to this company (AC-1.3).
         $customer = $this->resolveCustomer($company, $data->customerId);
 
@@ -96,10 +102,11 @@ final readonly class ReceiptService
         $bankAccount = $this->resolveBankAccount($company, $data->bankAccountId);
 
         // 4. The allocation set, against the pre-read invoices — a readable early refusal before any lock.
-        //    The authoritative per-invoice cap is re-checked under the lock below (AC-2.5).
-        $allocationAmounts = $this->allocationAmounts($data, $currency);
+        //    The authoritative per-invoice cap is re-checked under the lock below (AC-2.5). Each line is held
+        //    to the currency precision for the same reason as the amount.
+        $allocationAmounts = $this->allocationAmounts($data, $currency, $precision);
 
-        $this->assertFullyAllocated($allocationAmounts, $amount);
+        $this->assertNotOverAllocated($allocationAmounts, $amount);
 
         $invoices = $this->loadInvoices(array_keys($allocationAmounts));
 
@@ -117,7 +124,7 @@ final readonly class ReceiptService
         $branchId = $this->resolveBranchId($company, $data->branchId);
 
         return DB::transaction(function () use (
-            $company, $data, $customer, $bankAccount, $amount, $allocationAmounts, $period, $branchId, $currency, $actor,
+            $company, $data, $customer, $bankAccount, $amount, $allocationAmounts, $period, $branchId, $currency, $precision, $actor,
         ): CustomerReceipt {
             // 6. Lock and re-read every target invoice, in deterministic id order to prevent deadlock between
             //    two multi-invoice receipts. The figure the caller saw is never trusted.
@@ -234,6 +241,38 @@ final readonly class ReceiptService
                     ? SalesInvoiceStatus::Paid
                     : SalesInvoiceStatus::PartiallyPaid;
                 $invoice->save();
+            }
+
+            // 12. Hold the remainder as customer advances (ADR 0016 §C). The remainder is `amount − Σ
+            //     allocations`, non-negative by construction because over-allocation was refused above. When it
+            //     is zero no record is created — identical to a fully-allocated receipt — and the DB's
+            //     `original_amount > 0` CHECK is the backstop. The GL side of this remainder is the Customer
+            //     Advances credit line the posting map already emitted.
+            $allocated = array_reduce(
+                $allocationAmounts,
+                static fn (Money $carry, Money $line): Money => $carry->plus($line),
+                Money::zero($currency),
+            );
+
+            // Held at the company's currency precision, so the subledger record and the Customer Advances
+            // posting line (also at currency_precision) agree exactly and the entry balances (ADR 0016 Gate-2
+            // amendment). A no-op when amount and allocations are already at precision — which the input
+            // validation above guarantees — but applied explicitly so the invariant does not depend on it.
+            $remainder = $amount->minus($allocated)->roundedTo($precision);
+
+            if ($remainder->isPositive()) {
+                $heldCredit = new ReceiptHeldCredit;
+                $heldCredit->setAttribute($heldCredit->getKeyName(), $heldCredit->newUniqueId());
+                $heldCredit->company_id = $company->getKey();
+                $heldCredit->customer_id = $customer->getKey();
+                $heldCredit->customer_receipt_id = $receipt->getKey();
+                $heldCredit->currency_code = $currency;
+                $heldCredit->original_amount = $this->decimal($remainder);
+                $heldCredit->applied_amount = $this->decimal(Money::zero($currency));
+                $heldCredit->remaining_amount = $this->decimal($remainder);
+                $heldCredit->status = ReceiptHeldCredit::STATUS_ACTIVE;
+                $heldCredit->created_by_id = $actor?->getKey();
+                $heldCredit->save();
             }
 
             return $receipt->refresh();
@@ -409,7 +448,7 @@ final readonly class ReceiptService
      *
      * @return array<string, Money>
      */
-    private function allocationAmounts(ReceiptData $data, string $currency): array
+    private function allocationAmounts(ReceiptData $data, string $currency, int $precision): array
     {
         if ($data->allocations === []) {
             throw ReceiptCannotBeRecorded::withoutAllocations();
@@ -425,6 +464,10 @@ final readonly class ReceiptService
                 throw ReceiptCannotBeAllocated::zeroOrNegativeLine($allocation->salesInvoiceId, $allocation->amount);
             }
 
+            // Held to the currency precision, like the receipt amount (ADR 0016 Gate-2 amendment): a finer
+            // allocation could leave a remainder the ledger cannot represent.
+            $this->assertAtCurrencyPrecision($amount, $precision);
+
             $amounts[$allocation->salesInvoiceId] = isset($amounts[$allocation->salesInvoiceId])
                 ? $amounts[$allocation->salesInvoiceId]->plus($amount)
                 : $amount;
@@ -434,9 +477,31 @@ final readonly class ReceiptService
     }
 
     /**
+     * Refuse an amount finer than the company's currency precision (ADR 0016 Gate-2 amendment).
+     *
+     * `roundedTo($precision)` at the currency's own precision is idempotent for a value already at it, so the
+     * equality holds exactly when the amount has no sub-precision digits. Refused rather than rounded, so a
+     * mistyped `1000.3333` in a two-decimal currency is corrected at the source rather than posting a figure
+     * that disagrees with what was entered.
+     */
+    private function assertAtCurrencyPrecision(Money $amount, int $precision): void
+    {
+        if (! $amount->roundedTo($precision)->equals($amount)) {
+            throw ReceiptCannotBeRecorded::amountExceedsCurrencyPrecision($amount->toDecimalString(), $precision);
+        }
+    }
+
+    /**
+     * Refuse only over-allocation (ADR 0016 §C, formerly `assertFullyAllocated`).
+     *
+     * `Σ allocations > amount` applies more than was received and still refuses (Gate-1 #5). `Σ ≤ amount` is
+     * accepted: an exact allocation posts two lines as before, and a shortfall leaves a remainder held as
+     * customer advances (ADR 0016). The empty-allocation refusal stays separate (`allocationAmounts()`,
+     * Gate-1 #3) — a remainder is only ever permitted on an otherwise-allocated receipt.
+     *
      * @param  array<string, Money>  $allocationAmounts
      */
-    private function assertFullyAllocated(array $allocationAmounts, Money $amount): void
+    private function assertNotOverAllocated(array $allocationAmounts, Money $amount): void
     {
         $allocated = array_reduce(
             $allocationAmounts,
@@ -444,8 +509,8 @@ final readonly class ReceiptService
             Money::zero($amount->currency),
         );
 
-        if (! $allocated->equals($amount)) {
-            throw ReceiptCannotBeRecorded::overOrUnderAllocated(
+        if ($allocated->isGreaterThan($amount)) {
+            throw ReceiptCannotBeRecorded::overAllocated(
                 $allocated->toDecimalString(),
                 $amount->toDecimalString(),
             );

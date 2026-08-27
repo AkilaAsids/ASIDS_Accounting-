@@ -246,19 +246,45 @@ describe('a receipt with a remainder is accepted and held', function (): void {
             ->and($held->remaining_amount)->toBe('200.0000');
     });
 
-    it('holds the remainder at exact four-decimal precision, never rounded', function (): void {
-        // NFR exact Money math — the remainder is amount − Σalloc summed, not recomputed.
+    it('refuses an amount finer than the currency precision', function (): void {
+        // ADR 0016 Gate-2 amendment: `1000.3333` is not an amount anyone can pay in a two-decimal currency,
+        // and accepting it would create a remainder the ledger (which posts at currency_precision) could never
+        // match. Refused at record(), so no phantom remainder is ever held.
         $invoice = holdSuiteInvoice('900.00');
 
-        $receipt = holdSuiteReceipt([(string) $invoice->getKey() => '700.1111'], '1000.3333');
+        $exception = catchPlatformException(
+            fn () => holdSuiteReceipt([(string) $invoice->getKey() => '700.1111'], '1000.3333')
+        );
+
+        expect($exception)->toBeInstanceOf(ReceiptCannotBeRecorded::class)
+            ->and($exception->problemCode())->toBe('receipt-amount-exceeds-currency-precision');
+        expect(DB::table('customer_receipts')->count())->toBe(0);
+    });
+
+    it('holds the remainder at the currency precision, consistent with the ledger', function (): void {
+        // ADR 0016 Gate-2 amendment: held credit lives at the company's currency_precision, so the subledger
+        // record and the Customer Advances posting line agree exactly and the entry balances. (Replaces the
+        // former 4dp case, whose 1000.3333/700.1111 input is now refused above.)
+        $invoice = holdSuiteInvoice('900.00');
+
+        $receipt = holdSuiteReceipt([(string) $invoice->getKey() => '700.10'], '1000.25'); // remainder 300.15.
 
         $held = heldCreditFor((string) $receipt->getKey());
 
-        expect($held->original_amount)->toBe('300.2222')
-            ->and($held->remaining_amount)->toBe('300.2222')
-            ->and((float) JournalEntry::query()->with('lines')->findOrFail($receipt->journal_entry_id)
-                ->lines->keyBy('account_id')[holdSuiteAdvancesAccount()->getKey()]->credit)
-            ->toBe(300.2222);
+        $entry = JournalEntry::query()->with('lines')->findOrFail($receipt->journal_entry_id);
+        $advancesCredit = $entry->lines->keyBy('account_id')[holdSuiteAdvancesAccount()->getKey()]->credit;
+
+        $debits = $entry->lines->sum(fn ($line): float => (float) $line->debit);
+        $credits = $entry->lines->sum(fn ($line): float => (float) $line->credit);
+
+        expect($held->original_amount)->toBe('300.1500')
+            ->and($held->remaining_amount)->toBe('300.1500')
+            // The posting line equals the held-credit record exactly — subledger and ledger agree.
+            ->and((float) $advancesCredit)->toBe(300.15)
+            ->and((float) $advancesCredit)->toBe((float) $held->original_amount)
+            // And the entry balances at the currency precision.
+            ->and($debits)->toBe($credits)
+            ->and($debits)->toBe(1000.25);
     });
 
     it('tracks credit per receipt: two remainder receipts produce two distinct rows', function (): void {
