@@ -428,3 +428,16 @@ The human approved the architecture package **as proposed** and resolved the thr
 All Gate-2 PROPOSED values are confirmed: account `2180 Customer Advances` / key `customer_advances`; the two-table `receipt_held_credits` + `credit_applications` model; variable-line receipt posting; `ReceiptService::applyCredit()` with FIFO (`receipt_date` then `number`, multi-record, explicit-source override); lock order receipts → held-credits → invoices; permission `sales.receipts.apply-credit` (accountant-only, sensitive); and the error contract (reuse `ReceiptCannotBeAllocated`/`ReceiptCannotBeRecorded`; add `insufficientCredit`, `withoutCustomerAdvancesAccount()`, `heldCreditAlreadyApplied()`).
 
 Build proceeds strictly within this ADR. Any implementation discovery that would change a decision above returns to Gate 2.
+
+## Gate 2 amendment — APPROVED 2026-08-27 (precision reconciliation)
+
+**Discovery during Stage 3 build:** `JournalService::writeLines` deliberately rounds every posted line to the company's `currency_precision` (its comment: "the ledger holds amounts that exist in the currency"). §C's "exact `Money` at `Money::SCALE` (4dp)" was never reconciled with this, so a sub-currency-precision remainder (e.g. `300.2222`) is held at 4dp in the subledger but posts to the ledger at `300.22` — a phantom the customer can never pay. Returned to Gate 2 per the wave's gate policy.
+
+**Decision:** **Held credit lives at the company's `currency_precision`, consistent with the ledger** (amends §C — `currency_precision`, not `Money::SCALE`, for the persisted held-credit amounts and the posting).
+
+1. The remainder is computed with exact `Money` math, then **rounded to `currency_precision`** for BOTH the `receipt_held_credits` record and the Customer Advances posting line, so subledger and ledger agree exactly and every entry balances.
+2. **Input validation:** receipt `amount` and each allocation must already be at `currency_precision` — reject sub-precision inputs at `record()` (a receipt of `1000.3333` in a 2dp currency is not a real amount). This closes the door on 4dp inputs producing a phantom remainder.
+3. **No change to shared `JournalService`** — the ledger's rounding is correct and untouched.
+4. The Stage-3 acceptance test's precision case is updated to realistic `currency_precision` inputs/expectations (QA re-verifies independently).
+
+Everything else in ADR 0016 stands. Build resumes within this amended ADR.
