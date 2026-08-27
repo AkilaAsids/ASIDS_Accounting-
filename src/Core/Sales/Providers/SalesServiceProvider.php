@@ -15,6 +15,7 @@ use Asids\Core\Sales\Application\Services\TaxCodeService;
 use Asids\Core\Sales\Application\Services\TaxRateResolver;
 use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
+use Asids\Core\Sales\Domain\Models\CreditApplication;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\CustomerReceipt;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
@@ -115,6 +116,9 @@ final class SalesServiceProvider extends ServiceProvider
             TaxCode::MORPH_ALIAS => TaxCode::class,
             SalesInvoice::MORPH_ALIAS => SalesInvoice::class,
             CustomerReceipt::MORPH_ALIAS => CustomerReceipt::class,
+            // Each apply-credit event's reclassification JV cites its `credit_application` as source
+            // (ADR 0016 §D); `SourceDocument::for()` refuses an unmapped model.
+            CreditApplication::MORPH_ALIAS => CreditApplication::class,
         ]);
     }
 }
