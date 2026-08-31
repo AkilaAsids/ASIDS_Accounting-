@@ -37,7 +37,7 @@ final class ChartTemplate
      * or a removal. Companies store the version they were created from, so a correction can find
      * them.
      */
-    public const string VERSION = '2026.08-lk-sme-3';
+    public const string VERSION = '2026.08-lk-sme-4';
 
     /**
      * Shown wherever the template is offered or applied. Not optional, and not abbreviated.
@@ -86,6 +86,11 @@ final class ChartTemplate
             // Input VAT is an asset — it is recoverable from the authority. Which account the tax
             // engine posts to is configured in settings, not fixed here.
             self::leaf('1170', 'Input VAT Recoverable', AccountType::Asset, parent: '1100'),
+            // Where the income tax a customer withholds on a receipt is held: recoverable against the company's
+            // own income tax, an asset, resolved by key rather than code (ADR 0017). Its nearest sibling in kind
+            // is `1170` — both are "recoverable from the authority" assets — and `1180` is the first free leaf
+            // under Current Assets, renumbering nothing above it.
+            self::leaf('1180', 'WHT Receivable', AccountType::Asset, parent: '1100', system: Account::WHT_RECEIVABLE),
 
             self::heading('1200', 'Non-Current Assets', AccountType::Asset, parent: '1000'),
             self::leaf('1210', 'Property, Plant and Equipment', AccountType::Asset, parent: '1200'),
@@ -169,6 +174,10 @@ final class ChartTemplate
             // Added by ADR 0016. A company that skipped the starter chart must still be able to hold an
             // overpayment, so the remainder account is required whether or not the template was applied.
             self::leaf('2180', 'Customer Advances', AccountType::Liability, system: Account::CUSTOMER_ADVANCES),
+            // Added by ADR 0017. A company that skipped the starter chart must still be able to record a receipt
+            // net of withholding tax, so the WHT Receivable account is required whether or not the template was
+            // applied.
+            self::leaf('1180', 'WHT Receivable', AccountType::Asset, system: Account::WHT_RECEIVABLE),
         ];
     }
 

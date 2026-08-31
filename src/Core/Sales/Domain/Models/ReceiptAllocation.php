@@ -24,6 +24,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $customer_receipt_id
  * @property string $sales_invoice_id
  * @property numeric-string $amount
+ * @property numeric-string $wht_amount
+ * @property string|null $wht_certificate_reference
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  * @property-read CustomerReceipt $receipt
@@ -60,6 +62,11 @@ final class ReceiptAllocation extends Model
         return Money::of($this->amount, $currency);
     }
 
+    public function whtMoney(string $currency): Money
+    {
+        return Money::of($this->wht_amount, $currency);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -67,6 +74,7 @@ final class ReceiptAllocation extends Model
     {
         return [
             'amount' => 'decimal:4',
+            'wht_amount' => 'decimal:4',
         ];
     }
 }

@@ -110,7 +110,7 @@ describe('the system key', function (): void {
 describe('the chart template', function (): void {
     it('advances its version for the added account', function (): void {
         // ChartTemplate::VERSION's own contract: bump on any addition. Gate-2 APPROVED the target value.
-        expect(ChartTemplate::VERSION)->toBe('2026.08-lk-sme-3');
+        expect(ChartTemplate::VERSION)->toBe('2026.08-lk-sme-4');
     });
 
     it('lists 2180 Customer Advances as a required system account', function (): void {

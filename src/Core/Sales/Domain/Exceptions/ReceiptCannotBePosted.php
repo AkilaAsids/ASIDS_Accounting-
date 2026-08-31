@@ -126,4 +126,21 @@ final class ReceiptCannotBePosted extends BusinessRuleViolation
             'receipt-without-customer-advances-account',
         );
     }
+
+    /**
+     * The company has no WHT Receivable account to hold withheld tax (ADR 0017 §A).
+     *
+     * A receipt carrying withholding debits `WHT Receivable`, resolved by system key. Every company gets one
+     * from the template or the backfill, so this is reachable only if that account was removed or never
+     * provisioned — the mirror of `withoutCustomerAdvancesAccount()`. Resolved only when `Σ wht > 0`, so a
+     * company lacking it can still record ordinary (non-WHT) receipts.
+     */
+    public static function withoutWhtReceivableAccount(): self
+    {
+        return new self(
+            'This company has no WHT Receivable account, so the tax withheld on this receipt has nowhere to '
+            .'land. Provision the WHT Receivable system account, then record the receipt.',
+            'receipt-without-wht-receivable-account',
+        );
+    }
 }

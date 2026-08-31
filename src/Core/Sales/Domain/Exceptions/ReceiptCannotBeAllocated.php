@@ -126,6 +126,49 @@ final class ReceiptCannotBeAllocated extends BusinessRuleViolation
     }
 
     /**
+     * The withholding tax on an allocation is negative (ADR 0017 §D).
+     *
+     * The readable refusal ahead of the same-row `wht_amount >= 0` CHECK, following the `zeroOrNegativeLine()`
+     * reasoning: a zero withholding is simply "no WHT", but a negative one would fabricate a credit — un-paying
+     * the invoice through the ledger.
+     */
+    public static function negativeWithholding(string $identifier, string $whtAmount): self
+    {
+        return new self(
+            sprintf(
+                'The withholding of %s on invoice %s is negative. Withholding tax is never negative — a zero or '
+                .'omitted figure means none was withheld.',
+                $whtAmount,
+                $identifier,
+            ),
+            'receipt-allocation-withholding-negative',
+            ['invoice' => $identifier, 'wht_amount' => $whtAmount],
+        );
+    }
+
+    /**
+     * The withholding tax on an allocation is larger than the gross AR it is withheld against (ADR 0017 §D).
+     *
+     * The readable refusal ahead of the same-row `wht_amount <= amount` CHECK, mirroring how `exceedsAmountDue()`
+     * precedes the invoice-level CHECK. A customer cannot withhold more tax than the gross amount they are
+     * settling (Gate-1 #2).
+     */
+    public static function withholdingExceedsAllocation(string $identifier, string $whtAmount, string $amount): self
+    {
+        return new self(
+            sprintf(
+                'The withholding of %s on invoice %s is more than the %s allocated to it. Withholding tax cannot '
+                .'exceed the gross amount it is withheld against.',
+                $whtAmount,
+                $identifier,
+                $amount,
+            ),
+            'receipt-allocation-withholding-exceeds-allocation',
+            ['invoice' => $identifier, 'wht_amount' => $whtAmount, 'amount' => $amount],
+        );
+    }
+
+    /**
      * The named invoice does not exist in this workspace at all.
      */
     public static function unknownInvoice(string $identifier): self

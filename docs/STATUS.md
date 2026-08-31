@@ -1,33 +1,31 @@
-# Project status — Phase 4 credit on account (Minions Team 4)
+# Project status — Phase 4 withholding tax on receipt (Minions Team 5)
 
-**Last updated:** 2026-08-31 · **Branch:** `feature/phase4-credit-on-account` · **Base:** `feature/phase4-cancellation` (stacked)
+**Last updated:** 2026-08-31 · **Branch:** `feature/phase4-withholding-tax` · **Base:** `feature/phase4-credit-on-account` (stacked)
 
 ## Where we are
-Wave 4 **delivered**: unallocated credit on account + apply-credit. A receipt may leave a remainder
-(Σ allocations < amount, ≥1 invoice still required) held as **Customer Advances** credit, later
-**applied** to another invoice (FIFO or explicit source). Backend wave (no HTTP). Delivered as PR #5.
+Wave 5 **delivered**: withholding tax (WHT) on customer receipts. A customer withholds tax and pays net;
+the invoice's AR settles in full — `Dr Bank(net) + Dr WHT Receivable = Cr AR(gross)`, coexisting with
+ADR 0016's variable-line posting. Backend wave (no HTTP, no new permission). Delivered as PR #6.
 
 | Stage | State |
 |---|---|
 | 1 · Intake | ✅ carried forward |
-| 2 · Requirements | ✅ Gate 1 APPROVED 2026-08-26 |
-| 3 · Architecture (ADR 0016) | ✅ Gate 2 APPROVED 2026-08-26 (+ currency_precision amendment; + invoice-cancel guard reorder approved 2026-08-31) |
-| 4 · Build | ✅ 6 stages test-first (Opus) — `24cbb10`,`f91f25e`,`f3982e9`,`9289a67`,`08eddd1`,`b5571db` |
-| 5 · Review (QA ∥ Security) | ✅ **both PASS** — 0 blockers, 0 should-fixes |
-| Delivery | ✅ **PR #5 opened** (base `feature/phase4-cancellation`) — autonomy ends here |
+| 2 · Requirements | ✅ Gate 1 APPROVED 2026-08-31 |
+| 3 · Architecture (ADR 0017) | ✅ Gate 2 APPROVED 2026-08-31 |
+| 4 · Build | ✅ 4 stages test-first (Opus) — `1e550eb`(RED),`af54f44`,`c2e4955`,`fef46ea` |
+| 5 · Review (QA ∥ Security) | ✅ Security **PASS**; QA **PASS-WITH-FIXES** → 2 stale-test fixes applied, now green |
+| Delivery | ✅ **PR #6 opened** (base `feature/phase4-credit-on-account`) |
 
 ## Result
-- **Tests:** 1,248 green — wave suites 79, full Sales 972, Accounting 275, +1 QA-added coverage test. **0 regressions.** Pint + PHPStan clean.
-- **Reviews:** Security **PASS**, QA **PASS**. Money integrity (subledger==ledger @ currency_precision), FIFO, concurrency (no over-consume), tenant/company isolation, cancellation safety, and the `b5571db` invoice-cancel guard reorder all verified.
-- **Delivered:** `2180 Customer Advances` account (+ backfill); `receipt_held_credits` + `credit_applications` (RLS, immutability); variable-line receipt posting; `ReceiptService::applyCredit()` (FIFO/explicit); cancellation interaction; `sales.receipts.apply-credit` permission/policy.
+- **Tests:** 40 WHT + full Sales 999 + Accounting green after the 2 stale-test fixes; **0 production regressions** (Σwht=0 byte-identical). Pint + PHPStan clean. QA added a `wht==allocation` boundary test.
+- **Reviews:** Security **PASS** (0 blockers, 2 informational nits — deliberate boundaries). QA **PASS-WITH-FIXES**: the 2 fixes were stale Accounting tests (VERSION pin `-3`→`-4`; API test off the now-provisioned `1180` → `1190`), not production defects — applied + a lesson written to `.minions/memory/backend_engineer.md`.
+- **Delivered:** `1180 WHT Receivable` account (+ backfill); per-allocation `wht_amount`/`wht_certificate_reference`; settlement invariant (gross may exceed net cash only when WHT covers it); `Dr Bank net + Dr WHT = Cr AR gross` posting; cancellation reverses WHT via the generic mirror (no new code).
 
-## Known limitations / follow-ups (accepted, non-blocking)
-1. **No `reverseApplication()`** this wave (Gate 2): once credit is applied, neither the source receipt nor the target invoice can be cancelled via the service — interim remedy is a manual JV.
-2. **No HTTP surface** this wave (Gate 2): apply-credit REST route deferred to a later slice; that slice must resolve the FIFO-path authorization target (Security nit #2).
-3. **Defensive hardening (Security nit #1):** `applyCredit()` advances the invoice by `$requested`; add a post-loop `assert remaining==0` / advance-by-sum-of-consumed as belt-and-braces on the money path.
+## Known limitations (accepted)
+- 100%-withheld / zero-net-cash receipt refused by design (manual JV); pure-WHT adjustments out of scope this wave.
 
 ## Related (stacked, all open)
-- PR #2 (front-end) · PR #3 (receipts) · PR #4 (cancellation) · **PR #5 (credit-on-account)**. Merge bottom-up.
+- PR #2 (front-end) · PR #3 (receipts) · PR #4 (cancellation) · PR #5 (credit-on-account) · **PR #6 (WHT)**. Merge bottom-up.
 
 ## What you (the human) need to do next
-Nothing blocking. When ready, review/merge the PR chain in order. **Next wave (5, withholding tax on receipt)** is opening now and will STOP at Gate 1 for your approval. Prod deploy (Gate 3) always needs you; none in scope.
+Nothing blocking. Review/merge the PR chain in order when ready. **Phase 5 (Purchasing)** opens next and will STOP at Gate 1. Prod deploy (Gate 3) always needs you; none in scope. **Phase 4 (Payments) is now functionally complete** across receipts, allocation, cancellation, credit-on-account, and WHT.
