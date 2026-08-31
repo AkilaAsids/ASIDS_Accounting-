@@ -336,3 +336,15 @@ chosen).
 *Prepared by the Business Analyst. Every requirement above cites the customer-domain source it
 mirrors; no architecture, stack or module-placement decision is made — those are Gate 2 (Architect)
 questions, listed in §6 for the human to answer at Gate 1.*
+
+## Gate 1 decisions — APPROVED 2026-08-31
+
+Binding on the architecture (ADR 0018) and build:
+
+1. **(a) Module placement — a NEW `src/Core/Purchasing/` bounded context** with its own `ModuleServiceProvider` entry (depends on Accounting the way Sales does; does not depend on Sales). Not folded under Sales.
+2. **(b) Permission namespace `purchasing.suppliers.{view,manage}`**, granted to the SAME roles that hold `sales.customers.*` today — accountant + bookkeeper (manage), viewer (read-only). No new dedicated purchasing role this phase.
+3. **(c) Supplier coding — `S-` prefix, non-gapless, company-scoped** (mirrors the customer `C-` convention; gapless numbering is for documents like bills, not master-data codes).
+4. **(d) Fields — core + TIN now, defer the rest.** Carry name, code, contact, payment terms, and **`tax_identification_number`** now (pre-provisions for Wave 8 supplier-WHT / compliance, mirroring how `tax_codes.input_account_id` was pre-provisioned for this phase). **Defer** the default payable/expense account and `credit_limit` to Wave 7 (bills), which defines their real need.
+5. **(e) Domain-only — NO HTTP this slice.** Model, service, policy, permissions, factory, and a **dormant `PayableBalanceProbe` seam** (mirroring `ReceivableBalanceProbe`/`NoReceivables`), written and tested now but not bound for real until Wave 7 ships bills. REST surface deferred to a later dedicated slice, mirroring the customer M2 → HTTP gap.
+
+**Phase 5 wave breakdown (proposed ordering):** Wave 6 supplier domain (this slice) → Wave 7 bills/purchase invoices (new `DocumentType` case, gapless numbering, ledger posting, first use of `tax_codes.input_account_id`/input VAT) → Wave 8 supplier payments + allocation + WHT-on-payment. Each its own gated wave.
