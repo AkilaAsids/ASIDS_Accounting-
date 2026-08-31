@@ -148,3 +148,17 @@ Consolidated below verbatim for the Delivery Manager. Every item frames options;
 ---
 
 **This document does not authorize any build.** Stage 2 (this document) is followed by Gate 1 (human approval of the open questions in §5), then Gate 2 (Architect design), then build.
+
+## Gate 1 decisions — APPROVED 2026-08-31
+
+Binding on the architecture (ADR 0017) and build:
+
+1. **WHT account = a NEW system account** — "WHT Receivable" (Advance Income Tax Recoverable), a Current-Asset leaf in `ChartTemplate` + a new `Account` system key, auto-provisioned for new companies and backfilled for existing ones (mirror `Input VAT Recoverable` / the `2180 Customer Advances` ADR 0016 §A backfill). (OQ-1 → i.)
+2. **WHT amount is CALLER-SUPPLIED** — the accountant enters the withheld amount from the customer's remittance advice / WHT certificate. No rate table, no reuse of `tax_codes`. Validated: `≥ 0`, `≤ the allocation it applies to`, at `currency_precision`. (OQ-2 → ii; the highest-uncertainty fork, resolved to the simplest faithful option.)
+3. **WHT is PER-ALLOCATION** — each `receipt_allocation` line may carry its own WHT (and certificate reference); a receipt settling several invoices can withhold differently per invoice. Each invoice's gross AR settled = its allocation; posting Dr Bank(net) + Dr WHT-Receivable = Cr AR(gross) per the receipt's single entry. (OQ-3 → per-allocation.)
+4. **WHT never touches the Customer Advances remainder** — it applies only to allocated (invoiced) portions. (OQ-4 → confirmed.)
+5. **Certificate reference = a simple optional field** this wave (not a structured register — that is a later compliance-pack concern). (OQ-5 → simple field.)
+6. **Permission = reuse `sales.receipts.manage`** — recording WHT is an attribute of the same record action, not a distinct capability. (OQ-6 → reuse.)
+7. Supplier-side WHT and IRD filing remain OUT of scope.
+
+**Deferred to Gate 2 (Architect proposes, human confirms):** OQ-1 the account code/name; OQ-7 the schema shape (columns on `receipt_allocations` vs a small side table) — leaning columns since WHT posts once inside the receipt's own entry (no ADR-0016-style second-posting forcing constraint); the exact posting-map extension and the immutability-trigger update for any new WHT columns; how "allocation amount" relates to gross-vs-net given per-allocation WHT.
