@@ -392,3 +392,17 @@ The build does not start until the human approves the following. Items are label
     - Plus confirmation of every Gate-2 PROPOSED value above (account code/name/key, the two columns and CHECKs, the `settlement` invariant and the newly-accepted `Σ alloc > amount` state, the DTO fields, the exception factories, the migration filenames, the four stages).
 
 **STOP — Stage 4 (build) does not begin until these are approved.**
+
+## Gate 2 decision — APPROVED 2026-08-31
+
+The human approved the architecture package **as proposed**:
+
+- **Account `1180 WHT Receivable`** (Asset, normal balance Debit), system key `Account::WHT_RECEIVABLE = 'wht_receivable'`, in `ChartTemplate::accounts()` + `requiredSystemAccounts()`, `VERSION → 2026.08-lk-sme-4`.
+- **Per-allocation columns** on `receipt_allocations`: `wht_amount numeric(19,4) NOT NULL DEFAULT 0` (CHECK `>= 0` and `<= amount`) and `wht_certificate_reference varchar(120) NULL`. No side table; no immutability-trigger change (the unconditional allocation freeze already covers them).
+- **Settlement invariant CONFIRMED:** `settlement = amount + Σ wht`; over-allocation refuses `Σ allocations > settlement`; `remainder = settlement − Σ allocations`. The **newly-accepted state is approved** — `Σ allocations > amount` is valid exactly when WHT covers the gap (`Σ alloc ≤ amount + Σ wht`). `allocation.amount` keeps its gross meaning (no semantics change). Byte-identical at `Σ wht = 0`.
+- **Posting:** `Dr Bank(net) + Dr WHT Receivable(Σ wht) = Cr Trade Receivables(Σ alloc gross) [+ Cr Customer Advances(remainder)]`, at `currency_precision`.
+- **Fork (a) — certificate reference INDEPENDENT of wht_amount** (no cross-field constraint). (OQ resolved.)
+- **Fork (b) — backfill = raw-SQL create-not-stamp**, mirroring ADR 0016 §A.
+- No new permission (reuse `sales.receipts.manage`); no HTTP; cancellation reuses the generic whole-entry mirror; apply-credit unaffected.
+
+Build proceeds strictly within this ADR (4 stages, test-first). Any implementation discovery that would change a decision above returns to Gate 2.
