@@ -125,7 +125,7 @@ describe('the chart of accounts endpoint', function (): void {
 
     it('creates an account', function (): void {
         $response = asAccounting($this->accountant, 'POST', companyUri('accounts'), [
-            'code' => '1180',
+            'code' => '1190',
             'name' => 'Petty Cash',
             'type' => 'asset',
         ]);
@@ -152,7 +152,7 @@ describe('the chart of accounts endpoint', function (): void {
 
     it('does not accept a normal balance from the client', function (): void {
         asAccounting($this->accountant, 'POST', companyUri('accounts'), [
-            'code' => '1180',
+            'code' => '1190',
             'name' => 'Petty Cash',
             'type' => 'asset',
             // Ignored rather than honoured. Accepting it would create an account that reports every
@@ -160,7 +160,7 @@ describe('the chart of accounts endpoint', function (): void {
             'normal_balance' => 'credit',
         ]);
 
-        expect(byCode('1180')->normal_balance->value)->toBe('debit');
+        expect(byCode('1190')->normal_balance->value)->toBe('debit');
     });
 
     it('offers the starter template with its disclaimer', function (): void {

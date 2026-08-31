@@ -1,0 +1,5 @@
+
+## LESSON (2026-08-31, Wave 5 WHT review)
+LESSON: Stage 1 bumped `ChartTemplate::VERSION` (-3→-4) and provisioned a new account code (1180) but did not update the two pre-existing Accounting tests that encoded the OLD facts — `CustomerAdvancesSystemAccountTest` pinned VERSION `-3`, and `AccountingApiTest` created code `1180` expecting 201. Both went RED at branch tip (QA proved they were green pre-build), blocking the gate though production was correct.
+ROOT CAUSE: changed globally-observable facts (the template VERSION constant; the set of provisioned account codes) without grepping for every test that asserts those facts.
+RULE: when a change alters a globally-observable invariant — `ChartTemplate::VERSION`, the provisioned account-code set, a shared enum, a permission catalogue count — grep the whole test suite for assertions on the old value and update them IN THE SAME wave. A new system account silently steals a previously-free code from any API test that hard-codes it; pick codes for such tests that cannot collide, or assert against a freshly-created account, not a hard-coded one.
