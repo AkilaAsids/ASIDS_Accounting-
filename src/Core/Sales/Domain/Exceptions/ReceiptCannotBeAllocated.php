@@ -105,6 +105,27 @@ final class ReceiptCannotBeAllocated extends BusinessRuleViolation
     }
 
     /**
+     * The customer holds less credit than the apply requested (ADR 0016 §E, §13).
+     *
+     * Raised when the FIFO set — or a single named source — cannot satisfy the requested amount. A named source
+     * that falls short does *not* spill into other records: naming a source is a deliberate choice to draw from
+     * that receipt alone. Refused before anything is written, so the held records stay intact.
+     */
+    public static function insufficientCredit(string $requested, string $available): self
+    {
+        return new self(
+            sprintf(
+                'This customer holds %s of applicable credit, which is less than the %s requested. Apply no more '
+                .'than what is held, or record a fresh receipt for the difference.',
+                $available,
+                $requested,
+            ),
+            'receipt-insufficient-credit',
+            ['requested' => $requested, 'available' => $available],
+        );
+    }
+
+    /**
      * The named invoice does not exist in this workspace at all.
      */
     public static function unknownInvoice(string $identifier): self

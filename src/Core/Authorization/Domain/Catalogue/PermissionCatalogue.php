@@ -277,6 +277,10 @@ final class PermissionCatalogue
             // separately from `issue` for invoices. Sensitive because it reverses a posting and restores the
             // invoices a receipt paid — it moves money and posts to the ledger.
             new PermissionDefinition('sales', 'receipts', 'cancel', 'Cancel customer receipts', 'Reverse a posted receipt\'s posting and restore the invoices it paid, keeping both ledger entries.', sensitive: true, sortOrder: 110),
+            // Applying held credit to a later invoice, arriving separately from `manage` and `cancel` exactly as
+            // `cancel` arrived separately from `issue` for invoices (ADR 0016 §F). Sensitive because it moves
+            // money and posts a reclassification JV — a distinct money-moving action, not a variant of recording.
+            new PermissionDefinition('sales', 'receipts', 'apply-credit', 'Apply customer credit', 'Apply a customer\'s held credit to one of their later invoices, posting a reclassification to the ledger.', sensitive: true, sortOrder: 120),
         ];
     }
 

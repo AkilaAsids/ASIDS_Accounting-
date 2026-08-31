@@ -19,16 +19,19 @@ use Asids\Core\Sales\Domain\Models\CustomerReceipt;
  * posts nothing, and reserves no document number** — so it can be exercised, and got wrong, without touching
  * the ledger. That is why the AC-3.2 test can feed it a hand-built receipt directly.
  *
- * THE SHAPE OF A RECEIPT POSTING
- * ------------------------------
- * Two lines, the mirror of a sales invoice's receivable debit:
+ * THE SHAPE OF A RECEIPT POSTING (variable-line, ADR 0016 §C)
+ * -----------------------------------------------------------
+ * Two lines when the receipt is fully allocated, three when it leaves a remainder:
  *
  *   Dr  Bank / Cash (the named asset account)    <receipt amount>
- *       Cr  Trade Receivables                            <receipt amount>
+ *       Cr  Trade Receivables                            <Σ allocations>
+ *       Cr  Customer Advances                            <remainder>          (only when remainder > 0)
  *
- * The entry balances by construction — one debit and one credit, both the stored receipt amount, summed with
- * `Money::plus` — the same "sum stored values, never recompute" discipline that makes `InvoicePostingMap`
- * balance. No rounding happens here because no arithmetic beyond addition happens here.
+ * The entry balances by construction: `amount = Σ allocations + remainder`, all summed with `Money::plus` — the
+ * same "sum stored values, never recompute" discipline that makes `InvoicePostingMap` balance. When the
+ * remainder is zero the Customer Advances line is omitted entirely and the result is byte-for-byte the two-line
+ * entry receipts posted before ADR 0016 (AC-CR-6.1 regression safety). No rounding happens here because no
+ * arithmetic beyond addition and subtraction happens here.
  *
  * WHICH ACCOUNTS, AND THE AC-3.2 REFUSAL
  * --------------------------------------
@@ -48,7 +51,8 @@ final readonly class ReceiptPostingMap
     ) {}
 
     /**
-     * The journal lines representing this receipt: the bank debit, then the receivable credit.
+     * The journal lines representing this receipt: the bank debit, the receivable credit for the allocated
+     * portion, and — only when the receipt leaves a remainder — the Customer Advances credit for it.
      *
      * @return list<JournalLineData>
      */
@@ -63,21 +67,39 @@ final readonly class ReceiptPostingMap
         $currency = $receipt->currency_code;
         $amount = Money::of($receipt->amount, $currency);
 
+        // Σ allocations, summed from the stored allocation amounts — never recomputed. The remainder is what is
+        // left of the receipt after the invoices it names are cleared, held as customer advances.
+        $allocated = array_reduce(
+            $receipt->allocations->all(),
+            static fn (Money $carry, $allocation): Money => $carry->plus(Money::of($allocation->amount, $currency)),
+            Money::zero($currency),
+        );
+
+        $remainder = $amount->minus($allocated);
+
         $bank = $this->bankAccountFor($receipt);
         $receivable = $this->receivableAccountFor($receipt);
 
-        return [
-            $this->line($bank, $amount, $receipt->branch_id, LedgerNarration::limit(sprintf(
-                'Receipt %s from %s',
-                $receipt->number,
-                $receipt->customer->name,
-            ))),
-            $this->line($receivable, $amount, $receipt->branch_id, LedgerNarration::limit(sprintf(
-                'Receipt %s from %s',
-                $receipt->number,
-                $receipt->customer->name,
-            )), creditSide: true),
+        $narration = LedgerNarration::limit(sprintf('Receipt %s from %s', $receipt->number, $receipt->customer->name));
+
+        $lines = [
+            $this->line($bank, $amount, $receipt->branch_id, $narration),
+            $this->line($receivable, $allocated, $receipt->branch_id, $narration, creditSide: true),
         ];
+
+        // Emitted only when positive: a fully-allocated receipt yields the identical two-line entry it did
+        // before ADR 0016. The remainder is non-negative by construction — the service refuses Σ > amount.
+        if ($remainder->isPositive()) {
+            $lines[] = $this->line(
+                $this->customerAdvancesAccountFor($receipt),
+                $remainder,
+                $receipt->branch_id,
+                $narration,
+                creditSide: true,
+            );
+        }
+
+        return $lines;
     }
 
     /**
@@ -134,6 +156,37 @@ final readonly class ReceiptPostingMap
 
         // Guaranteed non-empty: `for()` refuses a receipt with no allocations before reaching here.
         return array_values($distinct)[0];
+    }
+
+    /**
+     * The Customer Advances account the remainder credits (ADR 0016 §A).
+     *
+     * Resolved by system key, never by code — a company may renumber — and validated a postable liability, the
+     * checks a CHECK cannot make because it cannot join to `accounts`. A separate resolution from the
+     * receivable, never conflated with it: the remainder is a liability to the customer, not a reduction of the
+     * receivable. Refused with `withoutCustomerAdvancesAccount()` when a company has none, the mirror of the
+     * invoice map's missing-receivable refusal.
+     */
+    public function customerAdvancesAccountFor(CustomerReceipt $receipt): Account
+    {
+        $account = Account::query()
+            ->forCompany($receipt->company_id)
+            ->withSystemKey(Account::CUSTOMER_ADVANCES)
+            ->first();
+
+        if ($account === null) {
+            throw ReceiptCannotBePosted::withoutCustomerAdvancesAccount();
+        }
+
+        if ($account->type !== AccountType::Liability) {
+            throw ReceiptCannotBePosted::accountNotPostable('customer advances', $account);
+        }
+
+        if (! $account->acceptsPostings()) {
+            throw ReceiptCannotBePosted::accountNotPostable('customer advances', $account);
+        }
+
+        return $account;
     }
 
     private function line(

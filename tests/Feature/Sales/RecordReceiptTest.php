@@ -358,25 +358,28 @@ describe('double-post prevention', function (): void {
     });
 });
 
-describe('the full-allocation invariant', function (): void {
-    it('refuses a receipt under-allocated against its own amount', function (): void {
+describe('the over-allocation invariant', function (): void {
+    it('accepts a receipt under-allocated against its own amount, holding the remainder', function (): void {
+        // FLIPPED for ADR 0016 (was "refuses a receipt under-allocated against its own amount"). ADR 0014
+        // refused a remainder as unallocated credit it would not half-build; ADR 0016 builds it: the shortfall
+        // is now held as customer advances. The over half of this invariant stays refused, below — the split
+        // is a reviewed decision, made visible here (AC-CR-4.1).
         $invoice = receivableInvoice('1000.00');
 
-        // Fixed: the setup invoice's own issuance already posted one journal entry, so the invariant under
-        // test is "the refused receipt posts nothing *more*", not "the ledger is empty" — the ledger already
-        // holds the invoice's posting by the time the receipt is attempted.
-        $entriesBeforeAttempt = JournalEntry::query()->count();
+        $receipt = recordReceipt([(string) $invoice->getKey() => '400.00'], '1000.00');
 
-        $exception = catchPlatformException(
-            fn () => recordReceipt([(string) $invoice->getKey() => '400.00'], '1000.00')
-        );
+        // The receipt records, the named invoice moves by its allocation, and the 600 remainder is held.
+        expect(DB::table('customer_receipts')->count())->toBe(1)
+            ->and($invoice->refresh()->amount_paid)->toBe('400.0000')
+            ->and($invoice->status)->toBe(SalesInvoiceStatus::PartiallyPaid);
 
-        expect($exception)->toBeInstanceOf(ReceiptCannotBeRecorded::class);
+        $held = DB::table('receipt_held_credits')->where('customer_receipt_id', $receipt->getKey())->first();
 
-        // Nothing written by the refusal itself: no receipt row, no invoice movement, no new posting.
-        expect(DB::table('customer_receipts')->count())->toBe(0)
-            ->and($invoice->refresh()->amount_paid)->toBe('0.0000')
-            ->and(JournalEntry::query()->count())->toBe($entriesBeforeAttempt);
+        expect($held)->not->toBeNull()
+            ->and($held->original_amount)->toBe('600.0000')
+            ->and($held->remaining_amount)->toBe('600.0000')
+            ->and($held->applied_amount)->toBe('0.0000')
+            ->and($held->status)->toBe('active');
     });
 
     it('refuses a receipt over-allocated beyond its own amount', function (): void {

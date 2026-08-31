@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Sales\Providers;
 
+use Asids\Core\Sales\Application\Services\CreditApplicationPostingMap;
 use Asids\Core\Sales\Application\Services\CustomerService;
 use Asids\Core\Sales\Application\Services\InvoicePostingMap;
 use Asids\Core\Sales\Application\Services\InvoiceTotalsCalculator;
@@ -15,6 +16,7 @@ use Asids\Core\Sales\Application\Services\TaxCodeService;
 use Asids\Core\Sales\Application\Services\TaxRateResolver;
 use Asids\Core\Sales\Domain\Contracts\ReceivableBalanceProbe;
 use Asids\Core\Sales\Domain\Contracts\TaxRateUsageProbe;
+use Asids\Core\Sales\Domain\Models\CreditApplication;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\CustomerReceipt;
 use Asids\Core\Sales\Domain\Models\SalesInvoice;
@@ -66,8 +68,10 @@ final class SalesServiceProvider extends ServiceProvider
         $this->app->singleton(ReceivableReportService::class);
 
         // The receipt map reuses `InvoicePostingMap::receivableAccountFor()`, so the receivable account is
-        // resolved the same way for both sides of the ledger — bound as singletons like the invoice pair.
+        // resolved the same way for both sides of the ledger — bound as singletons like the invoice pair. The
+        // apply-credit map (ADR 0016 §D) reuses the same resolution for the reclassification's receivable side.
         $this->app->singleton(ReceiptPostingMap::class);
+        $this->app->singleton(CreditApplicationPostingMap::class);
         $this->app->singleton(ReceiptService::class);
 
         /*
@@ -115,6 +119,9 @@ final class SalesServiceProvider extends ServiceProvider
             TaxCode::MORPH_ALIAS => TaxCode::class,
             SalesInvoice::MORPH_ALIAS => SalesInvoice::class,
             CustomerReceipt::MORPH_ALIAS => CustomerReceipt::class,
+            // Each apply-credit event's reclassification JV cites its `credit_application` as source
+            // (ADR 0016 §D); `SourceDocument::for()` refuses an unmapped model.
+            CreditApplication::MORPH_ALIAS => CreditApplication::class,
         ]);
     }
 }

@@ -102,23 +102,48 @@ final class ReceiptCannotBeRecorded extends BusinessRuleViolation
     }
 
     /**
-     * The allocations do not sum exactly to the receipt amount (Gate-1 #2).
+     * The allocations sum to more than the receipt amount (ADR 0016 §C, renamed from `overOrUnderAllocated`).
      *
-     * Both over- and under-allocation refuse. Under-allocation would leave a remainder that is unallocated
-     * credit-on-account — a deferred feature — so accepting it would half-build it; over-allocation would
-     * apply more than was received.
+     * Only over-allocation refuses now. Under-allocation is newly accepted: the remainder is held as customer
+     * advances (ADR 0016), the credit-on-account feature ADR 0014 deferred. Over-allocation still refuses —
+     * applying more than was received. The caller must never be told "over or under" when only over is
+     * possible, which is why the message and code name only the over case (AC-CR-4.2).
      */
-    public static function overOrUnderAllocated(string $allocated, string $amount): self
+    public static function overAllocated(string $allocated, string $amount): self
     {
         return new self(
             sprintf(
-                'The allocations total %s but the receipt is for %s. A receipt has to be fully allocated — the '
-                .'two must be equal — so record it against the invoices it actually pays.',
+                'The allocations total %s but the receipt is for %s. A receipt cannot apply more than it '
+                .'received — reduce the allocations so they do not exceed the amount.',
                 $allocated,
                 $amount,
             ),
-            'receipt-not-fully-allocated',
+            'receipt-over-allocated',
             ['allocated' => $allocated, 'amount' => $amount],
+        );
+    }
+
+    /**
+     * The amount is finer than the company's currency precision (ADR 0016 Gate-2 amendment).
+     *
+     * A receipt in a two-decimal currency cannot be for `1000.3333` — that is not an amount anyone can pay,
+     * and accepting it would create a phantom remainder the ledger (which posts at `currency_precision`) could
+     * never match. Both the receipt amount and every allocation are held to the currency's precision; a finer
+     * value is refused here rather than silently rounded, so the caller fixes the figure rather than
+     * discovering the ledger disagrees with what they entered.
+     */
+    public static function amountExceedsCurrencyPrecision(string $amount, int $precision): self
+    {
+        return new self(
+            sprintf(
+                'The amount %s is more precise than this company\'s currency, which is kept to %d decimal '
+                .'place%s. Enter an amount at that precision.',
+                $amount,
+                $precision,
+                $precision === 1 ? '' : 's',
+            ),
+            'receipt-amount-exceeds-currency-precision',
+            ['amount' => $amount, 'precision' => $precision],
         );
     }
 
