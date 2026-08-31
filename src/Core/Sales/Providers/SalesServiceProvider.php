@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Sales\Providers;
 
+use Asids\Core\Sales\Application\Services\CreditApplicationPostingMap;
 use Asids\Core\Sales\Application\Services\CustomerService;
 use Asids\Core\Sales\Application\Services\InvoicePostingMap;
 use Asids\Core\Sales\Application\Services\InvoiceTotalsCalculator;
@@ -67,8 +68,10 @@ final class SalesServiceProvider extends ServiceProvider
         $this->app->singleton(ReceivableReportService::class);
 
         // The receipt map reuses `InvoicePostingMap::receivableAccountFor()`, so the receivable account is
-        // resolved the same way for both sides of the ledger — bound as singletons like the invoice pair.
+        // resolved the same way for both sides of the ledger — bound as singletons like the invoice pair. The
+        // apply-credit map (ADR 0016 §D) reuses the same resolution for the reclassification's receivable side.
         $this->app->singleton(ReceiptPostingMap::class);
+        $this->app->singleton(CreditApplicationPostingMap::class);
         $this->app->singleton(ReceiptService::class);
 
         /*

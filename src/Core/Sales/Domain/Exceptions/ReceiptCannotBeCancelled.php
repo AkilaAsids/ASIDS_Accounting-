@@ -182,4 +182,27 @@ final class ReceiptCannotBeCancelled extends BusinessRuleViolation
             ['invoice' => $invoiceIdentifier, 'amount_paid' => $currentPaid, 'allocation' => $allocation],
         );
     }
+
+    /**
+     * The receipt's held credit has already been applied, in part or full (ADR 0016 §G Case 2).
+     *
+     * The credit-side analogue of `wouldReverseBelowZero()`. `PostingService::reverse()` can only mirror the
+     * original entry *whole* — the full Customer Advances credit — so reversing it while part of that credit has
+     * already been reclassified onto an invoice by an apply event would over-reverse the subledger. The remedy is
+     * to reverse the credit application(s) first, which is out of scope this wave; a mistaken application is
+     * undone by a manual journal adjustment. Refused before anything is reversed, so the receipt stays posted.
+     */
+    public static function heldCreditAlreadyApplied(string $identifier, string $applied): self
+    {
+        return new self(
+            sprintf(
+                'Receipt %s cannot be cancelled: %s of its held credit has already been applied to an invoice. '
+                .'Reverse the credit application first — cancelling now would over-reverse the ledger.',
+                $identifier,
+                $applied,
+            ),
+            'receipt-held-credit-already-applied',
+            ['receipt' => $identifier, 'applied' => $applied],
+        );
+    }
 }

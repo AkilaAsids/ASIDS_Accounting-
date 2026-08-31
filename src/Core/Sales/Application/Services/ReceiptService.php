@@ -18,11 +18,13 @@ use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
+use Asids\Core\Sales\Application\DTOs\ApplyCreditData;
 use Asids\Core\Sales\Application\DTOs\ReceiptData;
 use Asids\Core\Sales\Domain\Enums\SalesInvoiceStatus;
 use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeAllocated;
 use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeCancelled;
 use Asids\Core\Sales\Domain\Exceptions\ReceiptCannotBeRecorded;
+use Asids\Core\Sales\Domain\Models\CreditApplication;
 use Asids\Core\Sales\Domain\Models\Customer;
 use Asids\Core\Sales\Domain\Models\CustomerReceipt;
 use Asids\Core\Sales\Domain\Models\ReceiptAllocation;
@@ -74,6 +76,7 @@ final readonly class ReceiptService
 {
     public function __construct(
         private ReceiptPostingMap $postingMap,
+        private CreditApplicationPostingMap $creditApplicationMap,
         private PostingService $posting,
         private DocumentNumberService $numbers,
         private FiscalCalendarService $calendar,
@@ -280,6 +283,182 @@ final readonly class ReceiptService
     }
 
     /**
+     * Apply a customer's held credit to one of that customer's later invoices — ADR 0016 §D, §E, §H.
+     *
+     * No cash arrives: the money was booked when the source receipt was recorded, leaving a Customer Advances
+     * liability. Applying it reclassifies that liability onto the invoice — Dr Customer Advances / Cr Trade
+     * Receivables — and moves the invoice's balance forward exactly as a receipt allocation would.
+     *
+     * FIFO, OR A NAMED SOURCE
+     * -----------------------
+     * By default the credit is drawn from the customer's active held records oldest-first, by the source
+     * receipt's `receipt_date` then `number`, consuming as many records as the requested amount needs. A named
+     * `sourceReceiptId` overrides FIFO and draws from that receipt alone — a named source that falls short is
+     * refused rather than spilling into other records. Either way the customer is taken from the *target
+     * invoice*, so credit never crosses a customer or a company.
+     *
+     * ONE APPLICATION, ONE JV, PER CONSUMED RECORD
+     * --------------------------------------------
+     * Each consumed held-credit record produces its own `credit_application` row and its own reclassification
+     * JV, because the source-uniqueness index permits one non-reversing posting per source document — a second
+     * apply against one held credit must carry its own source (Problem #1). Each application is built in memory
+     * with its id assigned up front so its JV can cite it as source, then inserted whole with the resulting
+     * `journal_entry_id`: the `credit_applications` full-freeze trigger refuses any later UPDATE.
+     *
+     * WHAT HOLDS UNDER CONCURRENCY
+     * ----------------------------
+     * The candidate held-credit rows are locked first, in ascending id order (so two applies cannot deadlock),
+     * then the target invoice — the global order receipts → held-credits → invoices, with apply never touching
+     * the receipt row. Two applies of one record contend on its lock: one decrements `remaining_amount` and
+     * commits, the other re-reads the now-lower figure and either fits or is refused `insufficientCredit`.
+     * Available credit cannot go negative — the lock serialises the decrement and the `remaining_amount >= 0`
+     * CHECK is the backstop if the service is ever bypassed.
+     *
+     * @return list<CreditApplication> one per consumed held-credit record
+     */
+    public function applyCredit(Company $company, ApplyCreditData $data, ?User $actor = null): array
+    {
+        $currency = $company->base_currency_code;
+        $precision = $company->currency_precision;
+
+        // 1. The requested amount: positive, and at the company's currency precision (Gate-2 amendment) — a
+        //    finer value could never be represented in the ledger the reclassification posts to.
+        $requested = Money::of($data->amount, $currency);
+
+        if (! $requested->isPositive()) {
+            throw ReceiptCannotBeAllocated::zeroOrNegativeLine($data->salesInvoiceId, $data->amount);
+        }
+
+        $this->assertAtCurrencyPrecision($requested, $precision);
+
+        // 2. The target invoice. `firstOrFail` so a foreign tenant — for whom row level security hides the row —
+        //    gets a not-found rather than a misleading domain refusal, matching the tenant-isolation guard.
+        $invoice = SalesInvoice::query()->whereKey($data->salesInvoiceId)->firstOrFail();
+
+        $identifier = $invoice->number ?? $data->salesInvoiceId;
+
+        // Two companies in one workspace share a `tenant_id`, so row level security is satisfied by either's
+        // rows; only this comparison stops credit reaching a sibling company's invoice.
+        if ((string) $invoice->company_id !== (string) $company->getKey()) {
+            throw ReceiptCannotBeAllocated::crossCompany($identifier);
+        }
+
+        $customerId = (string) $invoice->customer_id;
+
+        return DB::transaction(function () use (
+            $company, $data, $invoice, $identifier, $requested, $currency, $customerId, $actor,
+        ): array {
+            // 3. Lock the candidate held-credit records (held-credits before invoices, ascending id within the
+            //    table — §H). FIFO is the *consumption* order, computed in memory over the locked set below.
+            $candidates = $this->lockCandidateHeldCredits($company, $customerId, $data->sourceReceiptId, $identifier);
+
+            // 4. Enough applicable credit? The exhausted-set refusal, before the invoice is even locked, so a
+            //    shortfall writes nothing. A named source that fell short filtered itself out above.
+            $available = array_reduce(
+                $candidates,
+                static fn (Money $carry, ReceiptHeldCredit $held): Money => $carry->plus(Money::of($held->remaining_amount, $currency)),
+                Money::zero($currency),
+            );
+
+            if ($requested->isGreaterThan($available)) {
+                throw ReceiptCannotBeAllocated::insufficientCredit(
+                    $requested->toDecimalString(),
+                    $available->toDecimalString(),
+                );
+            }
+
+            // 5. Lock and re-read the target invoice (after the held credits, per the order). Its status and
+            //    outstanding balance are re-checked against the figure read through the lock, never the caller's.
+            $lockedInvoice = SalesInvoice::query()->whereKey($invoice->getKey())->lockForUpdate()->firstOrFail();
+
+            if (! $lockedInvoice->status->isCollectable()) {
+                throw ReceiptCannotBeAllocated::toNonCollectableInvoice($identifier, $lockedInvoice->status);
+            }
+
+            $amountDue = Money::of($lockedInvoice->amount_due, $currency);
+
+            if ($requested->isGreaterThan($amountDue)) {
+                throw ReceiptCannotBeAllocated::exceedsAmountDue(
+                    $identifier,
+                    $requested->toDecimalString(),
+                    $amountDue->toDecimalString(),
+                );
+            }
+
+            // 6. Consume FIFO across the locked set — one application + one JV per record (Problem #1).
+            $narration = LedgerNarration::limit(sprintf('Credit applied to invoice %s', $identifier));
+
+            /** @var list<CreditApplication> $applications */
+            $applications = [];
+            $remainingToApply = $requested;
+
+            foreach ($candidates as $held) {
+                if (! $remainingToApply->isPositive()) {
+                    break;
+                }
+
+                $heldRemaining = Money::of($held->remaining_amount, $currency);
+                $take = $remainingToApply->isGreaterThan($heldRemaining) ? $heldRemaining : $remainingToApply;
+
+                // Built in memory, id assigned up front so its JV can cite it as source and the row carries the
+                // resulting `journal_entry_id` in one INSERT (the full-freeze trigger refuses a later UPDATE).
+                $application = new CreditApplication;
+                $application->setAttribute($application->getKeyName(), $application->newUniqueId());
+                $application->company_id = $company->getKey();
+                $application->customer_id = $customerId;
+                $application->receipt_held_credit_id = $held->getKey();
+                $application->sales_invoice_id = $lockedInvoice->getKey();
+                $application->currency_code = $currency;
+                $application->amount = $this->decimal($take);
+                $application->applied_at = now();
+                $application->applied_by_id = $actor?->getKey();
+                $application->created_by_id = $actor?->getKey();
+
+                $entry = $this->posting->postNew($company, new JournalEntryData(
+                    entryDate: CarbonImmutable::now()->startOfDay(),
+                    description: $narration,
+                    lines: $this->creditApplicationMap->for($lockedInvoice, $take, $narration),
+                    reference: $identifier,
+                    documentType: DocumentType::JournalVoucher,
+                    source: SourceDocument::for($application),
+                ), $actor);
+
+                $application->journal_entry_id = $entry->getKey();
+                $application->save();
+
+                $applications[] = $application;
+
+                // Decrement the held record, delta: applied up, remaining down, written together (the balance-tie
+                // CHECK). `status` stays active — a fully-consumed record simply drops out of the FIFO filter.
+                $newApplied = Money::of($held->applied_amount, $currency)->plus($take);
+                $newRemaining = Money::of($held->original_amount, $currency)->minus($newApplied);
+
+                $held->applied_amount = $this->decimal($newApplied);
+                $held->remaining_amount = $this->decimal($newRemaining);
+                $held->save();
+
+                $remainingToApply = $remainingToApply->minus($take);
+            }
+
+            // 7. Move the target invoice forward by the total applied — the mirror of record()'s split.
+            //    `amount_paid` and `amount_due` are written together (the `amount_due = total - amount_paid`
+            //    invariant), status to Paid when settled else PartiallyPaid, the only columns the invoice's
+            //    immutability trigger permits.
+            $newPaid = Money::of($lockedInvoice->amount_paid, $currency)->plus($requested);
+            $newDue = Money::of($lockedInvoice->total, $currency)->minus($newPaid);
+
+            $lockedInvoice->amount_paid = $this->decimal($newPaid);
+            $lockedInvoice->amount_due = $this->decimal($newDue);
+            $lockedInvoice->status = $newDue->isZero()
+                ? SalesInvoiceStatus::Paid
+                : SalesInvoiceStatus::PartiallyPaid;
+            $lockedInvoice->save();
+
+            return $applications;
+        });
+    }
+
+    /**
      * Cancel a posted receipt, reversing its posting and restoring the invoices it paid.
      *
      * The counterpart to `record()`, and deliberately not its undo. Nothing is deleted and nothing about the
@@ -381,6 +560,24 @@ final readonly class ReceiptService
                 $allocationByInvoice[(string) $allocation->sales_invoice_id] = Money::of($allocation->amount, $currency);
             }
 
+            // Lock this receipt's held-credit record — after the receipt, before the invoices (the global order
+            // receipts → held-credits → invoices, §H). A receipt whose credit was already applied is refused
+            // here, before anything is reversed: `reverse()` mirrors the entry whole, so reversing the full
+            // Customer Advances credit while part of it has been reclassified out by an apply would over-reverse
+            // the subledger (§G Case 2). Untouched credit is delta-zeroed after the reversal, below.
+            $heldCredit = ReceiptHeldCredit::query()
+                ->where('customer_receipt_id', $locked->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($heldCredit !== null) {
+                $applied = Money::of($heldCredit->applied_amount, $currency);
+
+                if ($applied->isPositive()) {
+                    throw ReceiptCannotBeCancelled::heldCreditAlreadyApplied($identifier, $applied->toDecimalString());
+                }
+            }
+
             // Lock and re-read every allocated invoice in deterministic id order — `record()`'s ordering, run
             // in the reverse direction, so a cancel racing a record cannot deadlock.
             $ids = array_keys($allocationByInvoice);
@@ -425,6 +622,22 @@ final readonly class ReceiptService
                     ? SalesInvoiceStatus::Issued
                     : SalesInvoiceStatus::PartiallyPaid;
                 $invoice->save();
+            }
+
+            // Delta-zero the untouched held credit alongside the invoice restore — the credit-side analogue of
+            // the delta-restore, using the record's own current remaining, never a snapshot (§G Case 1). The GL
+            // side is already unwound: `reverse()` mirrored the whole entry, including the Customer Advances
+            // credit. `remaining` and `applied` are written together so the balance-tie CHECK holds — the
+            // remainder is consumed into `applied` (applied → original), which is the only shape the tie and the
+            // cancelled ⇒ remaining = 0 CHECK jointly permit while `original_amount` stays frozen.
+            if ($heldCredit !== null) {
+                $remaining = Money::of($heldCredit->remaining_amount, $currency);
+                $newApplied = Money::of($heldCredit->applied_amount, $currency)->plus($remaining);
+
+                $heldCredit->applied_amount = $this->decimal($newApplied);
+                $heldCredit->remaining_amount = $this->decimal($remaining->minus($remaining));
+                $heldCredit->status = ReceiptHeldCredit::STATUS_CANCELLED;
+                $heldCredit->save();
             }
 
             // One save, like recording. The tie-to-status CHECK means a status written without the metadata —
@@ -541,6 +754,95 @@ final readonly class ReceiptService
         if (! $invoice->status->isCollectable()) {
             throw ReceiptCannotBeAllocated::toNonCollectableInvoice($identifier, $invoice->status);
         }
+    }
+
+    /**
+     * The held-credit records this apply may consume, locked and in FIFO order — ADR 0016 §E, §H.
+     *
+     * A named source is resolved and locked alone; if it belongs to another customer it is refused as a
+     * cross-customer attempt (credit never crosses a customer, §K#5), and if it is cancelled or exhausted it
+     * falls out as an empty set (surfacing as `insufficientCredit`, never a silent spill into other records).
+     *
+     * Without a named source, the customer's active records with credit remaining are selected, locked in
+     * ascending id order (the deadlock-free acquisition order), re-filtered under the lock, then sorted by the
+     * source receipt's `receipt_date` then `number` — the business-precedence order, distinct from the
+     * lock-acquisition order.
+     *
+     * @return list<ReceiptHeldCredit>
+     */
+    private function lockCandidateHeldCredits(
+        Company $company,
+        string $customerId,
+        ?string $sourceReceiptId,
+        string $invoiceIdentifier,
+    ): array {
+        $currency = $company->base_currency_code;
+
+        if ($sourceReceiptId !== null) {
+            $held = ReceiptHeldCredit::query()
+                ->where('company_id', $company->getKey())
+                ->where('customer_receipt_id', $sourceReceiptId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($held === null) {
+                return [];
+            }
+
+            // Checked before status/remaining so a deliberate cross-customer attempt is named as such rather
+            // than reported as "insufficient".
+            if ((string) $held->customer_id !== $customerId) {
+                throw ReceiptCannotBeAllocated::crossCustomer($invoiceIdentifier);
+            }
+
+            $isUsable = $held->status === ReceiptHeldCredit::STATUS_ACTIVE
+                && Money::of($held->remaining_amount, $currency)->isPositive();
+
+            return $isUsable ? [$held] : [];
+        }
+
+        /** @var list<string> $ids */
+        $ids = ReceiptHeldCredit::query()
+            ->where('company_id', $company->getKey())
+            ->where('customer_id', $customerId)
+            ->where('status', ReceiptHeldCredit::STATUS_ACTIVE)
+            ->where('remaining_amount', '>', 0)
+            ->orderBy('id')
+            ->pluck('id')
+            ->all();
+
+        /** @var list<ReceiptHeldCredit> $locked */
+        $locked = [];
+
+        foreach ($ids as $id) {
+            $held = ReceiptHeldCredit::query()
+                ->whereKey($id)
+                ->with('receipt')
+                ->lockForUpdate()
+                ->first();
+
+            if ($held === null) {
+                continue;
+            }
+
+            if ($held->status === ReceiptHeldCredit::STATUS_ACTIVE
+                && Money::of($held->remaining_amount, $currency)->isPositive()) {
+                $locked[] = $held;
+            }
+        }
+
+        usort($locked, static function (ReceiptHeldCredit $a, ReceiptHeldCredit $b): int {
+            $dateA = $a->receipt->receipt_date;
+            $dateB = $b->receipt->receipt_date;
+
+            if (! $dateA->equalTo($dateB)) {
+                return $dateA->lessThan($dateB) ? -1 : 1;
+            }
+
+            return ($a->receipt->number ?? '') <=> ($b->receipt->number ?? '');
+        });
+
+        return $locked;
     }
 
     /**
