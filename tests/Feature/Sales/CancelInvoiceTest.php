@@ -22,7 +22,6 @@ use Asids\Core\Sales\Domain\Models\SalesInvoice;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
 
 /**
  * Cancelling: undoing an invoice without pretending it never existed.

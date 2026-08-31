@@ -1,39 +1,33 @@
 # Project status — Phase 4 credit on account (Minions Team 4)
 
-**Last updated:** 2026-08-26 · **Branch:** `feature/phase4-credit-on-account` · **Base:** `feature/phase4-cancellation` (stacked)
+**Last updated:** 2026-08-31 · **Branch:** `feature/phase4-credit-on-account` · **Base:** `feature/phase4-cancellation` (stacked)
 
 ## Where we are
-Wave 4 of the rolling program. Building **unallocated credit on account + apply-credit**: a receipt may
-leave a remainder (Σ allocations < amount, ≥1 invoice still required) held as **Customer Advances**
-credit, later **applied** to another invoice. Backend wave (no HTTP). Mirrors the receipts/cancellation
-discipline (ADR 0014/0015).
+Wave 4 **delivered**: unallocated credit on account + apply-credit. A receipt may leave a remainder
+(Σ allocations < amount, ≥1 invoice still required) held as **Customer Advances** credit, later
+**applied** to another invoice (FIFO or explicit source). Backend wave (no HTTP). Delivered as PR #5.
 
 | Stage | State |
 |---|---|
-| 1 · Intake | ✅ carried forward (ASAP/critical, Balanced) |
-| 2 · Requirements | ✅ [PHASE-4-CREDIT-ON-ACCOUNT-REQUIREMENTS.md](PHASE-4-CREDIT-ON-ACCOUNT-REQUIREMENTS.md) — **Gate 1 APPROVED** 2026-08-26 |
-| 3 · Architecture | ✅ [ADR 0016](adr/0016-unallocated-credit-on-account-and-apply-credit.md) — **Gate 2 APPROVED** 2026-08-26 (raw-SQL backfill; HTTP deferred; no reverseApplication) |
-| 4 · Build | 🔵 in progress — 6 stages, test-first (Backend Engineer, Opus) |
-| 5 · Review (QA ∥ Security) | ⏳ |
-| Delivery | ⏳ stacked PR (base `feature/phase4-cancellation`) |
+| 1 · Intake | ✅ carried forward |
+| 2 · Requirements | ✅ Gate 1 APPROVED 2026-08-26 |
+| 3 · Architecture (ADR 0016) | ✅ Gate 2 APPROVED 2026-08-26 (+ currency_precision amendment; + invoice-cancel guard reorder approved 2026-08-31) |
+| 4 · Build | ✅ 6 stages test-first (Opus) — `24cbb10`,`f91f25e`,`f3982e9`,`9289a67`,`08eddd1`,`b5571db` |
+| 5 · Review (QA ∥ Security) | ✅ **both PASS** — 0 blockers, 0 should-fixes |
+| Delivery | ✅ **PR #5 opened** (base `feature/phase4-cancellation`) — autonomy ends here |
 
-## Build stages (ADR 0016 §O)
-1. Account `2180 Customer Advances` (new + existing companies via raw-SQL backfill)
-2. Held-credit schema + models (`receipt_held_credits` + `credit_applications`, CHECKs, RLS, immutability)
-3. Record path + variable-line posting (remainder → held credit; flip ADR 0014 under-allocation test)
-4. Apply-credit domain op (`ReceiptService::applyCredit()`, FIFO + explicit source, atomic)
-5. Cancellation interaction (unwind untouched credit; refuse applied credit)
-6. Permission + policy (`sales.receipts.apply-credit`, accountant-only)
+## Result
+- **Tests:** 1,248 green — wave suites 79, full Sales 972, Accounting 275, +1 QA-added coverage test. **0 regressions.** Pint + PHPStan clean.
+- **Reviews:** Security **PASS**, QA **PASS**. Money integrity (subledger==ledger @ currency_precision), FIFO, concurrency (no over-consume), tenant/company isolation, cancellation safety, and the `b5571db` invoice-cancel guard reorder all verified.
+- **Delivered:** `2180 Customer Advances` account (+ backfill); `receipt_held_credits` + `credit_applications` (RLS, immutability); variable-line receipt posting; `ReceiptService::applyCredit()` (FIFO/explicit); cancellation interaction; `sales.receipts.apply-credit` permission/policy.
 
-## Known limitation (Gate 2 accepted)
-No service-path `reverseApplication()` this wave: once credit is applied, neither the source receipt nor
-the target invoice can be cancelled via the service — a mistaken application is undone by a manual JV until
-a later slice adds reversal (the interim the project accepted before ADR 0015).
+## Known limitations / follow-ups (accepted, non-blocking)
+1. **No `reverseApplication()`** this wave (Gate 2): once credit is applied, neither the source receipt nor the target invoice can be cancelled via the service — interim remedy is a manual JV.
+2. **No HTTP surface** this wave (Gate 2): apply-credit REST route deferred to a later slice; that slice must resolve the FIFO-path authorization target (Security nit #2).
+3. **Defensive hardening (Security nit #1):** `applyCredit()` advances the invoice by `$requested`; add a post-loop `assert remaining==0` / advance-by-sum-of-consumed as belt-and-braces on the money path.
 
 ## Related (stacked, all open)
-- PR #2 — Phase 3 front-end · PR #3 — Phase 4 receipts+allocation · PR #4 — Phase 4 receipt cancellation
-- This wave stacks on #4's branch.
+- PR #2 (front-end) · PR #3 (receipts) · PR #4 (cancellation) · **PR #5 (credit-on-account)**. Merge bottom-up.
 
 ## What you (the human) need to do next
-Nothing right now — Gates 1 & 2 approved; build → QA + Security → PR runs autonomously within ADR 0016.
-When the stacked PR opens, review/merge the chain in order. Prod deploy (Gate 3) always needs you; none in scope.
+Nothing blocking. When ready, review/merge the PR chain in order. **Next wave (5, withholding tax on receipt)** is opening now and will STOP at Gate 1 for your approval. Prod deploy (Gate 3) always needs you; none in scope.

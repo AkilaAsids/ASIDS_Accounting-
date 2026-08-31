@@ -35,7 +35,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use RuntimeException;
 
 /**
  * Applying held credit to a later invoice — ADR 0016 §D, §E, §H (Stage 4), and §B (the credit_applications
