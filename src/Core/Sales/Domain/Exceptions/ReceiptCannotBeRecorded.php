@@ -124,6 +124,31 @@ final class ReceiptCannotBeRecorded extends BusinessRuleViolation
     }
 
     /**
+     * The allocations exceed the receipt's settlement power `amount + Σ wht` (ADR 0017 §C).
+     *
+     * The withholding-aware analogue of `overAllocated()`, raised only when `Σ wht > 0` so the no-WHT path keeps
+     * ADR 0016's exact message and `receipt-over-allocated` code untouched. A receipt settles receivables with
+     * both the net cash it received and the tax the customer withheld — `settlement = amount + Σ wht` — so
+     * `Σ allocations > amount` is legitimate when withholding covers the gap. It refuses only when the gross
+     * settled exceeds even that: the net value applied to invoices (`Σ alloc − Σ wht`) is more than the cash.
+     */
+    public static function overAllocatedBeyondSettlement(string $allocated, string $amount, string $totalWht, string $settlement): self
+    {
+        return new self(
+            sprintf(
+                'The allocations total %s gross, but the receipt settles only %s = cash %s + withholding %s. A '
+                .'receipt cannot settle more than its cash and withholding together — reduce the allocations.',
+                $allocated,
+                $settlement,
+                $amount,
+                $totalWht,
+            ),
+            'receipt-over-allocated-beyond-settlement',
+            ['allocated' => $allocated, 'amount' => $amount, 'total_wht' => $totalWht, 'settlement' => $settlement],
+        );
+    }
+
+    /**
      * The amount is finer than the company's currency precision (ADR 0016 Gate-2 amendment).
      *
      * A receipt in a two-decimal currency cannot be for `1000.3333` — that is not an amount anyone can pay,

@@ -107,9 +107,21 @@ final readonly class ReceiptService
         // 4. The allocation set, against the pre-read invoices — a readable early refusal before any lock.
         //    The authoritative per-invoice cap is re-checked under the lock below (AC-2.5). Each line is held
         //    to the currency precision for the same reason as the amount.
-        $allocationAmounts = $this->allocationAmounts($data, $currency, $precision);
+        $parsed = $this->parseAllocations($data, $currency, $precision);
+        $allocationAmounts = $parsed['amounts'];
+        $allocationWht = $parsed['wht'];
+        $allocationCertificates = $parsed['certificates'];
 
-        $this->assertNotOverAllocated($allocationAmounts, $amount);
+        // The receipt's settlement power: the total value it applies to receivables, whether that value arrived
+        // as cash or was withheld as tax (ADR 0017 §C). `settlement = amount + Σ wht`.
+        $totalWht = array_reduce(
+            $allocationWht,
+            static fn (Money $carry, Money $line): Money => $carry->plus($line),
+            Money::zero($currency),
+        );
+        $settlement = $amount->plus($totalWht);
+
+        $this->assertNotOverAllocated($allocationAmounts, $amount, $totalWht);
 
         $invoices = $this->loadInvoices(array_keys($allocationAmounts));
 
@@ -127,7 +139,7 @@ final readonly class ReceiptService
         $branchId = $this->resolveBranchId($company, $data->branchId);
 
         return DB::transaction(function () use (
-            $company, $data, $customer, $bankAccount, $amount, $allocationAmounts, $period, $branchId, $currency, $precision, $actor,
+            $company, $data, $customer, $bankAccount, $amount, $allocationAmounts, $allocationWht, $allocationCertificates, $settlement, $period, $branchId, $currency, $precision, $actor,
         ): CustomerReceipt {
             // 6. Lock and re-read every target invoice, in deterministic id order to prevent deadlock between
             //    two multi-invoice receipts. The figure the caller saw is never trusted.
@@ -194,6 +206,10 @@ final readonly class ReceiptService
                 $allocation->customer_receipt_id = $receipt->getKey();
                 $allocation->sales_invoice_id = $invoiceId;
                 $allocation->amount = $this->decimal($allocationAmounts[$invoiceId]);
+                // Per-allocation withholding, beside the gross amount (ADR 0017 §D). `Σ wht` for this invoice
+                // and its certificate reference, both frozen by the existing full-freeze trigger once written.
+                $allocation->wht_amount = $this->decimal($allocationWht[$invoiceId]);
+                $allocation->wht_certificate_reference = $allocationCertificates[$invoiceId];
                 // The locked invoice, so the posting map resolves the receivable account without a fresh read.
                 $allocation->setRelation('invoice', $locked[$invoiceId]);
 
@@ -261,7 +277,11 @@ final readonly class ReceiptService
             // posting line (also at currency_precision) agree exactly and the entry balances (ADR 0016 Gate-2
             // amendment). A no-op when amount and allocations are already at precision — which the input
             // validation above guarantees — but applied explicitly so the invariant does not depend on it.
-            $remainder = $amount->minus($allocated)->roundedTo($precision);
+            // The remainder is `settlement − Σ allocations` (ADR 0017 §C): the excess of the receipt's full
+            // settling power — cash plus withholding — over the gross it allocated, still pure excess cash held
+            // as a liability, never touched by WHT (Gate-1 #4). At `Σ wht = 0` this is ADR 0016's
+            // `amount − Σ allocations` exactly.
+            $remainder = $settlement->minus($allocated)->roundedTo($precision);
 
             if ($remainder->isPositive()) {
                 $heldCredit = new ReceiptHeldCredit;
@@ -653,15 +673,24 @@ final readonly class ReceiptService
     }
 
     /**
-     * The amount to apply to each invoice, keyed by invoice id.
+     * Parse and validate every allocation line — its gross amount, its withholding tax, and its certificate
+     * reference — aggregated per invoice id (ADR 0017 §D).
      *
-     * Aggregated by invoice, so a caller that names one invoice twice gets one line summing them — which is
-     * also what the `(receipt, invoice)` uniqueness index requires. Each line is validated positive here, the
-     * readable answer before the `receipt_allocations_amount_positive_check` backstop.
+     * Three parallel maps come out, keyed by invoice id: the gross `amounts` (unchanged from before WHT), the
+     * `wht` withheld against each, and the `certificates`. A caller naming one invoice twice sums both its
+     * amount and its WHT; the certificate reference of a doubled line takes the first non-null (a documented
+     * edge). Each figure is validated before the transaction and before any number is reserved:
      *
-     * @return array<string, Money>
+     *   - the gross amount positive and at currency precision (as before ADR 0017);
+     *   - the WHT non-negative (`negativeWithholding`) and at currency precision (`amountExceedsCurrencyPrecision`,
+     *     reused — WHT is a money figure like any other and reopens nothing about precision);
+     *   - the aggregated WHT no larger than the aggregated gross it is withheld against
+     *     (`withholdingExceedsAllocation`), the readable refusal ahead of the same-row `wht_amount <= amount`
+     *     CHECK.
+     *
+     * @return array{amounts: array<string, Money>, wht: array<string, Money>, certificates: array<string, string|null>}
      */
-    private function allocationAmounts(ReceiptData $data, string $currency, int $precision): array
+    private function parseAllocations(ReceiptData $data, string $currency, int $precision): array
     {
         if ($data->allocations === []) {
             throw ReceiptCannotBeRecorded::withoutAllocations();
@@ -669,6 +698,10 @@ final readonly class ReceiptService
 
         /** @var array<string, Money> $amounts */
         $amounts = [];
+        /** @var array<string, Money> $wht */
+        $wht = [];
+        /** @var array<string, string|null> $certificates */
+        $certificates = [];
 
         foreach ($data->allocations as $allocation) {
             $amount = Money::of($allocation->amount, $currency);
@@ -681,12 +714,49 @@ final readonly class ReceiptService
             // allocation could leave a remainder the ledger cannot represent.
             $this->assertAtCurrencyPrecision($amount, $precision);
 
-            $amounts[$allocation->salesInvoiceId] = isset($amounts[$allocation->salesInvoiceId])
-                ? $amounts[$allocation->salesInvoiceId]->plus($amount)
+            // WHT is a money figure like the rest: non-negative, at currency precision. Null ≡ "0" ≡ no WHT.
+            $lineWht = Money::of($allocation->whtAmount ?? '0', $currency);
+
+            if ($lineWht->isNegative()) {
+                throw ReceiptCannotBeAllocated::negativeWithholding(
+                    $allocation->salesInvoiceId,
+                    $allocation->whtAmount ?? '0',
+                );
+            }
+
+            $this->assertAtCurrencyPrecision($lineWht, $precision);
+
+            $invoiceId = $allocation->salesInvoiceId;
+
+            $amounts[$invoiceId] = isset($amounts[$invoiceId])
+                ? $amounts[$invoiceId]->plus($amount)
                 : $amount;
+
+            $wht[$invoiceId] = isset($wht[$invoiceId])
+                ? $wht[$invoiceId]->plus($lineWht)
+                : $lineWht;
+
+            // The first non-null certificate reference wins for a doubled invoice: `isset` is false while the
+            // stored value is still null, so a later non-null line fills it and a later line never overwrites a
+            // reference already captured.
+            if (! isset($certificates[$invoiceId])) {
+                $certificates[$invoiceId] = $allocation->whtCertificateReference;
+            }
         }
 
-        return $amounts;
+        // WHT ≤ the gross it is withheld against, per aggregated invoice (Gate-1 #2) — the readable refusal
+        // ahead of the same-row `wht_amount <= amount` CHECK.
+        foreach ($amounts as $invoiceId => $amount) {
+            if ($wht[$invoiceId]->isGreaterThan($amount)) {
+                throw ReceiptCannotBeAllocated::withholdingExceedsAllocation(
+                    $invoiceId,
+                    $wht[$invoiceId]->toDecimalString(),
+                    $amount->toDecimalString(),
+                );
+            }
+        }
+
+        return ['amounts' => $amounts, 'wht' => $wht, 'certificates' => $certificates];
     }
 
     /**
@@ -705,16 +775,21 @@ final readonly class ReceiptService
     }
 
     /**
-     * Refuse only over-allocation (ADR 0016 §C, formerly `assertFullyAllocated`).
+     * Refuse over-allocation against the receipt's settlement power (ADR 0016 §C, generalised by ADR 0017 §C).
      *
-     * `Σ allocations > amount` applies more than was received and still refuses (Gate-1 #5). `Σ ≤ amount` is
-     * accepted: an exact allocation posts two lines as before, and a shortfall leaves a remainder held as
-     * customer advances (ADR 0016). The empty-allocation refusal stays separate (`allocationAmounts()`,
-     * Gate-1 #3) — a remainder is only ever permitted on an otherwise-allocated receipt.
+     * A receipt settles receivables with both the net cash it received and the tax the customer withheld:
+     * `settlement = amount + Σ wht`. `Σ allocations > settlement` applies more than the receipt can settle and
+     * refuses; `Σ ≤ settlement` is accepted — an exact allocation posts as before, and a shortfall leaves a
+     * remainder held as customer advances (ADR 0016).
+     *
+     * To keep the no-WHT path byte-identical (§C regression), the refusal reuses the existing `overAllocated()`
+     * with its unchanged `receipt-over-allocated` code when `Σ wht = 0` (settlement then equals amount), and
+     * raises the new `overAllocatedBeyondSettlement()` only when withholding is present. The empty-allocation
+     * refusal stays separate (`parseAllocations()`, Gate-1 #3).
      *
      * @param  array<string, Money>  $allocationAmounts
      */
-    private function assertNotOverAllocated(array $allocationAmounts, Money $amount): void
+    private function assertNotOverAllocated(array $allocationAmounts, Money $amount, Money $totalWht): void
     {
         $allocated = array_reduce(
             $allocationAmounts,
@@ -722,12 +797,27 @@ final readonly class ReceiptService
             Money::zero($amount->currency),
         );
 
-        if ($allocated->isGreaterThan($amount)) {
+        $settlement = $amount->plus($totalWht);
+
+        if (! $allocated->isGreaterThan($settlement)) {
+            return;
+        }
+
+        // No WHT: settlement equals the cash amount, so this is ADR 0016's over-allocation exactly — same
+        // message, same `receipt-over-allocated` code, untouched.
+        if (! $totalWht->isPositive()) {
             throw ReceiptCannotBeRecorded::overAllocated(
                 $allocated->toDecimalString(),
                 $amount->toDecimalString(),
             );
         }
+
+        throw ReceiptCannotBeRecorded::overAllocatedBeyondSettlement(
+            $allocated->toDecimalString(),
+            $amount->toDecimalString(),
+            $totalWht->toDecimalString(),
+            $settlement->toDecimalString(),
+        );
     }
 
     /**

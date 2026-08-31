@@ -68,14 +68,24 @@ final readonly class ReceiptPostingMap
         $amount = Money::of($receipt->amount, $currency);
 
         // Σ allocations, summed from the stored allocation amounts — never recomputed. The remainder is what is
-        // left of the receipt after the invoices it names are cleared, held as customer advances.
+        // left of the receipt's settlement power after the invoices it names are cleared, held as customer
+        // advances.
         $allocated = array_reduce(
             $receipt->allocations->all(),
             static fn (Money $carry, $allocation): Money => $carry->plus(Money::of($allocation->amount, $currency)),
             Money::zero($currency),
         );
 
-        $remainder = $amount->minus($allocated);
+        // Σ wht, summed the same way from the stored allocation rows — never recomputed (ADR 0017 §D). The
+        // receipt's settlement power is `amount + Σ wht`, and the remainder is measured against it.
+        $totalWht = array_reduce(
+            $receipt->allocations->all(),
+            static fn (Money $carry, $allocation): Money => $carry->plus(Money::of($allocation->wht_amount, $currency)),
+            Money::zero($currency),
+        );
+
+        $settlement = $amount->plus($totalWht);
+        $remainder = $settlement->minus($allocated);
 
         $bank = $this->bankAccountFor($receipt);
         $receivable = $this->receivableAccountFor($receipt);
@@ -84,11 +94,25 @@ final readonly class ReceiptPostingMap
 
         $lines = [
             $this->line($bank, $amount, $receipt->branch_id, $narration),
-            $this->line($receivable, $allocated, $receipt->branch_id, $narration, creditSide: true),
         ];
 
+        // The withholding debit, one netted line for the whole receipt — WHT Receivable is a single GL account,
+        // the per-invoice detail lives in the subledger, exactly as Σ allocations is one AR line. Emitted, and
+        // the account resolved, only when Σ wht > 0: a no-WHT receipt is byte-identical to ADR 0016, and a
+        // company lacking the account can still record ordinary receipts (§C regression).
+        if ($totalWht->isPositive()) {
+            $lines[] = $this->line(
+                $this->whtReceivableAccountFor($receipt),
+                $totalWht,
+                $receipt->branch_id,
+                $narration,
+            );
+        }
+
+        $lines[] = $this->line($receivable, $allocated, $receipt->branch_id, $narration, creditSide: true);
+
         // Emitted only when positive: a fully-allocated receipt yields the identical two-line entry it did
-        // before ADR 0016. The remainder is non-negative by construction — the service refuses Σ > amount.
+        // before ADR 0016. The remainder is non-negative by construction — the service refuses Σ > settlement.
         if ($remainder->isPositive()) {
             $lines[] = $this->line(
                 $this->customerAdvancesAccountFor($receipt),
@@ -184,6 +208,37 @@ final readonly class ReceiptPostingMap
 
         if (! $account->acceptsPostings()) {
             throw ReceiptCannotBePosted::accountNotPostable('customer advances', $account);
+        }
+
+        return $account;
+    }
+
+    /**
+     * The WHT Receivable account the withheld tax debits (ADR 0017 §A).
+     *
+     * Resolved by system key, never by code — a company may renumber — and validated a postable asset, the
+     * checks a CHECK cannot make because it cannot join to `accounts`. The exact mirror of
+     * `customerAdvancesAccountFor()` on the debit side. Refused with `withoutWhtReceivableAccount()` when a
+     * company has none; called only when `Σ wht > 0`, so a company lacking it can still record ordinary
+     * receipts.
+     */
+    public function whtReceivableAccountFor(CustomerReceipt $receipt): Account
+    {
+        $account = Account::query()
+            ->forCompany($receipt->company_id)
+            ->withSystemKey(Account::WHT_RECEIVABLE)
+            ->first();
+
+        if ($account === null) {
+            throw ReceiptCannotBePosted::withoutWhtReceivableAccount();
+        }
+
+        if ($account->type !== AccountType::Asset) {
+            throw ReceiptCannotBePosted::accountNotPostable('WHT receivable', $account);
+        }
+
+        if (! $account->acceptsPostings()) {
+            throw ReceiptCannotBePosted::accountNotPostable('WHT receivable', $account);
         }
 
         return $account;
