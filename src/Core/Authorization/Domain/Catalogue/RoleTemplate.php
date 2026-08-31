@@ -121,6 +121,10 @@ final readonly class RoleTemplate
                     // is: undoing a posting is part of keeping the record, not day-to-day entry.
                     'sales.receipts.cancel',
 
+                    // Applying a customer's held credit to a later invoice — accountant-only for the same reason
+                    // as recording and cancelling: it moves money and posts a reclassification to the ledger.
+                    'sales.receipts.apply-credit',
+
                     // The receivables reports, for the same reason as `accounting.reports.view` above:
                     // whoever decides a customer's credit terms is who needs to see what that decision has
                     // cost so far, and the AR reconciliation is a check on the accountant's own postings.

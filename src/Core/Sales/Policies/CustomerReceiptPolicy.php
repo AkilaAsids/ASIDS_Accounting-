@@ -63,4 +63,19 @@ final class CustomerReceiptPolicy
         return $user->can('sales.receipts.cancel')
             && $user->canAccessCompany($receipt->company_id);
     }
+
+    /**
+     * Applying a customer's held credit to a later invoice.
+     *
+     * A capability of its own, `sales.receipts.apply-credit`, never riding on `sales.receipts.manage` or
+     * `.cancel` — the same issue/cancel split invoices make, because applying credit moves money and posts a
+     * reclassification JV as a distinct action (ADR 0016 §F). Permission and company access both required,
+     * matching `cancel()`. Advisory only: `Gate::before` short-circuits this for a tenant owner, so
+     * `ReceiptService::applyCredit()` is the authoritative boundary.
+     */
+    public function applyCredit(User $user, CustomerReceipt $receipt): bool
+    {
+        return $user->can('sales.receipts.apply-credit')
+            && $user->canAccessCompany($receipt->company_id);
+    }
 }
