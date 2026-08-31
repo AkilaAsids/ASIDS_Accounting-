@@ -80,6 +80,17 @@ final class Account extends Model
      */
     public const string CUSTOMER_ADVANCES = 'customer_advances';
 
+    /**
+     * Where the income tax a customer withholds on a receipt lands — a claim against the company's own future
+     * income tax, an asset, not a discount or a write-off.
+     *
+     * When a customer settles an invoice net of withholding tax, the gross receivable is still cleared in full;
+     * the withheld portion is booked here as a receivable (Dr WHT Receivable) inside the receipt's own entry. It
+     * is resolved by key rather than by code for the same reason as the others: a company may renumber freely,
+     * and the withheld tax still has to find its home account afterwards. Added by ADR 0017 (withholding tax).
+     */
+    public const string WHT_RECEIVABLE = 'wht_receivable';
+
     protected $table = 'accounts';
 
     /** @var list<string> */
