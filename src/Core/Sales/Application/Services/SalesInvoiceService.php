@@ -361,14 +361,16 @@ final readonly class SalesInvoiceService
                 throw InvoiceCannotBeCancelled::alreadyCancelled($identifier);
             }
 
-            if ($locked->status !== SalesInvoiceStatus::Issued) {
-                throw InvoiceCannotBeCancelled::notIssued($identifier, $locked->status);
-            }
-
-            // Phase 4 will make this reachable. Stated now so the rule exists before the thing it guards
-            // against does — a cancellation that stranded a receipt would be found by a customer, not a test.
+            // Any invoice carrying payment (partially or fully paid) cannot be cancelled — its receipts
+            // would be stranded. Checked BEFORE the status guard so a paid invoice refuses with the
+            // accurate partially-paid reason rather than "not issued". ADR 0015 wrote this dormant noting
+            // "Phase 4 will make this reachable"; Phase 4's apply-credit does (Gate 2 approved 2026-08-31).
             if (bccomp($locked->amount_paid, '0', Money::SCALE) > 0) {
                 throw InvoiceCannotBeCancelled::partiallyPaid($identifier, $locked->amount_paid);
+            }
+
+            if ($locked->status !== SalesInvoiceStatus::Issued) {
+                throw InvoiceCannotBeCancelled::notIssued($identifier, $locked->status);
             }
 
             $entry = $locked->journalEntry;
