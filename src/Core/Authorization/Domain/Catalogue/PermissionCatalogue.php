@@ -40,6 +40,7 @@ final class PermissionCatalogue
             ...self::audit(),
             ...self::accounting(),
             ...self::sales(),
+            ...self::purchasing(),
             ...self::platform(),
         ];
     }
@@ -267,6 +268,26 @@ final class PermissionCatalogue
             // why it is a capability of its own rather than folded into `customers.view`, which answers only
             // *who* the customers are.
             new PermissionDefinition('sales', 'reports', 'view', 'View receivables reports', 'Read outstanding balances, aged receivables and the AR control reconciliation.', sortOrder: 90),
+        ];
+    }
+
+    /**
+     * Buying: suppliers now, bills and payments as they arrive.
+     *
+     * A group of its own rather than folded under `sales`, because suppliers are the payable-side mirror
+     * of customers, not a kind of customer. Deciding who a company pays and on what terms is a distinct
+     * capability from deciding who it sells to.
+     *
+     * @return list<PermissionDefinition>
+     */
+    private static function purchasing(): array
+    {
+        return [
+            new PermissionDefinition('purchasing', 'suppliers', 'view', 'View suppliers', 'See the suppliers a company buys from and their terms.', sortOrder: 10),
+            // Sensitive because deciding who you pay is a sensitive action: `payment_terms_days` and the
+            // compliance-bearing tax identification number ride on `manage`, and the audit trail records
+            // every change to them.
+            new PermissionDefinition('purchasing', 'suppliers', 'manage', 'Manage suppliers', 'Add, edit, archive and restore suppliers.', sensitive: true, sortOrder: 20),
         ];
     }
 

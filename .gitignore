@@ -42,5 +42,7 @@ yarn-error.log
 *.pfx
 !/storage/oauth-*.key.example
 
-# Minions autonomous-run runtime (machine-local; keeps a colleague PR clean)
-.minions/
+# Minions autonomous-run runtime (machine-local only — session token & launch state).
+# NB: .minions/memory/ and docs/ are committed on purpose (Layer-1 memory + records).
+.minions/session.json
+.minions/launch.json
