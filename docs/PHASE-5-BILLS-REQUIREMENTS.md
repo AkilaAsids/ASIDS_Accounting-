@@ -327,3 +327,16 @@ HTTP surface.
 
 No commits made. No architecture or stack decisions made — every account-resolution and schema
 question above is framed as options for the Architect and the human, not decided here.
+
+## Gate 1 decisions — APPROVED 2026-09-01
+
+Binding on the architecture (ADR 0019) and build:
+
+1. **Numbering — capture the supplier's own invoice number (REQUIRED, the statutory identity, and what the duplicate guard keys on) PLUS an internal bill reference.** Gapless numbering is a compliance requirement for documents *we issue* (sales invoices); a bill is *received*, so its internal number need NOT be gapless. The ledger posting still draws a gapless `JV` from the journal-voucher counter as always (ADR 0009 §B two-series design preserved).
+2. **Cancellation/reversal DEFERRED** to a later slice. This wave is draft + post only, mirroring how Sales split draft (M4) from issue+cancel (M5). Prepare the structural boundary (a status that can gain a `cancelled` value later) but do not implement reversal.
+3. **AP account = the system `Account::TRADE_PAYABLES` (`2110 Trade Payables`)** control account. Per-supplier AP override DEFERRED (the Wave-6 deferred field).
+4. **Expense account = line-level** — each bill line names its own expense account, mirroring the sales invoice line's revenue account. Supplier-default expense account deferred.
+5. **Duplicate supplier-invoice-number = REFUSE**, scoped per supplier per company — a hard AP control against double-recording/double-paying the same bill.
+6. **Bind the real `EloquentPayableBalanceProbe` this wave**, activating Wave 6's dormant supplier archive/delete/code-lock rules. Requires a blast-radius acceptance test across existing suppliers (mirror `ReceivableBalanceProbeTest`).
+
+**Input-VAT readiness note (Risk):** posting refuses a line whose tax code has no `input_account_id`; existing tax codes may widely lack it — the Architect should address seeding/backfill or a clear refusal, not silent breakage.
