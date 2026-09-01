@@ -98,6 +98,11 @@ final readonly class RoleTemplate
                     'sales.customers.view',
                     'sales.customers.manage',
 
+                    // Suppliers, including their terms. An accountant is who decides who the business
+                    // pays and on what terms.
+                    'purchasing.suppliers.view',
+                    'purchasing.suppliers.manage',
+
                     // Tax codes and their rates. Deciding what a code charges is a professional
                     // judgement with statutory consequences, which is why this is the only template
                     // granted it.
@@ -148,6 +153,11 @@ final readonly class RoleTemplate
                     'sales.customers.view',
                     'sales.customers.manage',
 
+                    // Maintains suppliers too, because entering day-to-day purchases means creating the
+                    // supplier you are buying from — the mirror of the customer grant above.
+                    'purchasing.suppliers.view',
+                    'purchasing.suppliers.manage',
+
                     // Reads tax codes, never changes them. A bookkeeper raising an invoice has to know
                     // which codes exist and what they charge; deciding what they *should* charge is the
                     // accountant's call, and the same drafting/posting split reasoning applies.
@@ -189,6 +199,10 @@ final readonly class RoleTemplate
                     // Reads who the business sells to and on what terms, which an auditor reviewing
                     // receivables needs, and changes none of it.
                     'sales.customers.view',
+
+                    // Reads who the business buys from and on what terms, which an auditor reviewing
+                    // payables needs, and changes none of it.
+                    'purchasing.suppliers.view',
 
                     // Tax codes read-only. An auditor checking a VAT return needs to see which rate
                     // applied over which dates — that history is most of what they came for.
