@@ -6,6 +6,7 @@ namespace Asids\Core\Purchasing\Providers;
 
 use Asids\Core\Purchasing\Application\Services\SupplierService;
 use Asids\Core\Purchasing\Domain\Contracts\PayableBalanceProbe;
+use Asids\Core\Purchasing\Domain\Models\Bill;
 use Asids\Core\Purchasing\Domain\Models\Supplier;
 use Asids\Core\Purchasing\Infrastructure\NoPayables;
 use Asids\Core\Purchasing\Policies\SupplierPolicy;
@@ -47,6 +48,9 @@ final class PurchasingServiceProvider extends ServiceProvider
         // merges rather than replaces, so each module owns the aliases for its own models.
         Relation::morphMap([
             Supplier::MORPH_ALIAS => Supplier::class,
+            // `Bill` is `Auditable`, and an audit entry for an unmapped class throws. `BillLine` registers no
+            // alias — it is never audited separately and can never be a source document (ADR 0019 §C2, §E).
+            Bill::MORPH_ALIAS => Bill::class,
         ]);
 
         Gate::policy(Supplier::class, SupplierPolicy::class);

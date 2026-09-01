@@ -20,6 +20,7 @@ enum DocumentType: string
     case OpeningBalance = 'opening_balance';
     case YearEndClose = 'year_end_close';
     case SalesInvoice = 'sales_invoice';
+    case Bill = 'bill';
 
     public function label(): string
     {
@@ -28,6 +29,7 @@ enum DocumentType: string
             self::OpeningBalance => 'Opening balance',
             self::YearEndClose => 'Year-end close',
             self::SalesInvoice => 'Sales invoice',
+            self::Bill => 'Bill',
         };
     }
 
@@ -41,6 +43,7 @@ enum DocumentType: string
             self::OpeningBalance => 'OB',
             self::YearEndClose => 'YEC',
             self::SalesInvoice => 'INV',
+            self::Bill => 'BILL',
         };
     }
 
@@ -49,12 +52,13 @@ enum DocumentType: string
      *
      * Gapless numbering costs a row lock per document, serialising issuance within a company. It is
      * worth that for anything a tax authority may audit for completeness, and not worth it otherwise.
-     * Every family so far is auditable, so all four qualify — sales invoices most of all, since Sri Lankan
-     * e-invoicing demands completeness. The distinction exists because later phases will add internal
-     * document types where it does not.
+     * The journal and sales families are all auditable — sales invoices most of all, since Sri Lankan
+     * e-invoicing demands completeness — so they qualify. `Bill` is the first case that does not: a bill
+     * is *received*, not issued, so no authority audits *our* internal bill numbers for completeness, and
+     * the per-document row lock buys nothing (ADR 0019 §B, Gate-1 dec. 1).
      */
     public function requiresGaplessNumbering(): bool
     {
-        return true;
+        return $this !== self::Bill;
     }
 }
