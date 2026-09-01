@@ -703,3 +703,14 @@ command. Confirm the **(Gate-2 PROPOSED)** shapes:
 *Prepared by the Solution Architect (Stage 3, Phase 5 / Wave 7). Design only — no production code written,
 nothing committed. Build begins after Gate 2 approval, on this ADR, verbatim; any implementation discovery
 that would change a decision returns to Gate 2.*
+
+## Gate 2 decision — APPROVED 2026-09-01
+
+The human approved the architecture package **as proposed**, and resolved the one fork:
+
+- **Schema, posting, account, numbering, duplicate guard, probe rebind — all confirmed** as designed: `bills`/`bill_lines`; **Dr Expense (per line) + Dr Input VAT (Σ) = Cr Trade Payables**; new `Account::TRADE_PAYABLES` (`2110`) + stamp/backfill + VERSION bump; `1170` Input VAT stays keyless; `DocumentType::Bill` with `requiresGaplessNumbering() = false` (internal `BILL-` counter at post); duplicate unique on `(company_id, supplier_id, supplier_invoice_number)` full exact-match trimmed; `EloquentPayableBalanceProbe` rebind activating Wave 6's three dormant supplier rules (with binding + blast-radius tests).
+- **Permissions:** `purchasing.bills.{view, draft, post}` (`post` sensitive) — `draft` (not `manage`), matching the sales-invoice mirror. No `cancel` capability this wave (cancellation deferred, Gate-1 #2).
+- **Cancellation DEFERRED** — draft + post only; the status CHECK reserves `cancelled`/payment states so no later widening migration is needed.
+- **Fork (input-VAT readiness) → build the command.** Ship the input-VAT posting refusal (`BillCannotBePosted` when a line's tax code lacks `input_account_id`) **AND** a guarded, **dry-run-first** operator command **`purchasing:backfill-input-vat-accounts`** that points existing tax codes at `1170 Input VAT Recoverable` in one reviewed step (Stage 8). NOT force-set platform-wide.
+
+Build proceeds strictly within this ADR (8 stages incl. the backfill command, test-first). Any implementation discovery that would change a decision above returns to Gate 2.
