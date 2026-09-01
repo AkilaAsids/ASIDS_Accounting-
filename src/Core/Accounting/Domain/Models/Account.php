@@ -70,6 +70,15 @@ final class Account extends Model
      */
     public const string TRADE_RECEIVABLES = 'trade_receivables';
 
+    /**
+     * Where a supplier bill's credit lands — the control account every posted bill credits.
+     *
+     * A bill posts Dr Expense (+ Dr Input VAT) = Cr Trade Payables, and the payable is resolved by key,
+     * never by code, for the reason above: a company that renumbers its chart must still be able to post a
+     * bill afterwards. No per-supplier override this wave — every bill credits this one account.
+     */
+    public const string TRADE_PAYABLES = 'trade_payables';
+
     protected $table = 'accounts';
 
     /** @var list<string> */
