@@ -9,6 +9,7 @@ use Asids\Core\Audit\Providers\AuditServiceProvider;
 use Asids\Core\Authorization\Providers\AuthorizationServiceProvider;
 use Asids\Core\Identity\Providers\IdentityServiceProvider;
 use Asids\Core\Organization\Providers\OrganizationServiceProvider;
+use Asids\Core\Purchasing\Providers\PurchasingServiceProvider;
 use Asids\Core\Sales\Providers\SalesServiceProvider;
 use Asids\Core\Settings\Providers\SettingsServiceProvider;
 use Asids\Core\Tenancy\Providers\TenancyServiceProvider;
@@ -43,6 +44,11 @@ final class ModuleServiceProvider extends ServiceProvider
         // After Accounting: a customer's receivable account is an Account, and the invoices this
         // module posts go through Accounting's posting service. The dependency runs one way only.
         SalesServiceProvider::class,
+        // After Accounting: Wave 7's bills post through Accounting's posting service and resolve
+        // supplier accounts against Account. Placed directly after Sales — it depends on Sales in
+        // neither direction — to keep the Accounting-dependent business contexts grouped as the mirror
+        // it is.
+        PurchasingServiceProvider::class,
         SettingsServiceProvider::class,
         AuditServiceProvider::class,
     ];

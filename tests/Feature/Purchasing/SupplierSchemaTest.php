@@ -139,7 +139,9 @@ describe('the check constraints', function (): void {
     it('refuses a status outside the enum', function (): void {
         insertSupplier(['code' => 'S-0001']);
 
-        expect(fn () => insertSupplier(['code' => 'S-0002', 'status' => 'dormant']))
+        // Wrapped in a savepoint (DB::transaction) so the CHECK violation rolls back cleanly instead of
+        // aborting the whole RefreshDatabase transaction (PG 25P02) — mirrors IssueInvoiceTest.
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-0002', 'status' => 'dormant'])))
             ->toThrow(QueryException::class);
 
         // Proves it was the CHECK that rejected the row, not a missing table or an unrelated failure.
@@ -151,7 +153,7 @@ describe('the check constraints', function (): void {
 
         // Phase 2 learned this on fiscal_periods: a mass update moved status and left the timestamp
         // behind. The CHECK ties them together so the two can never disagree.
-        expect(fn () => insertSupplier(['code' => 'S-0002', 'status' => 'archived', 'archived_at' => null]))
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-0002', 'status' => 'archived', 'archived_at' => null])))
             ->toThrow(QueryException::class);
 
         expect(DB::table('suppliers')->where('code', 'S-0002')->count())->toBe(0);
@@ -160,7 +162,7 @@ describe('the check constraints', function (): void {
     it('refuses an active status that carries an archive timestamp', function (): void {
         insertSupplier(['code' => 'S-0001']);
 
-        expect(fn () => insertSupplier(['code' => 'S-0002', 'status' => 'active', 'archived_at' => now()]))
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-0002', 'status' => 'active', 'archived_at' => now()])))
             ->toThrow(QueryException::class);
 
         expect(DB::table('suppliers')->where('code', 'S-0002')->count())->toBe(0);
@@ -169,7 +171,7 @@ describe('the check constraints', function (): void {
     it('refuses VAT registration without a number', function (): void {
         insertSupplier(['code' => 'S-0001']);
 
-        expect(fn () => insertSupplier(['code' => 'S-0002', 'is_vat_registered' => true, 'vat_registration_number' => null]))
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-0002', 'is_vat_registered' => true, 'vat_registration_number' => null])))
             ->toThrow(QueryException::class);
 
         expect(DB::table('suppliers')->where('code', 'S-0002')->count())->toBe(0);
