@@ -491,3 +491,11 @@ No UNRESOLVED forks block the build. Confirm the following **(Gate-2 PROPOSED)**
 
 *Prepared by the Solution Architect (Stage 3, Phase 5 / Wave 6). Design only — no production code
 written, nothing committed. Build begins after Gate 2 approval, on this ADR, verbatim.*
+
+## Gate 2 decision — APPROVED 2026-09-01
+
+Approved **as proposed**, including both flagged departures from the literal customer mirror:
+1. **`purchasing.suppliers.manage` is `sensitive: true`** (the customer `manage` is not) — deciding who you pay is a sensitive action.
+2. **`Supplier::auditOnly()` includes `tax_identification_number`** (the customer omits its TIN) — the TIN is retained for later WHT/compliance, so changes to it must be audited.
+
+All Gate-2 PROPOSED values confirmed: new `src/Core/Purchasing/` context + `PurchasingServiceProvider` after Sales; the `suppliers` table (customer mirror less `credit_limit` and the AP account, keeps TIN) with FORCED RLS and per-company case-insensitive-unique `S-` non-gapless codes; `SupplierService`/`SupplierPolicy`; `purchasing.suppliers.{view,manage}` (view 10, manage 20 sensitive) granted to accountant + bookkeeper (manage) and viewer (view); dormant `PayableBalanceProbe`/`NoPayables` seam with method `hasAnyBill()`; the 5-stage test-first build. Build proceeds strictly within this ADR; any implementation discovery that would change a decision returns to Gate 2.
