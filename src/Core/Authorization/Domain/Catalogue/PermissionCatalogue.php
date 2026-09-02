@@ -288,6 +288,15 @@ final class PermissionCatalogue
             // compliance-bearing tax identification number ride on `manage`, and the audit trail records
             // every change to them.
             new PermissionDefinition('purchasing', 'suppliers', 'manage', 'Manage suppliers', 'Add, edit, archive and restore suppliers.', sensitive: true, sortOrder: 20),
+
+            new PermissionDefinition('purchasing', 'bills', 'view', 'View bills', 'Read bills and their lines.', sortOrder: 30),
+            // Not sensitive, and the contrast with posting is the point. A draft bill has no internal number,
+            // is not in the ledger, and can be corrected or deleted with no trace — the mirror of
+            // `sales.invoices.draft`.
+            new PermissionDefinition('purchasing', 'bills', 'draft', 'Draft bills', 'Prepare, change and delete draft bills before they are posted.', sortOrder: 40),
+            // Sensitive: posting takes an internal number, posts to the ledger and creates a payable — none of
+            // which can be taken back except by a cancellation. The mirror of `sales.invoices.issue`.
+            new PermissionDefinition('purchasing', 'bills', 'post', 'Post bills', 'Commit a draft bill to the ledger, creating the payable.', sensitive: true, sortOrder: 50),
         ];
     }
 
