@@ -96,7 +96,9 @@ describe('the document type', function (): void {
         expect(DocumentType::JournalVoucher->prefix())->toBe('JV')
             ->and(DocumentType::OpeningBalance->prefix())->toBe('OB')
             ->and(DocumentType::YearEndClose->prefix())->toBe('YEC')
-            ->and(DocumentType::cases())->toHaveCount(4);
+            // Five since Wave 7 added the non-gapless `Bill` case (ADR 0019 §B). The addition is additive —
+            // this family's prefixes and gaplessness are unchanged.
+            ->and(DocumentType::cases())->toHaveCount(5);
     });
 });
 

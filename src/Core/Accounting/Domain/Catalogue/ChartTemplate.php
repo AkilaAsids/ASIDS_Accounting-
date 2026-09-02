@@ -37,7 +37,7 @@ final class ChartTemplate
      * or a removal. Companies store the version they were created from, so a correction can find
      * them.
      */
-    public const string VERSION = '2026.08-lk-sme-2';
+    public const string VERSION = '2026.09-lk-sme-3';
 
     /**
      * Shown wherever the template is offered or applied. Not optional, and not abbreviated.
@@ -95,7 +95,7 @@ final class ChartTemplate
             // ── Liabilities ─────────────────────────────────────────────────────
             self::heading('2000', 'Liabilities', AccountType::Liability),
             self::heading('2100', 'Current Liabilities', AccountType::Liability, parent: '2000'),
-            self::leaf('2110', 'Trade Payables', AccountType::Liability, parent: '2100'),
+            self::leaf('2110', 'Trade Payables', AccountType::Liability, parent: '2100', system: Account::TRADE_PAYABLES),
             self::leaf('2120', 'Other Payables', AccountType::Liability, parent: '2100'),
             self::leaf('2130', 'Accruals', AccountType::Liability, parent: '2100'),
             self::leaf('2140', 'Output VAT Payable', AccountType::Liability, parent: '2100'),
@@ -162,6 +162,9 @@ final class ChartTemplate
             // Added by Phase 3 Milestone 5. Every sales invoice debits it unless the customer names an
             // account of its own, so a company that skipped the starter chart must still receive it.
             self::leaf('1130', 'Trade Receivables', AccountType::Asset, system: Account::TRADE_RECEIVABLES),
+            // Added by Phase 5 Wave 7. Every posted bill credits it, so a company that skipped the starter
+            // chart must still receive it — or its first bill fails to post.
+            self::leaf('2110', 'Trade Payables', AccountType::Liability, system: Account::TRADE_PAYABLES),
         ];
     }
 

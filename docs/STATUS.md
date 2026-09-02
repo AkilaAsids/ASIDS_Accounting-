@@ -1,34 +1,34 @@
-# Project status — Phase 5 supplier domain (Minions Team 6)
+# Project status — Phase 5 bills / purchase invoices (Minions Team 7)
 
-**Last updated:** 2026-09-01 · **Branch:** `feature/phase5-suppliers` · **Base:** `main` (independent of the Phase 4 stack)
+**Last updated:** 2026-09-02 · **Branch:** `feature/phase5-bills` · **Base:** `feature/phase5-suppliers` (stacked)
 
 ## Where we are
-Wave 6 **delivered**: the supplier domain foundation, in a new `src/Core/Purchasing/` bounded context —
-the mirror of the Phase 3 customer domain (model, service, policy, permissions, factory, dormant
-payable-balance probe). Master-data CRUD; no ledger posting, no HTTP. Delivered as PR #7 (off `main`).
+Wave 7 **delivered**: bills / purchase invoices — the purchase-side mirror of sales invoices and the
+**first purchasing document that posts to the ledger**. Draft a bill against a supplier → post →
+`Dr Expense(per line) + Dr Input VAT = Cr Trade Payables`. First real input-VAT use. Cancellation deferred.
+Delivered as PR #8.
 
 | Stage | State |
 |---|---|
-| 1 · Intake | ✅ | 2 · Requirements | ✅ Gate 1 APPROVED 2026-08-31 |
-| 3 · Architecture (ADR 0018) | ✅ Gate 2 APPROVED 2026-09-01 |
-| 4 · Build | ✅ 5 stages test-first (Opus) — `eaa4b0d`,`6222f9f`,`ad5ec23`,`5adc241`,`5440c63` |
-| 5 · Review (QA ∥ Security) | ✅ **both PASS** — 0 blockers, 0 should-fixes |
-| Delivery | ✅ **PR #7 opened** (base `main`) |
+| 1 · Intake | ✅ | 2 · Requirements | ✅ Gate 1 APPROVED 2026-09-01 |
+| 3 · Architecture (ADR 0019) | ✅ Gate 2 APPROVED 2026-09-01 |
+| 4 · Build | ✅ 8 stages test-first (Opus) — `7ff9e53`…`722ed94` |
+| 5 · Review (QA ∥ Security) | ✅ QA **PASS**; Security **PASS-WITH-FIXES** → should + nit actioned |
+| Delivery | ✅ **PR #8 opened** (base `feature/phase5-suppliers`) |
 
 ## Result
-- **Tests:** Purchasing **118 green** (incl. a QA mutation test proving the CHECK negatives are non-vacuous); Accounting **262 green** (boot integrity — new module registration undisturbed). Pint + PHPStan clean.
-- **Reviews:** Security **PASS**, QA **PASS**. FORCED RLS + tenant/company isolation, authz (manage sensitive), S-code race safety, and the archive-with-balance seam all verified.
-- **Delivered:** `src/Core/Purchasing/` module + provider; `suppliers` table (customer mirror less credit_limit/AP account, keeps TIN) + FORCED RLS; `Supplier`/`SupplierStatus`/factory; `PayableBalanceProbe`/`NoPayables` (dormant); `SupplierService`; `purchasing.suppliers.{view,manage}` + `SupplierPolicy`.
-- **Test-harness fix:** the 4 CHECK-negative schema tests now savepoint the failing insert (PG 25P02) — proven non-vacuous by `SupplierSchemaCheckMutationTest`.
+- **Tests:** 1,465 green — Purchasing 380 (+QA race test), Accounting 280, Sales 805. **0 regressions.** Pint + PHPStan clean.
+- **Reviews:** QA **PASS** (added `BillDuplicateNumberRaceTest`); Security **PASS-WITH-FIXES** — the should (backfill command now asset-only + names the resolved account) and its coverage are in; the nit (ASCII `trim`) accepted as negligible.
+- **Delivered:** `Account::TRADE_PAYABLES` (2110) + backfill; `bills`/`bill_lines` (+ FORCED RLS, posted-immutability, duplicate-supplier-invoice unique index); `DocumentType::Bill` (first non-gapless); `BillPostingMap`; `BillService` (draft/post + duplicate guard, two-series BILL-/JV numbering); `EloquentPayableBalanceProbe` rebind (Wave-6 supplier protections now live); `purchasing.bills.{view,draft,post}`; the dry-run `purchasing:backfill-input-vat-accounts` command.
 
-## Forward-looking follow-ups (for the Wave-7 HTTP slice; non-blocking)
-Enforce `authorize('view', $company)` before `create` at the supplier controller (as Sales does); keep `code`/lifecycle fields out of request mass-assignment; flip the `PayableBalanceProbe` binding to the real Eloquent probe (the binding test catches a miss).
+## Known limitations (accepted)
+- Cancellation/reversal deferred (status CHECK already reserves `cancelled`/payment states). Supplier payments + WHT-on-payment are Wave 8.
 
-## Phase 5 roadmap
-Wave 6 suppliers ✅ → Wave 7 bills/purchase invoices (input VAT, `tax_codes.input_account_id`, new DocumentType, gapless numbering, ledger posting) → Wave 8 supplier payments + WHT-on-payment.
+## ⚠ Harness note (from QA + Security)
+The shared `asids_erp_testing` DB **deadlocks under concurrent `artisan test` runs** (`RefreshDatabase` `migrate:fresh` vs `drop table`). Run suites **sequentially** or per-runner DBs — this was the cause of several intermittent "stall/deadlock" failures. Not a code defect.
 
 ## Related (open PRs)
-Phase 3 FE **#2** · Phase 4 **#3–#6** (stacked) · Phase 5 **#7** (off `main`). Merge #2–#6 bottom-up; #7 is independent.
+Phase 3 FE **#2** · Phase 4 **#3–#6** · Phase 5 **#7** (suppliers) · **#8** (bills, stacked on #7). Merge bottom-up.
 
 ## What you (the human) need to do next
-Nothing blocking. Review/merge the open PRs when ready. **Wave 7 (bills)** opens next and STOPs at Gate 1 — it's the first purchasing slice that posts to the ledger, so its gates matter. Prod (Gate 3) always needs you; none in scope.
+Nothing blocking. Review/merge the open PRs when ready. **Wave 8 (supplier payments + WHT-on-payment)** — the final Phase 5 wave — opens next and STOPs at Gate 1. Prod (Gate 3) always needs you; none in scope.

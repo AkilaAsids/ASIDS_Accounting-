@@ -117,6 +117,12 @@ final readonly class RoleTemplate
                     'sales.invoices.issue',
                     'sales.invoices.cancel',
 
+                    // Bills, the payable-side mirror of invoices. The accountant is the side of the split that
+                    // commits documents to the ledger, so it holds `post` as well as `draft`.
+                    'purchasing.bills.view',
+                    'purchasing.bills.draft',
+                    'purchasing.bills.post',
+
                     // The receivables reports, for the same reason as `accounting.reports.view` above:
                     // whoever decides a customer's credit terms is who needs to see what that decision has
                     // cost so far, and the AR reconciliation is a check on the accountant's own postings.
@@ -169,6 +175,11 @@ final readonly class RoleTemplate
                     'sales.invoices.view',
                     'sales.invoices.draft',
 
+                    // Drafts bills, never posts them — the mirror of the invoice grant above, and the role the
+                    // drafting/posting split exists for on the payable side too.
+                    'purchasing.bills.view',
+                    'purchasing.bills.draft',
+
                     // Included on the same reasoning as `accounting.reports.view` above — a bookkeeper who
                     // cannot see what a customer owes cannot tell whether the invoice they just drafted is
                     // sensible. This role already holds `sales.customers.manage`, which is marked sensitive
@@ -211,6 +222,10 @@ final readonly class RoleTemplate
                     // Reads invoices and changes none of them, which is the whole of what an auditor
                     // reviewing revenue needs.
                     'sales.invoices.view',
+
+                    // Reads bills and changes none of them, the mirror of the invoice read for an auditor
+                    // reviewing payables.
+                    'purchasing.bills.view',
 
                     // The receivables reports. For this role they are close to the point of it: an auditor
                     // testing receivables starts at the aged listing and the control reconciliation, and a
