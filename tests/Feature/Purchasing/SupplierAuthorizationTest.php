@@ -12,7 +12,7 @@ use Asids\Core\Purchasing\Application\DTOs\SupplierData;
 use Asids\Core\Purchasing\Application\Services\SupplierService;
 use Asids\Core\Purchasing\Domain\Contracts\PayableBalanceProbe;
 use Asids\Core\Purchasing\Domain\Models\Supplier;
-use Asids\Core\Purchasing\Infrastructure\NoPayables;
+use Asids\Core\Purchasing\Infrastructure\EloquentPayableBalanceProbe;
 use Asids\Core\Purchasing\Policies\SupplierPolicy;
 use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -236,9 +236,10 @@ describe('provider registration', function (): void {
         expect(Relation::getMorphedModel(Supplier::MORPH_ALIAS))->toBe(Supplier::class);
     });
 
-    it('binds the payables probe to the dormant NoPayables this slice', function (): void {
-        // Wave 7 flips this to `EloquentPayableBalanceProbe`. A seam left unbound is exactly the failure
-        // this assertion is here to catch (ADR 0018 §E).
-        expect(app(PayableBalanceProbe::class))->toBeInstanceOf(NoPayables::class);
+    it('binds the payables probe to the real EloquentPayableBalanceProbe now bills exist', function (): void {
+        // Wave 7 flipped this from the dormant `NoPayables` to `EloquentPayableBalanceProbe`, activating the
+        // three dormant supplier rules. A seam left unbound is exactly the failure this assertion catches
+        // (ADR 0018 §E, ADR 0019 §E). `NoPayables` is kept in the codebase but is no longer the bound default.
+        expect(app(PayableBalanceProbe::class))->toBeInstanceOf(EloquentPayableBalanceProbe::class);
     });
 });
