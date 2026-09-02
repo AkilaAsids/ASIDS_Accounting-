@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Asids\Core\Purchasing\Domain\Exceptions;
 
+use Asids\Core\Accounting\Domain\Enums\PeriodStatus;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
+use Asids\Core\Purchasing\Domain\Enums\BillStatus;
 
 /**
  * The bill cannot be turned into a balanced journal entry — the payable-side mirror of `InvoiceCannotBePosted`.
@@ -25,6 +27,70 @@ final class BillCannotBePosted extends BusinessRuleViolation
         return new self(
             'This bill has no lines, so there is nothing to post. Add at least one line first.',
             'bill-has-no-lines',
+        );
+    }
+
+    /**
+     * Only a draft may be posted.
+     *
+     * The readable answer for the ordinary sequential second `post()`. It is not the *protection* against
+     * double posting — that is the unique index on `journal_entries.source_id`, which is what holds when two
+     * requests race.
+     */
+    public static function notADraft(string $identifier, BillStatus $status): self
+    {
+        return new self(
+            sprintf(
+                'Bill %s is %s and has already been posted. A posted bill is a statutory record; correct it '
+                .'with a debit note or a cancellation instead.',
+                $identifier,
+                strtolower($status->label()),
+            ),
+            'bill-not-a-draft',
+            ['bill' => $identifier, 'status' => $status->value],
+        );
+    }
+
+    /**
+     * A draft totalling zero (or less).
+     *
+     * A draft may sit at zero while it is being written; posting is where that stops being acceptable. A zero
+     * bill cannot be posted at all — `journal_lines_one_sided_check` requires exactly one side positive — so
+     * without this the failure would surface as a database error naming a constraint the user never heard of.
+     */
+    public static function withZeroTotal(string $identifier, string $total): self
+    {
+        return new self(
+            sprintf(
+                'Bill %s totals %s, so there is nothing to post. A bill has to carry an amount before it can be '
+                .'posted.',
+                $identifier,
+                $total,
+            ),
+            'bill-total-not-positive',
+            ['bill' => $identifier, 'total' => $total],
+        );
+    }
+
+    /**
+     * The bill date falls in a period that is closed or locked.
+     *
+     * `PostingService` refuses this too, but only after a document number has been reserved. Checking here is
+     * what makes a closed-period refusal cost nothing — the one refusal a user hits routinely, posting on the
+     * 3rd for a bill dated the 30th of a month the accountant closed yesterday.
+     */
+    public static function intoClosedPeriod(string $identifier, string $periodLabel, PeriodStatus $status): self
+    {
+        return new self(
+            sprintf(
+                'Bill %s is dated in %s, which is %s. Reopen the period, or change the bill date to one in an '
+                .'open period.',
+                $identifier,
+                $periodLabel,
+                strtolower($status->label()),
+            ),
+            'bill-period-not-open',
+            ['bill' => $identifier, 'period' => $periodLabel, 'status' => $status->value],
         );
     }
 

@@ -20,6 +20,7 @@ use Asids\Core\Sales\Domain\Enums\TaxType;
 use Asids\Core\Sales\Domain\Models\TaxCode;
 use Asids\Core\Purchasing\Application\DTOs\BillData;
 use Asids\Core\Purchasing\Application\DTOs\BillLineData;
+use Asids\Core\Purchasing\Application\DTOs\SupplierData;
 use Asids\Core\Purchasing\Application\Services\BillService;
 use Asids\Core\Purchasing\Application\Services\SupplierService;
 use Asids\Core\Purchasing\Domain\Exceptions\BillCannotBePosted;
