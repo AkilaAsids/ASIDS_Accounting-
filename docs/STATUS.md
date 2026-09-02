@@ -1,29 +1,34 @@
 # Project status — Phase 5 bills / purchase invoices (Minions Team 7)
 
-**Last updated:** 2026-09-01 · **Branch:** `feature/phase5-bills` · **Base:** `feature/phase5-suppliers` (stacked)
+**Last updated:** 2026-09-02 · **Branch:** `feature/phase5-bills` · **Base:** `feature/phase5-suppliers` (stacked)
 
 ## Where we are
-Wave 7 of the rolling program. **Bills / purchase invoices** — the purchase-side mirror of sales
-invoices, and the **first purchasing document that posts to the ledger**: draft a bill against a
-supplier → post it → `Dr Expense(per line) + Dr Input VAT = Cr Trade Payables`. First real use of input VAT.
-Backend wave (no HTTP). Cancellation deferred.
+Wave 7 **delivered**: bills / purchase invoices — the purchase-side mirror of sales invoices and the
+**first purchasing document that posts to the ledger**. Draft a bill against a supplier → post →
+`Dr Expense(per line) + Dr Input VAT = Cr Trade Payables`. First real input-VAT use. Cancellation deferred.
+Delivered as PR #8.
 
 | Stage | State |
 |---|---|
 | 1 · Intake | ✅ | 2 · Requirements | ✅ Gate 1 APPROVED 2026-09-01 |
 | 3 · Architecture (ADR 0019) | ✅ Gate 2 APPROVED 2026-09-01 |
-| 4 · Build | 🔵 in progress — 8 stages, test-first (Opus) |
-| 5 · Review (QA ∥ Security) | ⏳ |
-| Delivery | ⏳ stacked PR (base `feature/phase5-suppliers`) |
+| 4 · Build | ✅ 8 stages test-first (Opus) — `7ff9e53`…`722ed94` |
+| 5 · Review (QA ∥ Security) | ✅ QA **PASS**; Security **PASS-WITH-FIXES** → should + nit actioned |
+| Delivery | ✅ **PR #8 opened** (base `feature/phase5-suppliers`) |
 
-## Gate decisions (approved)
-- supplier_invoice_number required (statutory identity + duplicate key) + internal `BILL-` non-gapless number; cancellation deferred; AP = `Account::TRADE_PAYABLES` (2110), Input VAT `1170` keyless; expense line-level; duplicate supplier-invoice refused per supplier/company; bind real `EloquentPayableBalanceProbe`; input-VAT = refusal + dry-run backfill command; permissions `purchasing.bills.{view,draft,post}` (post sensitive).
+## Result
+- **Tests:** 1,465 green — Purchasing 380 (+QA race test), Accounting 280, Sales 805. **0 regressions.** Pint + PHPStan clean.
+- **Reviews:** QA **PASS** (added `BillDuplicateNumberRaceTest`); Security **PASS-WITH-FIXES** — the should (backfill command now asset-only + names the resolved account) and its coverage are in; the nit (ASCII `trim`) accepted as negligible.
+- **Delivered:** `Account::TRADE_PAYABLES` (2110) + backfill; `bills`/`bill_lines` (+ FORCED RLS, posted-immutability, duplicate-supplier-invoice unique index); `DocumentType::Bill` (first non-gapless); `BillPostingMap`; `BillService` (draft/post + duplicate guard, two-series BILL-/JV numbering); `EloquentPayableBalanceProbe` rebind (Wave-6 supplier protections now live); `purchasing.bills.{view,draft,post}`; the dry-run `purchasing:backfill-input-vat-accounts` command.
 
-## Build stages (ADR 0019)
-1. `Account::TRADE_PAYABLES` 2110 + stamp/backfill · 2. `bills`/`bill_lines` schema + FORCED RLS + immutability · 3. `DocumentType::Bill` + `BillStatus` + models/factories · 4. DTOs + `BillPostingMap` + `BillCannotBePosted` · 5. `BillService` (draft/post) + duplicate guard · 6. `EloquentPayableBalanceProbe` rebind (activates Wave 6 rules) · 7. `purchasing.bills.*` + `BillPolicy` · 8. `purchasing:backfill-input-vat-accounts` command (dry-run-first).
+## Known limitations (accepted)
+- Cancellation/reversal deferred (status CHECK already reserves `cancelled`/payment states). Supplier payments + WHT-on-payment are Wave 8.
+
+## ⚠ Harness note (from QA + Security)
+The shared `asids_erp_testing` DB **deadlocks under concurrent `artisan test` runs** (`RefreshDatabase` `migrate:fresh` vs `drop table`). Run suites **sequentially** or per-runner DBs — this was the cause of several intermittent "stall/deadlock" failures. Not a code defect.
 
 ## Related (open PRs)
-Phase 3 FE **#2** · Phase 4 **#3–#6** · Phase 5 **#7** (suppliers) · Wave 7 → **#8** pending (stacked on #7).
+Phase 3 FE **#2** · Phase 4 **#3–#6** · Phase 5 **#7** (suppliers) · **#8** (bills, stacked on #7). Merge bottom-up.
 
 ## What you (the human) need to do next
-Nothing blocking — Gates 1 & 2 approved; build → QA + Security → PR within ADR 0019. Merge open PRs when ready. Prod (Gate 3) always needs you; none in scope.
+Nothing blocking. Review/merge the open PRs when ready. **Wave 8 (supplier payments + WHT-on-payment)** — the final Phase 5 wave — opens next and STOPs at Gate 1. Prod (Gate 3) always needs you; none in scope.
