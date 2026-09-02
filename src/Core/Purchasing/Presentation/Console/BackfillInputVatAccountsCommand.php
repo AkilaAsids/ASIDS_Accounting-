@@ -34,12 +34,12 @@ use RuntimeException;
  */
 final class BackfillInputVatAccountsCommand extends Command
 {
+    private const string INPUT_VAT_CODE = '1170';
+
     protected $signature = 'purchasing:backfill-input-vat-accounts
                             {--apply : Write the changes. Without this the command is a dry run.}';
 
     protected $description = 'Point VAT-charging tax codes with no input account at their company’s 1170 Input VAT Recoverable';
-
-    private const string INPUT_VAT_CODE = '1170';
 
     public function handle(): int
     {
@@ -63,13 +63,18 @@ final class BackfillInputVatAccountsCommand extends Command
             $skipped = 0;
 
             foreach ($companies as $companyId => $companyName) {
+                // Asset-typed only: `input_account_id` must be an asset (BillPostingMap refuses otherwise,
+                // TaxCodeService::resolveInputAccountId refuses otherwise). Guarding here means the command
+                // can never persist a config the domain would later reject — e.g. a chart that renumbered
+                // 1170 to a non-asset, or reused the code for a different account.
                 $candidates = DB::table('accounts')
                     ->where('company_id', $companyId)
                     ->where('code', self::INPUT_VAT_CODE)
+                    ->where('type', 'asset')
                     ->whereNull('deleted_at')
                     ->where('is_active', true)
                     ->where('is_postable', true)
-                    ->pluck('id');
+                    ->get(['id', 'name', 'code']);
 
                 if ($candidates->count() !== 1) {
                     // Ambiguous or absent: the command refuses to guess which account is the input-VAT one.
@@ -77,7 +82,7 @@ final class BackfillInputVatAccountsCommand extends Command
                     $this->components->twoColumnDetail(
                         (string) $companyName,
                         sprintf(
-                            '<fg=yellow>skipped — %d Input VAT (1170) account(s); need exactly one</>',
+                            '<fg=yellow>skipped — %d active postable asset account(s) coded 1170; need exactly one</>',
                             $candidates->count(),
                         ),
                     );
@@ -85,7 +90,16 @@ final class BackfillInputVatAccountsCommand extends Command
                     continue;
                 }
 
-                $accountId = (string) $candidates->first();
+                $account = $candidates->first();
+
+                if ($account === null) {
+                    // Unreachable: count() === 1 above guarantees a row. Kept so first()'s nullable
+                    // return is handled honestly rather than assumed away.
+                    continue;
+                }
+
+                $accountId = (string) $account->id;
+                $target = sprintf('%s %s (%s)', $account->code, $account->name, $accountId);
 
                 $eligible = DB::table('tax_codes')
                     ->where('company_id', $companyId)
@@ -102,12 +116,12 @@ final class BackfillInputVatAccountsCommand extends Command
                     ]);
                     $this->components->twoColumnDetail(
                         (string) $companyName,
-                        sprintf('<fg=green>%d code(s) pointed at 1170</>', $count),
+                        sprintf('<fg=green>%d code(s) pointed at %s</>', $count, $target),
                     );
                 } else {
                     $this->components->twoColumnDetail(
                         (string) $companyName,
-                        sprintf('%d code(s) would be pointed at 1170', $count),
+                        sprintf('%d code(s) would be pointed at %s', $count, $target),
                     );
                 }
 

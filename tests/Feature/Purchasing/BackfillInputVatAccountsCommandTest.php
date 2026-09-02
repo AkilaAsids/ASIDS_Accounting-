@@ -157,4 +157,29 @@ describe('a company without a unique input VAT account', function (): void {
         expect(freshInputAccountId($secondCode))->toBeNull()
             ->and(freshInputAccountId($this->code))->toBe((string) $this->inputVat->getKey());
     });
+
+    it('skips a company whose 1170 is not an asset account', function (): void {
+        // Security hardening (review should): the candidate filter requires type = asset. If a chart
+        // renumbered/reused 1170 as a non-asset, the command must NOT point input VAT at it — it skips,
+        // naming the company. The domain (BillPostingMap / TaxCodeService) rejects a non-asset input account
+        // anyway; guarding here means the command can never persist a config the domain would later reject.
+        $second = app(CompanyService::class)->create(new CreateCompanyData(name: 'Reused Code Books'), $this->owner);
+        app(ChartTemplateService::class)->apply($second);
+
+        $secondOutput = Account::query()->forCompany((string) $second->getKey())->where('code', '2140')->firstOrFail();
+        $secondCode = chargingCodeWithoutInput($second, 'VAT', (string) $secondOutput->getKey());
+
+        // Reuse 1170 for a non-asset account (asset and expense share a debit normal balance, so no CHECK
+        // trips) — the exact misconfiguration the asset-only filter guards against.
+        DB::table('accounts')
+            ->where('company_id', $second->getKey())
+            ->where('code', '1170')
+            ->update(['type' => 'expense']);
+
+        $this->artisan('purchasing:backfill-input-vat-accounts', ['--apply' => true])->assertSuccessful();
+
+        // The non-asset-1170 company is skipped; the well-formed one is still filled.
+        expect(freshInputAccountId($secondCode))->toBeNull()
+            ->and(freshInputAccountId($this->code))->toBe((string) $this->inputVat->getKey());
+    });
 });
