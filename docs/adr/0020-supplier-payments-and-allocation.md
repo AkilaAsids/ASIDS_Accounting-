@@ -823,3 +823,14 @@ No UNRESOLVED fork blocks the build; confirm the **(Gate-2 PROPOSED)** shapes:
 *Prepared by the Solution Architect (Stage 3, Phase 5 / Wave 8a). Design only — no production code written,
 nothing committed. Build begins after Gate 2 approval, on this ADR, verbatim; any implementation discovery
 that would change a decision returns to Gate 2.*
+
+## Gate 2 decision — APPROVED 2026-09-03
+
+The human approved the architecture package **as proposed**, and resolved the two judgement calls:
+
+- **Schema/posting/lifecycle/trigger/lock-order — all confirmed:** born-posted `supplier_payments` + `payment_allocations` (FORCED RLS, immutability, unique `(company_id, number)` and `(supplier_payment_id, bill_id)`, status CHECK reserving `cancelled`); `Dr Trade Payables (2110) = Cr Bank/Cash (caller-named, validated Asset+postable+same-company)`; `PaymentService::record()` one-step record-and-post with full-allocation + per-bill `≤ amount_due` re-checked under a row lock, bills locked in **ascending id order**; the **deferred constraint trigger** enforcing `Σ allocations = amount`; drop `bills_no_payments_until_payments_phase` and **add** `bills_amount_due_non_negative_check`; the born-posted departures (pre-assigned payment UUID + `postNew` ordering; supplier resolution skips `acceptsNewBills` so an archived supplier can still be paid what is owed).
+- **Numbering = GAPLESS.** `DocumentType::Payment` `requiresGaplessNumbering() = true` (a disbursement originated by us; completeness is an audit control; sequence lock already inside the txn). Bill remains the sole non-gapless case.
+- **Roles = accountant posts; bookkeeper + viewer view-only.** `purchasing.payments.view` + `purchasing.payments.post` (post sensitive).
+- **Bank account = Asset-only** for 8a (overdraft / credit-card liability funding deferred).
+
+Build proceeds strictly within this ADR (6 stages, test-first). Any implementation discovery that would change a decision above returns to Gate 2.
