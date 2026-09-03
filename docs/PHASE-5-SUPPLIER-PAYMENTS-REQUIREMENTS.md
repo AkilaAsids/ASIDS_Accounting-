@@ -376,3 +376,19 @@ reading the real code surfaced.
 
 See the assistant's final message for the doc path, scope summary, the consolidated open-questions list
 (verbatim), and risks.
+
+## Gate 1 decisions — APPROVED 2026-09-03
+
+Binding on the architecture (ADR 0020) and build. This is **Wave 8a: supplier payments + allocation** only.
+
+0. **Greenfield, grounded in the Bill pattern.** Confirmed: there is no customer-receipt code on this branch (Phase 4 is on unmerged `feature/phase4-*` branches; Phase 5 branched off `main`). Design payments fresh from the `Bill`/`BillService`/`BillPostingMap`/`EloquentPayableBalanceProbe` pattern, NOT a `ReceiptService` mirror. The Phase 4↔5 divergence is a later merge-time reconciliation, not a blocker.
+1. **Bank/cash account = caller-named per payment** (mirrors how a bill line names its expense account). No new per-company "primary account" setting this slice.
+2. **Full allocation required** — a payment's allocations must sum to its total; no unallocated remainder. Prepayment / supplier credit-on-account deferred to a later slice.
+3. **Per-bill allocation capped at the bill's current `amount_due`** — no single bill driven to a negative payable. Deliberate overpayment deferred with item 2.
+4. **Numbering = internal `PAY-` number** (carried default). The ledger entry draws its `JV` as always. (Architect: confirm gapless vs non-gapless — a payment is originated by us, which leans gapless; see §6 OQ-4.)
+5. **Lifecycle = record-and-post in ONE step.** No draft stage, no `Draft` status — a payment records cash that has already moved. Permissions therefore `purchasing.payments.{view, post}` (`post` sensitive); no `.draft` capability.
+6. **WHT-on-payment = a SEPARATE slice (8b).** 8a posts the two-line `Dr Trade Payables = Cr Bank`. 8b later adds the new `WHT Payable` liability account + the third line `Cr WHT Payable`.
+7. **Duplicate-real-world-payment detection = left to audit/user diligence for 8a.** The DB still guarantees one ledger entry per payment record (unique `journal_entry_id`/`source_id`).
+8. **Cancellation deferred** — the payment's status CHECK reserves a `cancelled` case from the start (as `bills` reserved it), so a later slice adds behaviour, not a migration.
+
+**Posting (8a):** `Dr Trade Payables (2110) = Cr Bank/Cash (caller-named)`; each allocated bill's `amount_paid`/`amount_due`/status moves (Posted→PartiallyPaid→Paid); relax/drop the `bills_no_payments_until_payments_phase` CHECK Wave 7 left for exactly this. Multi-bill locking in one transaction needs a fixed lock order (deadlock-safe) — see Risk 2.
