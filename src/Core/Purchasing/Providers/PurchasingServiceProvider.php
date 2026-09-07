@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace Asids\Core\Purchasing\Providers;
 
 use Asids\Core\Purchasing\Application\Services\BillService;
+use Asids\Core\Purchasing\Application\Services\PaymentService;
 use Asids\Core\Purchasing\Application\Services\SupplierService;
-use Asids\Core\Purchasing\Presentation\Console\BackfillInputVatAccountsCommand;
 use Asids\Core\Purchasing\Domain\Contracts\PayableBalanceProbe;
 use Asids\Core\Purchasing\Domain\Models\Bill;
 use Asids\Core\Purchasing\Domain\Models\Supplier;
+use Asids\Core\Purchasing\Domain\Models\SupplierPayment;
 use Asids\Core\Purchasing\Infrastructure\EloquentPayableBalanceProbe;
 use Asids\Core\Purchasing\Policies\BillPolicy;
+use Asids\Core\Purchasing\Policies\PaymentPolicy;
 use Asids\Core\Purchasing\Policies\SupplierPolicy;
+use Asids\Core\Purchasing\Presentation\Console\BackfillInputVatAccountsCommand;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -31,6 +34,7 @@ final class PurchasingServiceProvider extends ServiceProvider
     {
         $this->app->singleton(SupplierService::class);
         $this->app->singleton(BillService::class);
+        $this->app->singleton(PaymentService::class);
 
         /*
          * The payables seam, live.
@@ -55,10 +59,15 @@ final class PurchasingServiceProvider extends ServiceProvider
             // `Bill` is `Auditable`, and an audit entry for an unmapped class throws. `BillLine` registers no
             // alias — it is never audited separately and can never be a source document (ADR 0019 §C2, §E).
             Bill::MORPH_ALIAS => Bill::class,
+            // `SupplierPayment` is `Auditable` and a `SourceDocument` (the JV it posts cites it), so its alias
+            // is required. `PaymentAllocation` registers none — it is never audited separately and can never
+            // be a source document (ADR 0020 §C2, §E3).
+            SupplierPayment::MORPH_ALIAS => SupplierPayment::class,
         ]);
 
         Gate::policy(Supplier::class, SupplierPolicy::class);
         Gate::policy(Bill::class, BillPolicy::class);
+        Gate::policy(SupplierPayment::class, PaymentPolicy::class);
 
         if ($this->app->runningInConsole()) {
             $this->commands([

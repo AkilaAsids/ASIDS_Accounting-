@@ -185,18 +185,10 @@ describe('the bill CHECK negatives are non-vacuous (drop the constraint → the 
         expect(DB::table('bills')->where('number', 'BILL-DRAFT')->count())->toBe(1);
     });
 
-    it('the payments-phase CHECK is the only thing rejecting a non-zero amount paid', function (): void {
-        expect(billConstraintPresent('bills_no_payments_until_payments_phase'))->toBeTrue();
-
-        DB::statement('ALTER TABLE bills DROP CONSTRAINT bills_no_payments_until_payments_phase');
-
-        // amount_due kept at total - amount_paid so the amount-due invariant holds and only the phase CHECK objects.
-        expect(fn () => DB::transaction(fn () => DB::table('bills')->insert(mutationBillRow([
-            'amount_paid' => '100.0000', 'amount_due' => '1080.0000',
-        ]))))->not->toThrow(QueryException::class);
-
-        expect(DB::table('bills')->where('amount_paid', '100.0000')->count())->toBe(1);
-    });
+    // The "payments-phase CHECK is non-vacuous" mutation was removed at Wave 8a: that CHECK
+    // (`bills_no_payments_until_payments_phase`) is dropped this wave (ADR 0020 §A4), so there is nothing left
+    // to prove non-vacuous. Its replacement, `bills_amount_due_non_negative_check`, is proved non-vacuous by
+    // `PaymentSchemaCheckMutationTest`'s "bills-side CHECK negative is non-vacuous" case.
 });
 
 describe('the bill_lines CHECK negatives are non-vacuous', function (): void {

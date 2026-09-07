@@ -123,6 +123,12 @@ final readonly class RoleTemplate
                     'purchasing.bills.draft',
                     'purchasing.bills.post',
 
+                    // Supplier payments, the settlement side of bills. Record-and-post is one step (no draft),
+                    // so the accountant — the side of the split that commits money to the ledger — holds both
+                    // `view` and the sensitive `post`.
+                    'purchasing.payments.view',
+                    'purchasing.payments.post',
+
                     // The receivables reports, for the same reason as `accounting.reports.view` above:
                     // whoever decides a customer's credit terms is who needs to see what that decision has
                     // cost so far, and the AR reconciliation is a check on the accountant's own postings.
@@ -180,6 +186,11 @@ final readonly class RoleTemplate
                     'purchasing.bills.view',
                     'purchasing.bills.draft',
 
+                    // Reads payments to reconcile them, but does not commit them: posting a payment moves
+                    // money, and with no `.draft` to hold there is nothing for the bookkeeper to prepare — the
+                    // safe default is view-only for the money-moving action (ADR 0020 §E2).
+                    'purchasing.payments.view',
+
                     // Included on the same reasoning as `accounting.reports.view` above — a bookkeeper who
                     // cannot see what a customer owes cannot tell whether the invoice they just drafted is
                     // sensible. This role already holds `sales.customers.manage`, which is marked sensitive
@@ -226,6 +237,10 @@ final readonly class RoleTemplate
                     // Reads bills and changes none of them, the mirror of the invoice read for an auditor
                     // reviewing payables.
                     'purchasing.bills.view',
+
+                    // Reads payments and changes none of them — an auditor reviewing payables follows a bill
+                    // through to how it was settled.
+                    'purchasing.payments.view',
 
                     // The receivables reports. For this role they are close to the point of it: an auditor
                     // testing receivables starts at the aged listing and the control reconciliation, and a

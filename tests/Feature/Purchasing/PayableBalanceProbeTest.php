@@ -39,8 +39,9 @@ use Illuminate\Support\Facades\DB;
  * true, which is the pair of rules working as written.
  *
  * Cancellation is deferred this wave, so the not-outstanding states (`cancelled`, `paid`, `partially_paid`) are
- * reached with raw SQL — the immutability trigger permits a status change on a posted bill, and the phase CHECK
- * on `amount_paid` is dropped where a payment must be simulated, exactly as the receivable suite does.
+ * reached with raw SQL — the immutability trigger permits a status change on a posted bill, and since Wave 8a
+ * dropped the `amount_paid` phase CHECK (ADR 0020 §A4) the payment figures now move directly, no longer needing
+ * the constraint removed first.
  *
  * RED expectation before Stage 6 lands: the provider still binds `NoPayables`, so the binding assertion fails;
  * and before Stage 5, `BillService` does not exist, so the fixtures error.
@@ -119,10 +120,9 @@ describe('what a supplier is owed', function (): void {
     it('counts what is left on a partially paid bill, not its total', function (): void {
         $bill = payableBill('1000.00');
 
-        // Wave 8 territory reached the only way it can be today: `amount_paid` is pinned at zero by a
-        // phase-scoped CHECK, so the constraint comes off to move it. What matters is that the probe reads
-        // `amount_due` rather than recomputing `total - amount_paid` itself.
-        DB::statement('ALTER TABLE bills DROP CONSTRAINT bills_no_payments_until_payments_phase');
+        // Wave 8a dropped the phase CHECK that pinned `amount_paid` at zero (ADR 0020 §A4), so the figures
+        // move directly now. What matters is that the probe reads the stored `amount_due` rather than
+        // recomputing `total - amount_paid` itself.
         DB::table('bills')->where('id', $bill->getKey())->update([
             'status' => 'partially_paid',
             'amount_paid' => '400.0000',
@@ -159,7 +159,6 @@ describe('what a supplier is owed', function (): void {
     it('ignores a paid bill, which is settled', function (): void {
         $bill = payableBill('1000.00');
 
-        DB::statement('ALTER TABLE bills DROP CONSTRAINT bills_no_payments_until_payments_phase');
         DB::table('bills')->where('id', $bill->getKey())->update([
             'status' => 'paid',
             'amount_paid' => '1000.0000',
@@ -207,7 +206,6 @@ describe('whether a supplier has ever been billed', function (): void {
     it('is true for a paid bill', function (): void {
         $bill = payableBill('1000.00');
 
-        DB::statement('ALTER TABLE bills DROP CONSTRAINT bills_no_payments_until_payments_phase');
         DB::table('bills')->where('id', $bill->getKey())->update([
             'status' => 'paid', 'amount_paid' => '1000.0000', 'amount_due' => '0.0000',
         ]);
