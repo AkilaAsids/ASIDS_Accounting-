@@ -1,20 +1,44 @@
-# Project status — Phase 5 supplier payments (Minions Team 8)
+# Project status — Phase 5 Wave 8b: WHT on supplier payments (Minions Team 8)
 
-**Last updated:** 2026-09-03 · **Branch:** `feature/phase5-supplier-payments` · **Base:** `feature/phase5-bills` (stacked)
+**Last updated:** 2026-09-09 · **Branch:** `feature/phase5-wht-on-payment` · **Base:** `feature/phase5-supplier-payments` (Wave 8a, PR #9)
 
 ## Where we are
-Wave 8a of the rolling program. **Supplier payments + allocation** — pay a supplier from a bank/cash
-account, allocate across their posted bills, post `Dr Trade Payables = Cr Bank`, moving each bill
-Posted→PartiallyPaid→Paid. Record-and-post in one step. Backend wave (no HTTP). Greenfield (grounded in
-the Bill pattern — Phase 4 receipts are on unmerged branches, not this line). Delivered as PR #9.
+Wave 8b. **Withholding tax on supplier payments** — a withholding supplier's payment posts a third line:
+`Dr Trade Payables (gross) = Cr Bank (net) + Cr WHT Payable (withheld)`. Bill settlement is GROSS (the
+supplier's obligation is discharged in full; the withheld amount is reclassified to a liability owed to the
+authority). Contained extension of Wave 8a — because settlement is gross, 8a's `amount`/allocation invariants
+are untouched; WHT is one header snapshot + one credit line. Greenfield WHT on this branch.
 
 | Stage | State |
 |---|---|
-| 1 · Intake | ✅ | 2 · Requirements | ✅ Gate 1 APPROVED 2026-09-03 |
-| 3 · Architecture (ADR 0020) | ✅ Gate 2 APPROVED 2026-09-03 |
-| 4 · Build | ✅ all 6 stages GREEN — 9 payment suites, test-first (Opus) |
-| 5 · Review (QA ∥ Security) | ✅ Security PASS · QA PASS-WITH-FIXES → all fixes applied |
-| Delivery | ✅ **PR #9 open** (stacked on `feature/phase5-bills`) — awaiting human review/merge |
+| 1 · Requirements | ✅ Gate 1 APPROVED 2026-09-09 |
+| 2 · Architecture (ADR 0021) | ✅ Gate 2 APPROVED 2026-09-09 (5 forks resolved) |
+| 3 · Build | ✅ all 6 stages GREEN — test-first (Opus). Purchasing+Accounting 861 · Sales 805 · Pint+PHPStan clean |
+| 4 · Review (QA ∥ Security) | ✅ Security PASS · QA PASS-WITH-FIXES → all applied |
+| Delivery | ✅ **PR #10 open** (stacked on `feature/phase5-supplier-payments`) |
+
+## Review outcomes (Stage 4)
+- **Security (Opus, independent): PASS** — money integrity (double-guarded `wht ≤ amount`, balances every rounding outcome incl. net-zero, no floats, safe pre-VAT divide), the create-not-stamp backfill (tenant-id binding, idempotency, RLS scaffold, accounts CHECKs, safe `down()`), the freeze function keeping all columns + the two new ones, company-scoped WHT Payable resolution, unchanged authorization. One pre-existing, platform-wide INFO note (currency_precision CHECK allows >4 but `Money::roundedTo()` caps at 4) — filed as a separate backlog task, not an 8b defect.
+- **QA (independent): PASS-WITH-FIXES → resolved.** 1,666 green, 0 regressions; every gap was probed and the code confirmed correct — all were test-coverage gaps. Applied: a **multi-bill round-once** test (fork 4 regression guard), the two missing **drop-and-retry** mutation tests (`wht_amount_non_negative`, `wht_rate_range`), the two **backfill trip** tests (`assertBypassEffective`/`assertNothingLeftBehind`), plus partial+VAT, 100%-net-zero-through-`record()`, and WHT-Payable accumulation tests. Purchasing+Accounting 869 green after fixes.
+
+## Build (Stage 3 complete)
+1. Supplier WHT config (`wht_applicable`/`wht_rate` + CHECKs; `SupplierService`/`SupplierData`).
+2. `2180 WHT Payable` (`Account::WHT_PAYABLE`, template + `requiredSystemAccounts` + VERSION `-3`→`-4`,
+   create-not-stamp backfill).
+3. `supplier_payments.wht_amount`/`wht_rate` + CHECKs + freeze-trigger update.
+4. `PaymentData` `withholdTax`/`whtRateOverride`; `PaymentPostingMap` credit split + `whtPayableAccountFor`.
+5. `PaymentService::record()` WHT on the pre-VAT base (`allocation × subtotal/total`), round-once, gross
+   settlement (steps 11–17 unchanged); rate default/override/suppress.
+6. Authorization unchanged (reuse `purchasing.payments.post`; no-`.wht` scope-creep guard).
+
+Commits: `da69999` Gate 1 · `258eb10` ADR 0021 · `3573ed6` Gate 2 · `9fe69d9` Stages 1–2 · `9b60bb4` Stages 3–6.
+
+---
+
+## Wave 8a — DELIVERED (PR #9, stacked on `feature/phase5-bills`)
+
+Supplier payments + allocation: `Dr Trade Payables = Cr Bank`, gross record-and-post, born posted, gapless
+`PAY-`. Security PASS · QA PASS-WITH-FIXES (all applied). Whole app 2,113 green.
 
 ## Review outcomes (Stage 5)
 

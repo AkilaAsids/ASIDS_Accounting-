@@ -252,4 +252,32 @@ describe('the backfill (create, not stamp)', function (): void {
 
         expect(whtSystemAccounts($this->company->getKey()))->toHaveCount(0);
     });
+
+    it('assertBypassEffective trips when called outside RowLevelSecurity::bypass()', function (): void {
+        // The recurring zero-rows trap: without the bypass, a NOBYPASSRLS role sees no rows on a FORCED table
+        // and the migration would silently create nothing. The guard must refuse rather than report success.
+        $migration = whtPayableBackfill();
+        $method = new ReflectionMethod($migration, 'assertBypassEffective');
+        $method->setAccessible(true);
+
+        expect(fn () => $method->invoke($migration))->toThrow(RuntimeException::class);
+    })->skip(
+        fn () => ! RowLevelSecurity::isEnforced('accounts'),
+        'Row level security is not in force for the connecting role (asids_app). The guard cannot trip when the '
+        .'role bypasses RLS unconditionally.',
+    );
+
+    it('assertNothingLeftBehind trips when a company is left without the account (a partial run)', function (): void {
+        // Simulate a partial run: acme has no WHT payable and the backfill did not create it. The guard must
+        // refuse to finish rather than leave a company whose first withholding payment fails months later.
+        makeLegacyNoWht($this->company->getKey());
+
+        $migration = whtPayableBackfill();
+        $method = new ReflectionMethod($migration, 'assertNothingLeftBehind');
+        $method->setAccessible(true);
+
+        // Under bypass so the count sees every company; acme now lacks the account → throws.
+        expect(fn () => RowLevelSecurity::bypass(fn () => $method->invoke($migration)))
+            ->toThrow(RuntimeException::class);
+    });
 });

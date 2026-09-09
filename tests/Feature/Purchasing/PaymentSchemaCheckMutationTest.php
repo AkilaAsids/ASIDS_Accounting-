@@ -250,6 +250,34 @@ describe('the supplier_payments CHECK negatives are non-vacuous', function (): v
 
         expect(DB::table('supplier_payments')->where('wht_amount', '50.0000')->count())->toBe(1);
     });
+
+    it('the wht-amount-non-negative CHECK is the only thing rejecting a negative wht_amount', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_wht_amount_non_negative_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_wht_amount_non_negative_check');
+
+        // wht_amount -1 with a rate present (5.00): within-amount (-1 <= amount) and rate-present both pass, so
+        // only the non-negative CHECK could have objected.
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(
+            checkMutationPaymentRow(['wht_amount' => '-1.0000', 'wht_rate' => '5.00'])
+        )))->not->toThrow(QueryException::class);
+
+        expect(DB::table('supplier_payments')->where('wht_amount', '-1.0000')->count())->toBe(1);
+    });
+
+    it('the wht rate-range CHECK is the only thing rejecting a wht_rate above 100', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_wht_rate_range_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_wht_rate_range_check');
+
+        // wht_amount 50 (>= 0, <= amount) with rate 150: non-negative, within-amount and rate-present all pass,
+        // so only the range CHECK could have objected.
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(
+            checkMutationPaymentRow(['wht_amount' => '50.0000', 'wht_rate' => '150.00'])
+        )))->not->toThrow(QueryException::class);
+
+        expect(DB::table('supplier_payments')->where('wht_rate', '150.00')->count())->toBe(1);
+    });
 });
 
 describe('the payment_allocations CHECK negative is non-vacuous', function (): void {

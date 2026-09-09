@@ -11,6 +11,7 @@ use Asids\Core\Accounting\Domain\Enums\DocumentType;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\Models\FiscalPeriod;
 use Asids\Core\Accounting\Domain\Models\JournalEntry;
+use Asids\Core\Accounting\Domain\Models\JournalLine;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
 use Asids\Core\Organization\Application\DTOs\CreateCompanyData;
@@ -896,5 +897,106 @@ describe('withholding tax on a payment (ADR 0021)', function (): void {
 
         expect($exception)->toBeInstanceOf(PaymentCannotBeRecorded::class)
             ->and($exception->problemCode())->toBe('payment-wht-rate-missing');
+    });
+
+    it('rounds the withholding ONCE across several bills (dec. 5 / fork 4)', function (): void {
+        // The regression guard the single-bill tests cannot provide: with two bills 33.33 + 33.34 at 5%,
+        // round-once (implemented) gives round(5% × 66.67) = round(3.3335) = 3.33; round-per-bill (the rejected
+        // alternative) would give round(1.6665) + round(1.6670) = 1.67 + 1.67 = 3.34. Only a multi-bill
+        // payment distinguishes them, and Gate 2 chose round-once.
+        $supplier = whtSupplier('5.00');
+        $billA = recordBill($this->company, $supplier, '33.33');
+        $billB = recordBill($this->company, $supplier, '33.34');
+
+        $payment = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $billA->getKey(), '33.33'),
+            recordAllocation((string) $billB->getKey(), '33.34'),
+        ], ['supplierId' => (string) $supplier->getKey()]), $this->owner);
+
+        expect($payment->wht_amount)->toBe('3.3300');
+    });
+
+    it('withholds proportionally on a partial allocation of a VAT bill (pre-VAT base + partial together)', function (): void {
+        $supplier = whtSupplier('5.00');
+
+        $outputVat = recordAccount('2140', (string) $this->company->getKey());
+        $inputVat = recordAccount('1170', (string) $this->company->getKey());
+        app(TaxCodeService::class)->create($this->company, new TaxCodeData(
+            code: 'VAT',
+            name: 'Value Added Tax',
+            taxType: TaxType::Vat,
+            rate: '18',
+            effectiveFrom: CarbonImmutable::parse('2026-01-01'),
+            outputAccountId: (string) $outputVat->getKey(),
+            inputAccountId: (string) $inputVat->getKey(),
+        ));
+
+        // net 1,000 + 18% VAT = 1,180 total.
+        $bill = app(BillService::class)->post(
+            app(BillService::class)->createDraft($this->company, new BillData(
+                supplierId: (string) $supplier->getKey(),
+                billDate: CarbonImmutable::parse('2026-06-15'),
+                supplierInvoiceNumber: 'VAT-WHT-PARTIAL',
+                lines: [new BillLineData(
+                    description: 'Consulting',
+                    quantity: '1',
+                    unitPrice: '1000.00',
+                    expenseAccountId: (string) $this->purchases->getKey(),
+                    taxCode: 'VAT',
+                )],
+            )),
+            $this->owner,
+        );
+
+        // Pay 590 of the 1,180 bill (half). Pre-VAT base = 590 × 1000/1180 = 500; WHT = 5% × 500 = 25.
+        $payment = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $bill->getKey(), '590.00'),
+        ], ['supplierId' => (string) $supplier->getKey()]), $this->owner);
+
+        expect($payment->wht_amount)->toBe('25.0000')
+            ->and($bill->fresh()->status->value)->toBe('partially_paid');
+    });
+
+    it('posts a two-line net-zero entry for a 100%-withheld payment through the service (no bank line)', function (): void {
+        $supplier = whtSupplier('100.00');
+        $bill = recordBill($this->company, $supplier, '500.00');
+
+        $payment = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $bill->getKey(), '500.00'),
+        ], ['supplierId' => (string) $supplier->getKey()]), $this->owner);
+
+        expect($payment->wht_amount)->toBe('500.0000');
+
+        $entry = JournalEntry::query()->with('lines')->findOrFail($payment->journal_entry_id);
+        $whtPayable = recordAccount('2180', (string) $this->company->getKey());
+
+        // Dr Trade Payables 500 = Cr WHT Payable 500 — no bank line (net is zero).
+        expect($entry->lines)->toHaveCount(2)
+            ->and($entry->lines->pluck('account_id')->all())->not->toContain((string) $this->bank->getKey())
+            ->and($entry->lines->firstWhere('account_id', (string) $whtPayable->getKey())->credit)->not->toBeNull()
+            ->and($bill->fresh()->status->value)->toBe('paid');
+    });
+
+    it('accumulates WHT Payable across several withholding payments (AC-1.6)', function (): void {
+        $supplier = whtSupplier('5.00');
+        $billA = recordBill($this->company, $supplier, '1000.00');
+        $billB = recordBill($this->company, $supplier, '2000.00');
+
+        $paymentA = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $billA->getKey(), '1000.00'),
+        ], ['supplierId' => (string) $supplier->getKey()]), $this->owner);
+        $paymentB = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $billB->getKey(), '2000.00'),
+        ], ['supplierId' => (string) $supplier->getKey()]), $this->owner);
+
+        // WHT Payable is a live liability: 50 + 100 = 150 credited across the two payments' entries.
+        $whtPayable = recordAccount('2180', (string) $this->company->getKey());
+        $credited = JournalLine::query()
+            ->where('account_id', $whtPayable->getKey())
+            ->sum('credit');
+
+        expect(bcadd((string) $credited, '0', 4))->toBe('150.0000')
+            ->and($paymentA->wht_amount)->toBe('50.0000')
+            ->and($paymentB->wht_amount)->toBe('100.0000');
     });
 });
