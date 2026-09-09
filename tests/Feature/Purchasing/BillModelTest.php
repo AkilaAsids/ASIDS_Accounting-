@@ -127,7 +127,9 @@ describe('DocumentType::Bill', function (): void {
     });
 
     it('adds exactly one case', function (): void {
-        expect(DocumentType::cases())->toHaveCount(5);
+        // Wave 7 brought `Bill` to five; Wave 8a (ADR 0020 §D) adds `Payment`, the sixth. `PaymentModelTest`
+        // owns the assertion that Payment is present, gapless and PAY-prefixed.
+        expect(DocumentType::cases())->toHaveCount(6);
     });
 });
 

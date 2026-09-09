@@ -297,6 +297,12 @@ final class PermissionCatalogue
             // Sensitive: posting takes an internal number, posts to the ledger and creates a payable — none of
             // which can be taken back except by a cancellation. The mirror of `sales.invoices.issue`.
             new PermissionDefinition('purchasing', 'bills', 'post', 'Post bills', 'Commit a draft bill to the ledger, creating the payable.', sensitive: true, sortOrder: 50),
+
+            new PermissionDefinition('purchasing', 'payments', 'view', 'View payments', 'Read supplier payments and their allocations.', sortOrder: 60),
+            // Sensitive, and the strongest case for the marker in the module: recording a payment moves money
+            // out and commits it to the ledger in one step (there is no draft to hold, dec. 5), and it cannot
+            // be taken back except by a cancellation.
+            new PermissionDefinition('purchasing', 'payments', 'post', 'Record and post payments', 'Record a supplier payment and commit it to the ledger.', sensitive: true, sortOrder: 70),
         ];
     }
 

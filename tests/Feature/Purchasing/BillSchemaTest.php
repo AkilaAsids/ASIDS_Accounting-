@@ -209,7 +209,11 @@ describe('the check constraints exist', function (): void {
             ->and($checks)->toContain('bills_amount_due_check')
             ->and($checks)->toContain('bills_non_negative_check')
             ->and($checks)->toContain('bills_single_currency_until_fx_phase')
-            ->and($checks)->toContain('bills_no_payments_until_payments_phase');
+            // Wave 8a (ADR 0020 §A4) drops the payments-phase CHECK and replaces it with the stronger
+            // amount_due backstop. `PaymentSchemaTest`'s "bills-side migration" section is the authority on
+            // this transition; asserted here too so the bill constraint inventory stays honest post-Wave-8a.
+            ->and($checks)->not->toContain('bills_no_payments_until_payments_phase')
+            ->and($checks)->toContain('bills_amount_due_non_negative_check');
     });
 
     it('declares every bill_lines CHECK', function (): void {
@@ -420,14 +424,10 @@ describe('the money invariants', function (): void {
         expect(DB::table('bills')->count())->toBe(1);
     });
 
-    it('holds payments at zero until the payments phase', function (): void {
-        insertBill(['supplier_invoice_number' => 'BASE']);
-
-        // Phase-scoped, dropped by Wave 8. The columns ship now so payments add behaviour rather than a migration.
-        expect(fn () => DB::transaction(fn () => insertBill([
-            'supplier_invoice_number' => 'BAD', 'amount_paid' => '100.0000', 'amount_due' => '1080.0000',
-        ])))->toThrow(QueryException::class);
-    });
+    // The "holds payments at zero until the payments phase" negative was removed at Wave 8a: this IS the
+    // payments phase (ADR 0020 §A4), so the phase CHECK is dropped and `amount_paid` legitimately moves.
+    // `PaymentSchemaTest`'s "bills-side migration" section now owns that behaviour (amount_paid moves, an
+    // overpayment is refused by `bills_amount_due_non_negative_check`).
 
     it('holds the exchange rate at null until the FX phase', function (): void {
         insertBill(['supplier_invoice_number' => 'BASE']);
@@ -635,13 +635,10 @@ describe('a posted bill is frozen', function (): void {
         expect(DB::table('bills')->where('id', $this->bill)->value('status'))->toBe($status);
     })->with(['partially_paid', 'paid']);
 
-    it('still holds payment figures at zero until the payments phase', function (): void {
-        // The trigger permits these columns so Wave 8 adds behaviour rather than loosening a trigger; the
-        // phase-scoped CHECK is what stops them moving meanwhile. This proves the trigger has not superseded it.
-        expect(fn () => DB::transaction(fn () => DB::table('bills')->where('id', $this->bill)
-            ->update(['amount_paid' => '100.0000', 'amount_due' => '1080.0000'])))
-            ->toThrow(QueryException::class);
-    });
+    // The companion "still holds payment figures at zero" negative was removed at Wave 8a for the same reason:
+    // the immutability trigger permits `amount_paid`/`amount_due`/`status` to move on a posted bill precisely
+    // so payments can maintain them, and the phase CHECK that pinned them at zero is now dropped (ADR 0020
+    // §A4). `PaymentSchemaTest` proves the posted bill's payment figures move under a real payment.
 });
 
 describe('forced row level security', function (): void {

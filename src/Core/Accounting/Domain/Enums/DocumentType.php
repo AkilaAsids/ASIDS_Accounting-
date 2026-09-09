@@ -21,6 +21,7 @@ enum DocumentType: string
     case YearEndClose = 'year_end_close';
     case SalesInvoice = 'sales_invoice';
     case Bill = 'bill';
+    case Payment = 'payment';
 
     public function label(): string
     {
@@ -30,6 +31,7 @@ enum DocumentType: string
             self::YearEndClose => 'Year-end close',
             self::SalesInvoice => 'Sales invoice',
             self::Bill => 'Bill',
+            self::Payment => 'Payment',
         };
     }
 
@@ -44,6 +46,7 @@ enum DocumentType: string
             self::YearEndClose => 'YEC',
             self::SalesInvoice => 'INV',
             self::Bill => 'BILL',
+            self::Payment => 'PAY',
         };
     }
 
@@ -53,9 +56,15 @@ enum DocumentType: string
      * Gapless numbering costs a row lock per document, serialising issuance within a company. It is
      * worth that for anything a tax authority may audit for completeness, and not worth it otherwise.
      * The journal and sales families are all auditable — sales invoices most of all, since Sri Lankan
-     * e-invoicing demands completeness — so they qualify. `Bill` is the first case that does not: a bill
+     * e-invoicing demands completeness — so they qualify. `Bill` is the sole case that does not: a bill
      * is *received*, not issued, so no authority audits *our* internal bill numbers for completeness, and
      * the per-document row lock buys nothing (ADR 0019 §B, Gate-1 dec. 1).
+     *
+     * `Payment` sits on the other side of that line, with the *issued* documents: a payment is *originated*
+     * by us, disbursement completeness is a real internal control and audit concern, and its sequence lock
+     * is already inside the record-and-post transaction (acquired after the bill locks, so it cannot
+     * deadlock). So it is gapless, and the body needs no change — `$this !== self::Bill` already yields
+     * `true` for it, leaving `Bill` the single documented exception (ADR 0020 §D, Gate-2 GAPLESS).
      */
     public function requiresGaplessNumbering(): bool
     {
