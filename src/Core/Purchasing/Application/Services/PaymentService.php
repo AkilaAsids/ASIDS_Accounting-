@@ -156,8 +156,8 @@ final readonly class PaymentService
         }
 
         // 9. The posting lines — the map writes nothing, so an account refusal here (`PaymentCannotBePosted`)
-        //    costs no lock.
-        $lines = $this->postingMap->for($company, $bankAccount, Money::of($amount, $company->base_currency_code), $supplier);
+        //    costs no lock. The branch (resolved at step 3) is stamped on both lines, mirroring bills (§A2).
+        $lines = $this->postingMap->for($company, $bankAccount, Money::of($amount, $company->base_currency_code), $supplier, $branchId);
 
         // 10. The calendar, before any number is reserved (AC-2.7).
         $period = $this->calendar->periodFor($company, $data->paymentDate->startOfDay());

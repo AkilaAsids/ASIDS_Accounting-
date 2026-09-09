@@ -834,3 +834,9 @@ The human approved the architecture package **as proposed**, and resolved the tw
 - **Bank account = Asset-only** for 8a (overdraft / credit-card liability funding deferred).
 
 Build proceeds strictly within this ADR (6 stages, test-first). Any implementation discovery that would change a decision above returns to Gate 2.
+
+## Gate 2 clarification — branch on journal lines (2026-09-09)
+
+QA verification surfaced an internal inconsistency: **§A2** states `branch_id` is "the reporting dimension … passed to the journal lines" (mirroring bills, `bills:50`, where `BillPostingMap` stamps `branch_id` on every line), but the **§B** `PaymentPostingMap::for()` interface skeleton omitted the parameter, so as first built the payment's Dr/Cr lines posted with `branch_id = NULL` — the branch reached the payment header but not the ledger, and branch-level reports (branch P&L / trial balance) would have silently omitted supplier payments.
+
+Returned to the human as a Gate 2 decision (not resolved silently, per the gate policy). **Decision: honour §A2** — the branch propagates to both journal lines, consistent with the bill precedent. Realised by adding `?string $branchId` to `PaymentPostingMap::for()` and threading it onto both lines, and passing the payment's resolved branch from `PaymentService::record()`. §B is amended to match §A2. Covered by a `RecordPaymentTest` assertion on `journal_lines.branch_id` (branch present, and null when the payment names no branch).

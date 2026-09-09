@@ -13,8 +13,17 @@ the Bill pattern — Phase 4 receipts are on unmerged branches, not this line). 
 | 1 · Intake | ✅ | 2 · Requirements | ✅ Gate 1 APPROVED 2026-09-03 |
 | 3 · Architecture (ADR 0020) | ✅ Gate 2 APPROVED 2026-09-03 |
 | 4 · Build | ✅ all 6 stages GREEN — 9 payment suites, test-first (Opus) |
-| 5 · Review (QA ∥ Security) | ⏳ next |
-| Delivery | ⏳ PR pending |
+| 5 · Review (QA ∥ Security) | ✅ Security PASS · QA PASS-WITH-FIXES → all fixes applied |
+| Delivery | ⏳ PR #9 pending (stacked on `feature/phase5-bills`) |
+
+## Review outcomes (Stage 5)
+
+- **Security review (Opus, independent): PASS.** No blocking/fix-required defects across tenant isolation (both tables FORCE-RLS with own policies), the PL/pgSQL trigger functions (placeholder/arg parity correct; deferred trigger closes the born-posted rogue-insert hole), authorization gating, money integrity/injection, immutability, and the ascending-id lock-before-sequence order. Two non-blocking INFO notes: (1) add `->forCompany()` to the lock query as defense-in-depth; (2) the HTTP layer (future wave) must authorize + constrain `$company` to the actor's memberships.
+- **QA verification (independent): PASS-WITH-FIXES → resolved.** 162 payment + 522 Purchasing + 805 Sales green; full AC matrix; every CHECK proven non-vacuous. Fixes applied:
+  1. **Production (branch on ledger lines):** ADR §A2 said the payment branch propagates to its journal lines (bills do) but §B's map signature omitted it, so lines posted `branch_id = NULL`. **Returned to Gate 2; human chose to honour §A2.** `PaymentPostingMap::for()` now takes `branchId` and stamps both lines; `PaymentService` passes the resolved branch. New `RecordPaymentTest` assertions (present + null cases). ADR amended (§B→§A2).
+  2. **Reference coverage (AC-3.2):** added a positive test — a caller-supplied `reference` persists, and two payments may share one (dec. 7, non-unique).
+  3. **Race test honesty:** reframed the payload-order test to state exactly what it proves; documented that isolating the locked re-read requires an OS-concurrency harness the project lacks (inherited from `BillDuplicateNumberRaceTest`), and that the DB backstop is the tested authority under a race.
+  4. Renamed the mislabeled factory relation test.
 
 ## Build result (Stage 4 complete)
 

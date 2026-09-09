@@ -191,10 +191,10 @@ describe('the payment allocation factory', function (): void {
             ->toThrow(QueryException::class);
     });
 
-    it('dies with its payment when the payment is hard-deleted', function (): void {
-        // Cascade is the declared behaviour (§A3); reaching it legitimately is covered by
-        // `PaymentSchemaTest`'s freeze-trigger tests, which show that path is unreachable this wave. Here we
-        // only need the factory to produce a row that names its payment correctly.
+    it('produces an allocation that resolves its parent payment', function (): void {
+        // The cascade-on-delete is the declared FK behaviour (§A3) but is unreachable this wave — the payment
+        // freeze trigger refuses every delete of a posted payment (proven in `PaymentSchemaTest`). So this
+        // only asserts the factory produces a row that names its payment correctly; it does not delete.
         $payment = SupplierPayment::factory()->create([
             ...$this->references,
             'journal_entry_id' => factoryPaymentJournalEntryId(),

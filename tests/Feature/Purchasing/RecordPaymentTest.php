@@ -187,6 +187,54 @@ describe('recording and posting a payment', function (): void {
             ->and((float) $byAccount[$this->bank->getKey()]->credit)->toBe(1000.0);
     });
 
+    it('stamps the payment’s branch on both journal lines (ADR §A2)', function (): void {
+        // The reporting dimension propagates from the payment header to every ledger line, exactly as a bill's
+        // branch does — so a branch P&L or trial balance includes supplier payments (ADR 0020 §A2, Gate-2
+        // clarification resolving the §A2/§B divergence in favour of §A2).
+        $branch = Branch::factory()->create(['company_id' => $this->company->getKey()]);
+        $bill = recordBill($this->company, $this->supplier, '1000.00');
+
+        $payment = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $bill->getKey(), '1000.00'),
+        ], ['branchId' => (string) $branch->getKey()]), $this->owner);
+
+        $entry = JournalEntry::query()->with('lines')->findOrFail($payment->journal_entry_id);
+
+        expect($entry->lines)->toHaveCount(2)
+            ->and($entry->lines->pluck('branch_id')->unique()->all())->toBe([(string) $branch->getKey()]);
+    });
+
+    it('leaves the journal lines’ branch null when the payment names no branch', function (): void {
+        $bill = recordBill($this->company, $this->supplier, '1000.00');
+
+        $payment = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $bill->getKey(), '1000.00'),
+        ]), $this->owner);
+
+        $entry = JournalEntry::query()->with('lines')->findOrFail($payment->journal_entry_id);
+
+        expect($entry->lines->pluck('branch_id')->unique()->all())->toBe([null]);
+    });
+
+    it('records a caller-supplied external reference, and lets two payments share one (AC-3.2, dec. 7)', function (): void {
+        // A reference is optional and NOT unique — a bank txn id or cheque number, with duplicate detection
+        // deliberately left to audit (Gate-1 dec. 7). Both are exercised here through the real service.
+        $billA = recordBill($this->company, $this->supplier, '1000.00');
+        $billB = recordBill($this->company, $this->supplier, '1000.00');
+
+        $first = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $billA->getKey(), '1000.00'),
+        ], ['reference' => 'CHQ-000123']), $this->owner);
+
+        $second = $this->payments->record($this->company, recordPaymentData([
+            recordAllocation((string) $billB->getKey(), '1000.00'),
+        ], ['reference' => 'CHQ-000123']), $this->owner);
+
+        expect($first->reference)->toBe('CHQ-000123')
+            ->and($second->reference)->toBe('CHQ-000123')
+            ->and(SupplierPayment::query()->where('reference', 'CHQ-000123')->count())->toBe(2);
+    });
+
     it('numbers the journal entry from the journal voucher series, not the payment series', function (): void {
         $bill = recordBill($this->company, $this->supplier, '1000.00');
 

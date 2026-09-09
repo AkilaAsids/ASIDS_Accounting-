@@ -28,16 +28,27 @@ use Illuminate\Support\Facades\DB;
  * the locked re-read is authoritative, and `bills_amount_due_non_negative_check` is the database backstop the
  * app's readable cap check is layered over.
  *
- * True OS-level concurrency is not reproducible in a single-process test, so — exactly as
- * `BillDuplicateNumberRaceTest` uses a deterministic stand-in for two racing requests — these prove the
- * guarantees deterministically:
+ * SCOPE AND HONEST LIMITATION. True OS-level concurrency is not reproducible in this single-process,
+ * `RefreshDatabase` harness: the wrapping transaction is never committed, so a second connection cannot see
+ * the fixtures this test creates, and there is no yield point inside `PaymentService::record()` at which a
+ * genuine racer could change a bill between the unlocked pre-check (step 7) and the locked re-read (step 12).
+ * A single-process test therefore cannot isolate step 12 — the pre-check catches the same condition first.
+ * This is an inherited property shared with `BillDuplicateNumberRaceTest` (which mirrors it for
+ * `BillService::post()`'s single-row lock). What this suite proves deterministically, and what actually
+ * carries the concurrency guarantee, is the DATABASE AUTHORITY the readable app checks are layered over:
  *
- *   * the database refuses a raw over-allocation that would drive `amount_due` negative, so even a service bug
- *     that let an over-cap allocation through could not corrupt a payable (the authority under a race);
+ *   * the database refuses a raw over-allocation that would drive `amount_due` negative
+ *     (`bills_amount_due_non_negative_check`), so even a lost update or a service bug that let an over-cap
+ *     allocation through could not corrupt a payable — this is the authority that holds when the advisory
+ *     pre-check races;
  *   * a bill settled by a first payment cannot be settled again by a second — the loser is refused readably,
- *     no lost update, no double settlement;
- *   * the payload's bill order does not matter: the service locks in ascending id order regardless of how the
- *     allocations were supplied, which is the deadlock-free property of §F1.
+ *     no double settlement;
+ *   * the result is independent of the order the caller lists the allocations.
+ *
+ * The deadlock-free ascending-id lock order (§F1) and the locked re-read being authoritative rest on the code
+ * (`PaymentService::record()` steps 11–12) and the DB backstop above; proving them under a real race would
+ * need an OS-concurrency test harness this project does not yet have (a cross-cutting infrastructure item,
+ * not a Wave 8a deliverable).
  */
 beforeEach(function (): void {
     $this->acme = $this->createWorkspace('acme');
@@ -158,12 +169,20 @@ describe('two payments contending for the same bill', function (): void {
     });
 });
 
-describe('the ascending-id lock order is insensitive to payload order (§F1)', function (): void {
+describe('allocating across several bills is insensitive to payload order', function (): void {
+    // NOTE ON SCOPE: this proves the *result* is independent of the order the caller lists the allocations —
+    // the service does not assume caller-sorted input. It does NOT, on its own, prove the *lock acquisition*
+    // order (`orderBy('id')` at PaymentService step 11): with a single, non-concurrent call the per-bill
+    // movement is symmetric, so the final figures would match even without the ordering. The ascending-id
+    // ordering is the deadlock-free property of §F1 whose payoff only appears under genuine concurrency,
+    // which this single-process harness cannot reproduce (see the file docblock) — its correctness rests on
+    // the code (`PaymentService.php` step 11) and the DB backstop proven above, not on this test.
     it('settles every bill regardless of the order the allocations were supplied in', function (): void {
         $a = raceBill('600.00');
         $b = raceBill('900.00');
 
-        // Supplied b-before-a; the service locks ascending by id regardless — the deadlock-free order.
+        // Supplied in descending-id order — the opposite of the lock order — to show the payload order does
+        // not change the outcome.
         $ordered = collect([$a, $b])->sortByDesc(fn (Bill $bill): string => (string) $bill->getKey())->values();
 
         $payment = $this->payments->record($this->company, racePayment([

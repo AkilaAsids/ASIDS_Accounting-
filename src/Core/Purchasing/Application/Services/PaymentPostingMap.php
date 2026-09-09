@@ -50,9 +50,13 @@ final readonly class PaymentPostingMap
     /**
      * The journal lines representing this payment: `Dr Trade Payables (total) = Cr Bank/Cash (total)`.
      *
+     * `$branchId` is the payment's reporting dimension, stamped on both lines exactly as `BillPostingMap`
+     * stamps a bill's `branch_id` on every line (`BillPostingMap.php:126,169,234`; ADR §A2) — so branch-level
+     * ledger reports (branch P&L, branch trial balance) include supplier payments.
+     *
      * @return list<JournalLineData>
      */
-    public function for(Company $company, Account $bankAccount, Money $total, Supplier $supplier): array
+    public function for(Company $company, Account $bankAccount, Money $total, Supplier $supplier, ?string $branchId = null): array
     {
         $payable = $this->payableAccountFor($company);
         $bank = $this->assertBankAccount($company, $bankAccount);
@@ -60,8 +64,8 @@ final readonly class PaymentPostingMap
         $narration = LedgerNarration::limit(sprintf('Payment to %s', $supplier->name));
 
         return [
-            $this->line($payable, $total, $supplier, $narration, creditSide: false),
-            $this->line($bank, $total, $supplier, $narration, creditSide: true),
+            $this->line($payable, $total, $narration, $branchId, creditSide: false),
+            $this->line($bank, $total, $narration, $branchId, creditSide: true),
         ];
     }
 
@@ -131,15 +135,15 @@ final readonly class PaymentPostingMap
     private function line(
         Account $account,
         Money $amount,
-        Supplier $supplier,
         string $description,
+        ?string $branchId,
         bool $creditSide,
     ): JournalLineData {
         return new JournalLineData(
             accountId: (string) $account->getKey(),
             debit: $creditSide ? null : $amount,
             credit: $creditSide ? $amount : null,
-            branchId: null,
+            branchId: $branchId,
             description: $description,
         );
     }
