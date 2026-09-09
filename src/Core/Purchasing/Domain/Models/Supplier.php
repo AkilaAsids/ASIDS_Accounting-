@@ -40,6 +40,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $tax_identification_number
  * @property string|null $vat_registration_number
  * @property bool $is_vat_registered
+ * @property bool $wht_applicable
+ * @property numeric-string|null $wht_rate
  * @property string|null $email
  * @property string|null $phone
  * @property string|null $website
@@ -83,6 +85,8 @@ final class Supplier extends Model
         'tax_identification_number',
         'vat_registration_number',
         'is_vat_registered',
+        'wht_applicable',
+        'wht_rate',
         'email',
         'phone',
         'website',
@@ -193,6 +197,8 @@ final class Supplier extends Model
             'tax_identification_number',
             'vat_registration_number',
             'is_vat_registered',
+            'wht_applicable',
+            'wht_rate',
             'payment_terms_days',
             'status',
         ];
@@ -214,6 +220,8 @@ final class Supplier extends Model
         return [
             'status' => SupplierStatus::class,
             'is_vat_registered' => 'boolean',
+            'wht_applicable' => 'boolean',
+            'wht_rate' => 'decimal:2',
             'payment_terms_days' => 'integer',
             'archived_at' => 'immutable_datetime',
         ];

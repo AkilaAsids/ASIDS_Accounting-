@@ -109,4 +109,28 @@ describe('the CHECK negatives are non-vacuous (drop the constraint → the same 
 
         expect(DB::table('suppliers')->where('code', 'S-0002')->count())->toBe(1);
     });
+
+    it('the WHT rate-range CHECK is the only thing rejecting a rate above 100 (ADR 0021 §A2)', function (): void {
+        expect(constraintPresent('suppliers_wht_rate_range_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE suppliers DROP CONSTRAINT suppliers_wht_rate_range_check');
+
+        // 150 is out of range but still paired with applicable=true, so the biconditional is satisfied and
+        // only the range CHECK could have objected.
+        expect(fn () => DB::transaction(fn () => DB::table('suppliers')->insert(mutationSupplierRow(['code' => 'S-0002', 'wht_applicable' => true, 'wht_rate' => '150.00']))))
+            ->not->toThrow(QueryException::class);
+
+        expect(DB::table('suppliers')->where('code', 'S-0002')->count())->toBe(1);
+    });
+
+    it('the WHT applicable-requires-rate CHECK is the only thing rejecting applicable with no rate', function (): void {
+        expect(constraintPresent('suppliers_wht_applicable_requires_rate_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE suppliers DROP CONSTRAINT suppliers_wht_applicable_requires_rate_check');
+
+        expect(fn () => DB::transaction(fn () => DB::table('suppliers')->insert(mutationSupplierRow(['code' => 'S-0002', 'wht_applicable' => true, 'wht_rate' => null]))))
+            ->not->toThrow(QueryException::class);
+
+        expect(DB::table('suppliers')->where('code', 'S-0002')->count())->toBe(1);
+    });
 });

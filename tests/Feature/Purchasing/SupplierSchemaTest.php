@@ -113,6 +113,61 @@ describe('the indexes', function (): void {
     });
 });
 
+describe('withholding tax configuration (ADR 0021 §A2)', function (): void {
+    it('carries the two WHT columns', function (): void {
+        expect(Schema::hasColumns('suppliers', ['wht_applicable', 'wht_rate']))->toBeTrue();
+    });
+
+    it('declares the WHT CHECK constraints', function (): void {
+        $checks = collect(DB::select(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'suppliers'::regclass AND contype = 'c'"
+        ))->pluck('conname')->all();
+
+        expect($checks)->toContain('suppliers_wht_rate_range_check')
+            ->and($checks)->toContain('suppliers_wht_applicable_requires_rate_check');
+    });
+
+    it('accepts a non-withholding supplier (applicable false, no rate) — the default', function (): void {
+        insertSupplier(['code' => 'S-NONWHT']);
+
+        expect(DB::table('suppliers')->where('code', 'S-NONWHT')->value('wht_applicable'))->toBeFalse();
+    });
+
+    it('accepts a withholding supplier with a rate in range', function (): void {
+        insertSupplier(['code' => 'S-WHT', 'wht_applicable' => true, 'wht_rate' => '5.00']);
+
+        expect(DB::table('suppliers')->where('code', 'S-WHT')->value('wht_rate'))->toBe('5.00');
+    });
+
+    it('refuses a rate above 100', function (): void {
+        insertSupplier(['code' => 'S-BASE']);
+
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-BAD', 'wht_applicable' => true, 'wht_rate' => '150.00'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a negative rate', function (): void {
+        insertSupplier(['code' => 'S-BASE']);
+
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-NEG', 'wht_applicable' => true, 'wht_rate' => '-1.00'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a withholding supplier with no rate (the biconditional)', function (): void {
+        insertSupplier(['code' => 'S-BASE']);
+
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-NORATE', 'wht_applicable' => true, 'wht_rate' => null])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a non-withholding supplier that carries a rate (the biconditional)', function (): void {
+        insertSupplier(['code' => 'S-BASE']);
+
+        expect(fn () => DB::transaction(fn () => insertSupplier(['code' => 'S-RATEOFF', 'wht_applicable' => false, 'wht_rate' => '5.00'])))
+            ->toThrow(QueryException::class);
+    });
+});
+
 describe('the check constraints', function (): void {
     it('accepts a well-formed supplier row', function (): void {
         // The positive baseline: proves the table and its defaults accept a valid supplier, so the

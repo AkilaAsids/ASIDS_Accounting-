@@ -79,6 +79,15 @@ final class Account extends Model
      */
     public const string TRADE_PAYABLES = 'trade_payables';
 
+    /**
+     * Where a withholding payment's withheld tax lands — the liability owed to the authority until remitted.
+     *
+     * A WHT payment posts Dr Trade Payables (gross) = Cr Bank (net) + Cr WHT Payable (withheld). Resolved by
+     * key, never by code, exactly as `TRADE_PAYABLES` — a company may renumber its chart. Added Phase 5 Wave
+     * 8b (ADR 0021 §A5).
+     */
+    public const string WHT_PAYABLE = 'wht_payable';
+
     protected $table = 'accounts';
 
     /** @var list<string> */

@@ -154,6 +154,16 @@ final readonly class SupplierService
             ? ($attributes['country_code'] !== null ? strtoupper((string) $attributes['country_code']) : null)
             : $supplier->country_code;
 
+        $whtApplicable = array_key_exists('wht_applicable', $attributes)
+            ? (bool) $attributes['wht_applicable']
+            : $supplier->wht_applicable;
+
+        $whtRate = array_key_exists('wht_rate', $attributes)
+            ? ($attributes['wht_rate'] !== null ? (string) $attributes['wht_rate'] : null)
+            : $supplier->wht_rate;
+
+        [$whtApplicable, $whtRate] = $this->resolveWht($whtApplicable, $whtRate);
+
         return DB::transaction(function () use (
             $supplier,
             $attributes,
@@ -163,6 +173,8 @@ final readonly class SupplierService
             $vatRegistrationNumber,
             $paymentTermsDays,
             $countryCode,
+            $whtApplicable,
+            $whtRate,
         ): Supplier {
             $supplier->fill(array_intersect_key($attributes, array_flip([
                 'name', 'legal_name', 'tax_identification_number', 'email', 'phone', 'website',
@@ -175,6 +187,8 @@ final readonly class SupplierService
             $supplier->vat_registration_number = $vatRegistrationNumber;
             $supplier->payment_terms_days = $paymentTermsDays;
             $supplier->country_code = $countryCode;
+            $supplier->wht_applicable = $whtApplicable;
+            $supplier->wht_rate = $whtRate;
 
             return $this->save($supplier);
         });
@@ -369,6 +383,51 @@ final readonly class SupplierService
         $supplier->country_code = $data->countryCode !== null ? strtoupper($data->countryCode) : null;
         $supplier->payment_terms_days = $data->paymentTermsDays;
         $supplier->notes = $data->notes;
+
+        [$supplier->wht_applicable, $supplier->wht_rate] = $this->resolveWht($data->whtApplicable, $data->whtRate);
+    }
+
+    /**
+     * The effective withholding-tax pairing, validated (ADR 0021 §A2).
+     *
+     * A withholding supplier must have a rate, and the rate must be a percentage in [0,100] — both refused
+     * readably before the DB CHECKs surface as constraint names. A non-withholding supplier has no rate: a
+     * rate supplied alongside `applicable = false` is cleared, not rejected, so a caller can turn withholding
+     * off without also nulling the rate. This enforces the stored biconditional
+     * (`suppliers_wht_applicable_requires_rate_check`) by clearing rather than erroring on the "off" side.
+     *
+     * @return array{0: bool, 1: numeric-string|null}
+     */
+    private function resolveWht(bool $applicable, ?string $rate): array
+    {
+        if (! $applicable) {
+            return [false, null];
+        }
+
+        if ($rate === null || trim($rate) === '') {
+            throw BusinessRuleViolation::make(
+                'supplier-wht-rate-required',
+                'A withholding supplier needs a withholding-tax rate. Set the rate, or turn withholding off.',
+            );
+        }
+
+        $trimmed = trim($rate);
+
+        if (! is_numeric($trimmed)) {
+            throw BusinessRuleViolation::make(
+                'supplier-wht-rate-out-of-range',
+                sprintf('"%s" is not a valid withholding-tax rate.', $rate),
+            );
+        }
+
+        if (bccomp($trimmed, '0', 2) < 0 || bccomp($trimmed, '100', 2) > 0) {
+            throw BusinessRuleViolation::make(
+                'supplier-wht-rate-out-of-range',
+                sprintf('A withholding-tax rate of %s%% is out of range. It must be between 0 and 100.', $trimmed),
+            );
+        }
+
+        return [true, $trimmed];
     }
 
     /**

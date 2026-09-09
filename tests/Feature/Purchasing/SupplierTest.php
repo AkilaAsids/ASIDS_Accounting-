@@ -17,6 +17,7 @@ use Asids\Core\Tenancy\Infrastructure\RowLevelSecurity;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * The supplier domain — Stage 4 of Wave 6 (ADR 0018 §C, §G).
@@ -40,6 +41,67 @@ beforeEach(function (): void {
     $this->owner = $this->acme['owner'];
 
     $this->service = app(SupplierService::class);
+});
+
+describe('withholding tax configuration (ADR 0021 §A2)', function (): void {
+    it('creates a withholding supplier with a rate through the service', function (): void {
+        $supplier = $this->service->create($this->company, new SupplierData(
+            name: 'WHT Supplier',
+            code: 'WHT-1',
+            whtApplicable: true,
+            whtRate: '5.00',
+        ));
+
+        expect($supplier->wht_applicable)->toBeTrue()
+            ->and($supplier->wht_rate)->toBe('5.00');
+    });
+
+    it('defaults a supplier to non-withholding', function (): void {
+        $supplier = $this->service->create($this->company, new SupplierData(name: 'Plain', code: 'PLAIN-1'));
+
+        expect($supplier->wht_applicable)->toBeFalse()
+            ->and($supplier->wht_rate)->toBeNull();
+    });
+
+    it('refuses a withholding supplier with no rate, readably', function (): void {
+        $exception = catchPlatformException(fn () => $this->service->create($this->company, new SupplierData(
+            name: 'No Rate', code: 'NR-1', whtApplicable: true, whtRate: null,
+        )));
+
+        expect($exception->problemCode())->toBe('supplier-wht-rate-required');
+    });
+
+    it('clears a stray rate when the supplier is not withholding (the biconditional, applied leniently)', function (): void {
+        // A rate supplied alongside applicable=false is ignored, not rejected — a non-withholding supplier
+        // simply has no rate. The stored biconditional (rate present iff applicable) is what the service
+        // enforces; it does so by clearing, not by erroring.
+        $supplier = $this->service->create($this->company, new SupplierData(
+            name: 'Rate Off', code: 'RO-1', whtApplicable: false, whtRate: '5.00',
+        ));
+
+        expect($supplier->wht_applicable)->toBeFalse()
+            ->and($supplier->wht_rate)->toBeNull();
+    });
+
+    it('refuses a rate out of range, readably', function (): void {
+        $exception = catchPlatformException(fn () => $this->service->create($this->company, new SupplierData(
+            name: 'Bad Rate', code: 'BR-1', whtApplicable: true, whtRate: '150',
+        )));
+
+        expect($exception->problemCode())->toBe('supplier-wht-rate-out-of-range');
+    });
+
+    it('turns withholding on and off through update', function (): void {
+        $supplier = $this->service->create($this->company, new SupplierData(name: 'Toggle', code: 'TOG-1'));
+
+        $on = $this->service->update($supplier, ['wht_applicable' => true, 'wht_rate' => '10.00']);
+        expect($on->wht_applicable)->toBeTrue()->and($on->wht_rate)->toBe('10.00');
+
+        // Turning it off clears the rate (the biconditional the DB enforces).
+        $off = $this->service->update($on, ['wht_applicable' => false]);
+        expect($off->fresh()->wht_applicable)->toBeFalse()
+            ->and($off->fresh()->wht_rate)->toBeNull();
+    });
 });
 
 /**
@@ -645,7 +707,7 @@ describe('tenant isolation enforced by the database', function (): void {
         $this->withinTenant($globex['tenant']);
 
         expect(fn () => DB::table('suppliers')->insert([
-            'id' => (string) \Illuminate\Support\Str::uuid7(),
+            'id' => (string) Str::uuid7(),
             'tenant_id' => $acmeTenantId,
             'company_id' => $this->company->getKey(),
             'code' => 'SNEAK',

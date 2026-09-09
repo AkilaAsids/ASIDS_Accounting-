@@ -37,7 +37,7 @@ final class ChartTemplate
      * or a removal. Companies store the version they were created from, so a correction can find
      * them.
      */
-    public const string VERSION = '2026.09-lk-sme-3';
+    public const string VERSION = '2026.09-lk-sme-4';
 
     /**
      * Shown wherever the template is offered or applied. Not optional, and not abbreviated.
@@ -104,6 +104,9 @@ final class ChartTemplate
             self::leaf('2150', 'PAYE / APIT Payable', AccountType::Liability, parent: '2100'),
             self::leaf('2160', 'EPF Payable', AccountType::Liability, parent: '2100'),
             self::leaf('2170', 'ETF Payable', AccountType::Liability, parent: '2100'),
+            // Added Phase 5 Wave 8b (ADR 0021 §A5): where a withholding payment's withheld tax lands, owed to
+            // the authority until remitted. Keyed, so a renumbered chart still resolves it at posting time.
+            self::leaf('2180', 'WHT Payable', AccountType::Liability, parent: '2100', system: Account::WHT_PAYABLE),
 
             self::heading('2200', 'Non-Current Liabilities', AccountType::Liability, parent: '2000'),
             self::leaf('2210', 'Long-Term Borrowings', AccountType::Liability, parent: '2200'),
@@ -165,6 +168,9 @@ final class ChartTemplate
             // Added by Phase 5 Wave 7. Every posted bill credits it, so a company that skipped the starter
             // chart must still receive it — or its first bill fails to post.
             self::leaf('2110', 'Trade Payables', AccountType::Liability, system: Account::TRADE_PAYABLES),
+            // Added by Phase 5 Wave 8b. A withholding payment credits it, so a company that skipped the
+            // starter chart must still receive it — or its first WHT payment fails to post (ADR 0021 §A5).
+            self::leaf('2180', 'WHT Payable', AccountType::Liability, system: Account::WHT_PAYABLE),
         ];
     }
 

@@ -102,9 +102,10 @@ describe('the constant and the version', function (): void {
     });
 
     it('bumps the chart template version so existing companies can be found', function (): void {
-        // ADR §A0.2, confirmed at Gate 2: 2026.08-lk-sme-2 → 2026.09-lk-sme-3. A correction that must reach the
+        // ADR 0019 §A0.2 bumped 2026.08-lk-sme-2 → 2026.09-lk-sme-3; Wave 8b (ADR 0021 §A5) then bumped it to
+        // -4 for the WHT Payable account. This test tracks the current constant — a correction that must reach
         // companies built before it needs the version to change, exactly as the receivables key did.
-        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-3');
+        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-4');
     });
 });
 

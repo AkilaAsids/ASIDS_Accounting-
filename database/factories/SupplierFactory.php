@@ -39,6 +39,10 @@ final class SupplierFactory extends Factory
             'country_code' => 'LK',
             'payment_terms_days' => 30,
             'is_vat_registered' => false,
+            // Set explicitly so an unsaved instance is strict-mode-safe (ADR 0021 §A2). Non-withholding by
+            // default — a withholding supplier is configured through the service.
+            'wht_applicable' => false,
+            'wht_rate' => null,
             // Set explicitly rather than relying on the column default, so an unsaved instance reads
             // back the same as a saved one under `Model::shouldBeStrict()`.
             'status' => SupplierStatus::Active,
