@@ -154,6 +154,45 @@ final class PaymentCannotBeRecorded extends BusinessRuleViolation
     }
 
     /**
+     * The payment was told to withhold but no rate could be found — neither a per-payment override nor the
+     * supplier's `wht_rate` (ADR 0021 §C2).
+     */
+    public static function whtRateMissing(string $supplier): self
+    {
+        return new self(
+            sprintf('Supplier %s is set to withhold tax but has no rate, and none was supplied for this payment.', $supplier),
+            'payment-wht-rate-missing',
+            ['supplier' => $supplier],
+        );
+    }
+
+    /**
+     * A supplied WHT rate override is outside [0,100].
+     */
+    public static function whtRateOutOfRange(string $rate): self
+    {
+        return new self(
+            sprintf('A withholding-tax rate of %s%% is out of range. It must be between 0 and 100.', $rate),
+            'payment-wht-rate-out-of-range',
+            ['rate' => $rate],
+        );
+    }
+
+    /**
+     * The withheld amount exceeds the payment amount (net cash would be negative). Defensive: the rate range
+     * check makes this largely unreachable, and `supplier_payments_wht_within_amount_check` is the DB
+     * authority; this makes the net-cash-≥-0 rule explicit (FR-4).
+     */
+    public static function whtExceedsAmount(string $wht, string $amount): self
+    {
+        return new self(
+            sprintf('The withheld tax of %s exceeds the payment of %s — the net cash would be negative.', $wht, $amount),
+            'payment-wht-exceeds-amount',
+            ['wht' => $wht, 'amount' => $amount],
+        );
+    }
+
+    /**
      * An allocation exceeds the bill's current `amount_due` (AC-1.6, the per-bill cap, dec. 3). The readable
      * message; `bills_amount_due_non_negative_check` (§A4) is the authority under concurrency.
      */

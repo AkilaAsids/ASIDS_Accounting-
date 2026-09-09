@@ -49,6 +49,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $currency_code
  * @property numeric-string|null $exchange_rate
  * @property numeric-string $amount
+ * @property numeric-string $wht_amount
+ * @property numeric-string|null $wht_rate
  * @property PaymentStatus $status
  * @property string|null $reference
  * @property string|null $notes
@@ -195,6 +197,8 @@ final class SupplierPayment extends Model
             'bank_account_id',
             'payment_date',
             'amount',
+            'wht_amount',
+            'wht_rate',
             'reference',
             'status',
         ];
@@ -219,6 +223,8 @@ final class SupplierPayment extends Model
             'posted_at' => 'immutable_datetime',
             'exchange_rate' => 'decimal:10',
             'amount' => 'decimal:4',
+            'wht_amount' => 'decimal:4',
+            'wht_rate' => 'decimal:2',
         ];
     }
 }

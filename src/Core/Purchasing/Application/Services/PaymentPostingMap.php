@@ -56,17 +56,31 @@ final readonly class PaymentPostingMap
      *
      * @return list<JournalLineData>
      */
-    public function for(Company $company, Account $bankAccount, Money $total, Supplier $supplier, ?string $branchId = null): array
+    public function for(Company $company, Account $bankAccount, Money $total, Money $wht, Supplier $supplier, ?string $branchId = null): array
     {
         $payable = $this->payableAccountFor($company);
         $bank = $this->assertBankAccount($company, $bankAccount);
+        $net = $total->minus($wht);                                    // wht ≤ total guaranteed by the service + DB CHECK
 
         $narration = LedgerNarration::limit(sprintf('Payment to %s', $supplier->name));
 
-        return [
-            $this->line($payable, $total, $narration, $branchId, creditSide: false),
-            $this->line($bank, $total, $narration, $branchId, creditSide: true),
-        ];
+        // Dr Trade Payables (gross) — always.
+        $lines = [$this->line($payable, $total, $narration, $branchId, creditSide: false)];
+
+        // Cr Bank/Cash (net). Omitted only in the 100%-withheld net-zero edge — a zero line would be refused
+        // by journal_lines_one_sided_check anyway.
+        if ($net->isPositive()) {
+            $lines[] = $this->line($bank, $net, $narration, $branchId, creditSide: true);
+        }
+
+        // Cr WHT Payable (withheld) — the third line, only when withholding. Resolved here, not at the top, so
+        // a zero-WHT payment never touches WHT Payable and a company that never withholds posts the 8a
+        // two-line entry (AC-1.2).
+        if ($wht->isPositive()) {
+            $lines[] = $this->line($this->whtPayableAccountFor($company), $wht, $narration, $branchId, creditSide: true);
+        }
+
+        return $lines;
     }
 
     /**
@@ -93,6 +107,31 @@ final readonly class PaymentPostingMap
         }
 
         return $this->assertPostable($account, 'payable');
+    }
+
+    /**
+     * The account a withholding payment credits with the tax it withheld.
+     *
+     * Always the company's `wht_payable` system account (ADR 0021 §A5), resolved by key. Mirrors
+     * `payableAccountFor()`'s missing / wrong-type / not-postable checks exactly. Called only when the payment
+     * actually withholds, so a non-withholding company never needs a WHT Payable account.
+     */
+    public function whtPayableAccountFor(Company $company): Account
+    {
+        $account = Account::query()
+            ->forCompany((string) $company->getKey())
+            ->withSystemKey(Account::WHT_PAYABLE)
+            ->first();
+
+        if ($account === null) {
+            throw PaymentCannotBePosted::withoutWhtPayableAccount($company->name);
+        }
+
+        if ($account->type !== AccountType::Liability) {
+            throw PaymentCannotBePosted::whtPayableAccountWrongType($account);
+        }
+
+        return $this->assertPostable($account, 'WHT payable');
     }
 
     /**

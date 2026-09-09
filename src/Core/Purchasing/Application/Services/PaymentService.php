@@ -155,9 +155,65 @@ final readonly class PaymentService
             throw PaymentCannotBeRecorded::notFullyAllocated($amount, $allocated);
         }
 
+        $ccy = $company->base_currency_code;
+
+        // 8a. Resolve the effective WHT rate (ADR 0021 §C2): the supplier's default unless the caller forces
+        //     withholding on/off for this payment, and the supplier's rate unless a per-payment override.
+        $applyWht = $data->withholdTax ?? $supplier->wht_applicable;
+        $rate = null;
+
+        if ($applyWht) {
+            $rate = $data->whtRateOverride ?? $supplier->wht_rate;
+
+            if ($rate === null || trim((string) $rate) === '') {
+                throw PaymentCannotBeRecorded::whtRateMissing($supplier->name);
+            }
+
+            $rate = $this->assertDecimal((string) $rate);
+
+            if (bccomp($rate, '0', 2) < 0 || bccomp($rate, '100', 2) > 0) {
+                throw PaymentCannotBeRecorded::whtRateOutOfRange($rate);
+            }
+        }
+
+        // 8b. The WHT amount, from the pre-VAT base of each allocated bill (dec. 2). The pre-VAT share of an
+        //     allocation paying `allocation` of a bill's `total` is `allocation × subtotal / total` — exact
+        //     when fully allocated, proportional when partial. One rate (dec. 7): rate × Σ bases, rounded once
+        //     to currency precision (dec. 5). No WHT ⇒ Money::zero, so the posting is the 8a two-line entry.
+        $wht = Money::zero($ccy);
+        $whtRateSnapshot = null;
+
+        if ($rate !== null) {
+            $base = '0';
+
+            foreach ($data->allocations as $allocation) {
+                $bill = $bills[$allocation->billId];
+                // An outstanding bill has total > 0, so the divide is safe.
+                $share = bcdiv(
+                    bcmul($this->assertDecimal($allocation->amount), $bill->subtotal, Money::SCALE + 4),
+                    $bill->total,
+                    Money::SCALE,
+                );
+                $base = bcadd($base, $share, Money::SCALE);
+            }
+
+            $whtRaw = bcdiv(bcmul($base, $rate, Money::SCALE + 4), '100', Money::SCALE);
+            $wht = Money::of($whtRaw, $ccy)->roundedTo($company->currency_precision);
+
+            if ($wht->isGreaterThan(Money::of($amount, $ccy))) {
+                throw PaymentCannotBeRecorded::whtExceedsAmount($wht->toDecimalString(), $amount);
+            }
+
+            // Snapshot the rate only when something was actually withheld — a zero-WHT header stays
+            // 8a-identical (fork 5).
+            $whtRateSnapshot = $wht->isPositive() ? $rate : null;
+        }
+
+        $whtValue = $this->assertDecimal($wht->toDecimalString());
+
         // 9. The posting lines — the map writes nothing, so an account refusal here (`PaymentCannotBePosted`)
-        //    costs no lock. The branch (resolved at step 3) is stamped on both lines, mirroring bills (§A2).
-        $lines = $this->postingMap->for($company, $bankAccount, Money::of($amount, $company->base_currency_code), $supplier, $branchId);
+        //    costs no lock. The branch (§A2) is stamped on every line; the credit splits when wht > 0 (§B).
+        $lines = $this->postingMap->for($company, $bankAccount, Money::of($amount, $ccy), $wht, $supplier, $branchId);
 
         // 10. The calendar, before any number is reserved (AC-2.7).
         $period = $this->calendar->periodFor($company, $data->paymentDate->startOfDay());
@@ -174,6 +230,8 @@ final readonly class PaymentService
             $bankAccount,
             $branchId,
             $amount,
+            $whtValue,
+            $whtRateSnapshot,
             $lines,
             $period,
             $actor,
@@ -238,6 +296,8 @@ final readonly class PaymentService
             $payment->currency_code = $company->base_currency_code;
             $payment->exchange_rate = null;
             $payment->amount = $amount;
+            $payment->wht_amount = $whtValue;
+            $payment->wht_rate = $whtRateSnapshot;
             $payment->status = PaymentStatus::Posted;
             $payment->reference = $data->reference;
             $payment->notes = $data->notes;

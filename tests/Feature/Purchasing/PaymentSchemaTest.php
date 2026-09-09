@@ -274,6 +274,79 @@ describe('the status CHECK', function (): void {
     });
 });
 
+describe('the withholding-tax snapshot (ADR 0021 §A3)', function (): void {
+    it('carries the wht columns', function (): void {
+        expect(Schema::hasColumns('supplier_payments', ['wht_amount', 'wht_rate']))->toBeTrue();
+    });
+
+    it('declares the wht CHECK constraints', function (): void {
+        $checks = collect(DB::select(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'supplier_payments'::regclass AND contype = 'c'"
+        ))->pluck('conname')->all();
+
+        expect($checks)->toContain('supplier_payments_wht_amount_non_negative_check')
+            ->and($checks)->toContain('supplier_payments_wht_within_amount_check')
+            ->and($checks)->toContain('supplier_payments_wht_rate_range_check')
+            ->and($checks)->toContain('supplier_payments_wht_rate_present_when_withheld_check');
+    });
+
+    it('defaults wht_amount to zero and wht_rate to null (a non-withholding payment is 8a-identical)', function (): void {
+        $id = insertPayment();
+
+        $row = DB::table('supplier_payments')->where('id', $id)->first();
+        expect($row->wht_amount)->toBe('0.0000')
+            ->and($row->wht_rate)->toBeNull();
+    });
+
+    it('accepts a withholding payment', function (): void {
+        $id = insertPayment(['wht_amount' => '50.0000', 'wht_rate' => '5.00']);
+
+        expect(DB::table('supplier_payments')->where('id', $id)->value('wht_amount'))->toBe('50.0000');
+    });
+
+    it('refuses a negative wht_amount', function (): void {
+        insertPayment();
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['wht_amount' => '-1.0000', 'wht_rate' => '5.00'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses wht_amount greater than the payment amount', function (): void {
+        insertPayment();
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['amount' => '1000.0000', 'wht_amount' => '1000.0001', 'wht_rate' => '100.00'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a wht_rate above 100', function (): void {
+        insertPayment();
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['wht_amount' => '50.0000', 'wht_rate' => '150.00'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a positive withholding with no rate', function (): void {
+        insertPayment();
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['wht_amount' => '50.0000', 'wht_rate' => null])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('freezes wht_amount and wht_rate on a posted payment even on the one allowed cancelled transition (column-drift, §A4)', function (): void {
+        $id = insertPayment(['wht_amount' => '50.0000', 'wht_rate' => '5.00']);
+
+        // status -> cancelled is the one permitted move; changing wht_amount alongside it must still be
+        // refused by the frozen-by-name list — the regression that proves the column was added to the freeze.
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->where('id', $id)
+            ->update(['status' => 'cancelled', 'wht_amount' => '0.0000', 'updated_at' => now()])))
+            ->toThrow(QueryException::class);
+
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->where('id', $id)
+            ->update(['status' => 'cancelled', 'wht_rate' => '10.00', 'updated_at' => now()])))
+            ->toThrow(QueryException::class);
+    });
+});
+
 describe('the amount CHECK', function (): void {
     it('refuses a zero amount', function (): void {
         insertPayment();

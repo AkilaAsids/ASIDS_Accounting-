@@ -224,6 +224,32 @@ describe('the supplier_payments CHECK negatives are non-vacuous', function (): v
 
         expect(DB::table('supplier_payments')->whereNotNull('exchange_rate')->count())->toBe(1);
     });
+
+    it('the wht-within-amount CHECK is the only thing rejecting wht_amount > amount (ADR 0021 §A3)', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_wht_within_amount_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_wht_within_amount_check');
+
+        // wht_amount 1000.0001 > amount 1000; wht_rate present (100) and >= 0 so the other WHT checks pass —
+        // only the within-amount CHECK could have objected.
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(
+            checkMutationPaymentRow(['amount' => '1000.0000', 'wht_amount' => '1000.0001', 'wht_rate' => '100.00'])
+        )))->not->toThrow(QueryException::class);
+
+        expect(DB::table('supplier_payments')->where('wht_amount', '1000.0001')->count())->toBe(1);
+    });
+
+    it('the wht rate-present-when-withheld CHECK is the only thing rejecting a positive withholding with no rate', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_wht_rate_present_when_withheld_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_wht_rate_present_when_withheld_check');
+
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(
+            checkMutationPaymentRow(['wht_amount' => '50.0000', 'wht_rate' => null])
+        )))->not->toThrow(QueryException::class);
+
+        expect(DB::table('supplier_payments')->where('wht_amount', '50.0000')->count())->toBe(1);
+    });
 });
 
 describe('the payment_allocations CHECK negative is non-vacuous', function (): void {
