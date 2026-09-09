@@ -14,7 +14,7 @@ the Bill pattern — Phase 4 receipts are on unmerged branches, not this line). 
 | 3 · Architecture (ADR 0020) | ✅ Gate 2 APPROVED 2026-09-03 |
 | 4 · Build | ✅ all 6 stages GREEN — 9 payment suites, test-first (Opus) |
 | 5 · Review (QA ∥ Security) | ✅ Security PASS · QA PASS-WITH-FIXES → all fixes applied |
-| Delivery | ⏳ PR #9 pending (stacked on `feature/phase5-bills`) |
+| Delivery | ✅ **PR #9 open** (stacked on `feature/phase5-bills`) — awaiting human review/merge |
 
 ## Review outcomes (Stage 5)
 
