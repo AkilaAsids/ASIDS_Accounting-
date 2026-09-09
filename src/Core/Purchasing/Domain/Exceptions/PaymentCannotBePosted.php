@@ -42,6 +42,47 @@ final class PaymentCannotBePosted extends BusinessRuleViolation
     }
 
     /**
+     * No WHT Payable account could be found at all.
+     *
+     * Reachable only when a company was never provisioned the `wht_payable` system account (the §A6 backfill
+     * did not reach it). A withholding payment credits it, so without it the payment cannot post. Mirror
+     * `withoutPayableAccount`.
+     */
+    public static function withoutWhtPayableAccount(string $companyName): self
+    {
+        return new self(
+            sprintf(
+                '%s has no WHT Payable account, so a withholding payment has nowhere to post the tax it '
+                .'withheld. Provision the company\'s system accounts.',
+                $companyName,
+            ),
+            'wht-payable-account-missing',
+            ['company' => $companyName],
+        );
+    }
+
+    /**
+     * The WHT Payable account is not a liability.
+     *
+     * Reached only when `2180` was reclassified after provisioning. Crediting anything else would misstate
+     * what the company owes the authority. Mirror `payableAccountWrongType`.
+     */
+    public static function whtPayableAccountWrongType(Account $account): self
+    {
+        return new self(
+            sprintf(
+                'Account %s (%s) is %s. WHT Payable is what the company owes the authority, so it has to be a '
+                .'liability.',
+                $account->code,
+                $account->name,
+                $account->type->value,
+            ),
+            'wht-payable-account-wrong-type',
+            ['account' => $account->code, 'type' => $account->type->value],
+        );
+    }
+
+    /**
      * No payable account could be found at all.
      *
      * Reachable only when a company has no `trade_payables` system account — its chart was never provisioned.

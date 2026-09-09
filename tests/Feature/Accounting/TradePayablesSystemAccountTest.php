@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\DB;
  * resolved by system key — never by code, because a company may renumber its chart freely. That is a new system
  * key, provisioned two ways depending on when the company was created, which is where the risk is.
  *
- * A company created from here on gets it from the template (VERSION bumped to `2026.09-lk-sme-3`, ADR §A0.2). A
+ * A company created from here on gets it from the template (VERSION bumped to `2026.09-lk-sme-3` by Wave 7,
+ * later `-4` by Wave 8b's WHT Payable account, ADR §A0.2). A
  * company created from an earlier template already has a keyless `2110 Trade Payables`, and
  * `ensureSystemAccounts()` would not recognise it: that method provisions a missing key by *creating* an account
  * and its collision helper takes the next free code, so it would create `2110-1 Trade Payables` beside the
@@ -102,9 +103,10 @@ describe('the constant and the version', function (): void {
     });
 
     it('bumps the chart template version so existing companies can be found', function (): void {
-        // ADR §A0.2, confirmed at Gate 2: 2026.08-lk-sme-2 → 2026.09-lk-sme-3. A correction that must reach the
+        // ADR 0019 §A0.2 bumped 2026.08-lk-sme-2 → 2026.09-lk-sme-3; Wave 8b (ADR 0021 §A5) then bumped it to
+        // -4 for the WHT Payable account. This test tracks the current constant — a correction that must reach
         // companies built before it needs the version to change, exactly as the receivables key did.
-        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-3');
+        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-4');
     });
 });
 

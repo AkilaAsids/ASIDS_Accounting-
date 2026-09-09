@@ -104,9 +104,11 @@ describe('the permission catalogue', function (): void {
 
         expect($names)->toContain('purchasing.payments.view')
             ->and($names)->toContain('purchasing.payments.post')
-            // Record-and-post is one step (dec. 5) — no draft. Cancellation deferred (dec. 8).
+            // Record-and-post is one step (dec. 5) — no draft. Cancellation deferred (dec. 8). WHT (Wave 8b)
+            // reuses `payments.post` and adds NO capability of its own (ADR 0021 §C4) — the scope-creep guard.
             ->and($names)->not->toContain('purchasing.payments.draft')
-            ->and($names)->not->toContain('purchasing.payments.cancel');
+            ->and($names)->not->toContain('purchasing.payments.cancel')
+            ->and($names)->not->toContain('purchasing.payments.wht');
     });
 
     it('marks posting sensitive, and viewing not', function (): void {

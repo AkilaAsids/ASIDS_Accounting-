@@ -34,6 +34,11 @@ final readonly class PaymentData
         public ?string $reference = null,
         public ?string $notes = null,
         public ?string $branchId = null,
+        // WHT instruction (ADR 0021 §C1): null follows the supplier's `wht_applicable`; true/false forces
+        // withholding on/off for THIS payment. The rate override (a numeric-string percentage) replaces the
+        // supplier's rate when withholding. The withheld amount is always service-computed, never supplied.
+        public ?bool $withholdTax = null,
+        public ?string $whtRateOverride = null,
     ) {}
 
     /**
@@ -59,6 +64,10 @@ final readonly class PaymentData
             reference: self::optionalString($attributes, 'reference'),
             notes: self::optionalString($attributes, 'notes'),
             branchId: self::optionalString($attributes, 'branch_id'),
+            withholdTax: array_key_exists('withhold_tax', $attributes) && $attributes['withhold_tax'] !== null
+                ? (bool) $attributes['withhold_tax']
+                : null,
+            whtRateOverride: self::optionalString($attributes, 'wht_rate_override'),
         );
     }
 

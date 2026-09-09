@@ -98,7 +98,7 @@ function mapForAccount(array $lines, Account $account): array
 
 describe('the simplest payment', function (): void {
     it('produces exactly one payable debit and one bank credit, payable first', function (): void {
-        $lines = $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), $this->supplier);
+        $lines = $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
 
         // Trade Payables (the debit) first, Bank/Cash (the credit) last — the order the ADR's own worked
         // example renders the entry in (§B), the mirror of a purchase reading debits-first.
@@ -112,7 +112,7 @@ describe('the simplest payment', function (): void {
     });
 
     it('names the supplier on both lines', function (): void {
-        $lines = $this->map->for($this->company, $this->bank, Money::of('500.00', 'LKR'), $this->supplier);
+        $lines = $this->map->for($this->company, $this->bank, Money::of('500.00', 'LKR'), Money::zero('LKR'), $this->supplier);
 
         foreach ($lines as $line) {
             expect($line->description)->toContain($this->supplier->name);
@@ -120,7 +120,7 @@ describe('the simplest payment', function (): void {
     });
 
     it('posts whatever bank/cash account is named', function (): void {
-        $lines = $this->map->for($this->company, $this->cash, Money::of('250.00', 'LKR'), $this->supplier);
+        $lines = $this->map->for($this->company, $this->cash, Money::of('250.00', 'LKR'), Money::zero('LKR'), $this->supplier);
 
         expect(mapForAccount($lines, $this->cash))->toHaveCount(1)
             ->and(mapForAccount($lines, $this->bank))->toBeEmpty();
@@ -129,7 +129,7 @@ describe('the simplest payment', function (): void {
 
 describe('the balance invariant', function (): void {
     it('balances by construction for any amount', function (): void {
-        $lines = $this->map->for($this->company, $this->bank, Money::of('1234.56', 'LKR'), $this->supplier);
+        $lines = $this->map->for($this->company, $this->bank, Money::of('1234.56', 'LKR'), Money::zero('LKR'), $this->supplier);
 
         expect(mapDebitTotal($lines)->toDecimalString())->toBe(mapCreditTotal($lines)->toDecimalString())
             ->and(mapDebitTotal($lines)->toDecimalString())->toBe('1234.5600');
@@ -147,7 +147,7 @@ describe('the payable account', function (): void {
         DB::table('accounts')->where('id', $this->tradePayables->getKey())
             ->update(['is_active' => false, 'archived_at' => now()]);
 
-        expect(fn () => $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), $this->supplier))
+        expect(fn () => $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier))
             ->toThrow(PaymentCannotBePosted::class);
     });
 
@@ -156,7 +156,7 @@ describe('the payable account', function (): void {
             ->update(['system_key' => null, 'is_system' => false]);
 
         try {
-            $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), $this->supplier);
+            $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
             expect()->fail('a missing payable account should have been refused');
         } catch (PaymentCannotBePosted $exception) {
             // The exact code is not pinned here — see the QA report — but the message must still name the
@@ -170,7 +170,7 @@ describe('the payable account', function (): void {
             ->update(['type' => 'asset', 'normal_balance' => 'debit']);
 
         try {
-            $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), $this->supplier);
+            $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
             expect()->fail('a non-liability payable should have been refused');
         } catch (PaymentCannotBePosted $exception) {
             expect($exception->getMessage())->toContain($this->tradePayables->code);
@@ -183,7 +183,7 @@ describe('the bank/cash account', function (): void {
         // The ADR gives this exact code (§C4): `payment-bank-account-wrong-type` — the one new refusal with no
         // bill analogue, and confirmed verbatim, unlike the shared account-resolution refusals above.
         try {
-            $this->map->for($this->company, $this->income, Money::of('1000.00', 'LKR'), $this->supplier);
+            $this->map->for($this->company, $this->income, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
             expect()->fail('a non-asset bank account should have been refused');
         } catch (PaymentCannotBePosted $exception) {
             expect($exception->problemCode())->toBe('payment-bank-account-wrong-type')
@@ -195,7 +195,7 @@ describe('the bank/cash account', function (): void {
         DB::table('accounts')->where('id', $this->bank->getKey())
             ->update(['is_active' => false, 'archived_at' => now()]);
 
-        expect(fn () => $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), $this->supplier))
+        expect(fn () => $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier))
             ->toThrow(PaymentCannotBePosted::class);
     });
 
@@ -207,8 +207,87 @@ describe('the bank/cash account', function (): void {
 
         // Row level security cannot catch this — both companies share a tenant. Only comparing the company
         // stops a payment posting into a sibling's ledger (mirror `BillPostingMap`, ADR §B).
-        expect(fn () => $this->map->for($this->company, $siblingBank, Money::of('1000.00', 'LKR'), $this->supplier))
+        expect(fn () => $this->map->for($this->company, $siblingBank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier))
             ->toThrow(PaymentCannotBePosted::class);
+    });
+});
+
+describe('the withholding split (ADR 0021 §B)', function (): void {
+    it('splits the credit into net bank and WHT payable when wht > 0', function (): void {
+        $lines = $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::of('50.00', 'LKR'), $this->supplier);
+        $whtPayable = paymentMapAccount('2180');
+
+        expect($lines)->toHaveCount(3)
+            ->and($lines[0]->accountId)->toBe((string) $this->tradePayables->getKey())
+            ->and($lines[0]->debit?->toDecimalString())->toBe('1000.0000')
+            ->and($lines[1]->accountId)->toBe((string) $this->bank->getKey())
+            ->and($lines[1]->credit?->toDecimalString())->toBe('950.0000')
+            ->and($lines[2]->accountId)->toBe((string) $whtPayable->getKey())
+            ->and($lines[2]->credit?->toDecimalString())->toBe('50.0000')
+            // Balances by construction: Dr 1000 = Cr 950 + Cr 50.
+            ->and(mapDebitTotal($lines)->toDecimalString())->toBe(mapCreditTotal($lines)->toDecimalString())
+            ->and(mapDebitTotal($lines)->toDecimalString())->toBe('1000.0000');
+    });
+
+    it('posts the two-line 8a entry and never resolves WHT payable when wht = 0', function (): void {
+        $lines = $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
+
+        expect($lines)->toHaveCount(2)
+            ->and(mapForAccount($lines, paymentMapAccount('2180')))->toBeEmpty();
+    });
+
+    it('omits the bank line on a 100%-withheld net-zero payment', function (): void {
+        $lines = $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::of('1000.00', 'LKR'), $this->supplier);
+        $whtPayable = paymentMapAccount('2180');
+
+        // Dr Trade Payables + Cr WHT Payable, no zero bank line (journal_lines_one_sided_check would refuse it).
+        expect($lines)->toHaveCount(2)
+            ->and(mapForAccount($lines, $this->bank))->toBeEmpty()
+            ->and(mapForAccount($lines, $whtPayable))->toHaveCount(1)
+            ->and(mapDebitTotal($lines)->toDecimalString())->toBe(mapCreditTotal($lines)->toDecimalString());
+    });
+
+    it('refuses when the WHT payable account is missing', function (): void {
+        DB::table('accounts')->where('id', paymentMapAccount('2180')->getKey())
+            ->update(['system_key' => null, 'is_system' => false]);
+
+        try {
+            $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::of('50.00', 'LKR'), $this->supplier);
+            expect()->fail('a missing WHT payable account should have been refused');
+        } catch (PaymentCannotBePosted $exception) {
+            expect($exception->problemCode())->toBe('wht-payable-account-missing')
+                ->and($exception->getMessage())->toContain($this->company->name);
+        }
+    });
+
+    it('refuses a WHT payable account that is not a liability', function (): void {
+        DB::table('accounts')->where('id', paymentMapAccount('2180')->getKey())
+            ->update(['type' => 'asset', 'normal_balance' => 'debit']);
+
+        try {
+            $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::of('50.00', 'LKR'), $this->supplier);
+            expect()->fail('a non-liability WHT payable should have been refused');
+        } catch (PaymentCannotBePosted $exception) {
+            expect($exception->problemCode())->toBe('wht-payable-account-wrong-type');
+        }
+    });
+
+    it('refuses a WHT payable account that has been made non-postable', function (): void {
+        DB::table('accounts')->where('id', paymentMapAccount('2180')->getKey())
+            ->update(['is_active' => false, 'archived_at' => now()]);
+
+        expect(fn () => $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::of('50.00', 'LKR'), $this->supplier))
+            ->toThrow(PaymentCannotBePosted::class);
+    });
+
+    it('never resolves WHT payable for a zero-WHT payment even if the account is broken', function (): void {
+        // Proof the zero-WHT path is untouched by WHT-payable problems (AC-1.2): break the account, still 2 lines.
+        DB::table('accounts')->where('id', paymentMapAccount('2180')->getKey())
+            ->update(['system_key' => null, 'is_system' => false]);
+
+        $lines = $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
+
+        expect($lines)->toHaveCount(2);
     });
 });
 
@@ -220,10 +299,10 @@ describe('the map writes nothing', function (): void {
             'sequences' => DB::table('document_sequences')->count(),
         ];
 
-        $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), $this->supplier);
+        $this->map->for($this->company, $this->bank, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
 
         try {
-            $this->map->for($this->company, $this->income, Money::of('1000.00', 'LKR'), $this->supplier);
+            $this->map->for($this->company, $this->income, Money::of('1000.00', 'LKR'), Money::zero('LKR'), $this->supplier);
         } catch (PaymentCannotBePosted) {
             // Expected.
         }
