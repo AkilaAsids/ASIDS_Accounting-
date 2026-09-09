@@ -732,3 +732,22 @@ Shaped by the Wave 8a suites in `tests/Feature/Purchasing/` and the system-accou
 *Prepared by the Solution Architect (Stage 3, Phase 5 / Wave 8b). Design only — no production code written,
 nothing committed. Build begins after Gate 2 approval, on this ADR, verbatim; any implementation discovery
 that would change a decision returns to Gate 2.*
+
+## Gate 2 decision — APPROVED 2026-09-09
+
+The human approved the architecture **as proposed**, confirming all eight (Gate-2 PROPOSED) shapes, and
+resolved the five UNRESOLVED forks:
+
+- **Fork 1 (scope) — WIRE THE SUPPLIER WRITE PATH NOW.** `SupplierData` + `SupplierService` gain the two WHT
+  fields (§A2), so a withholding supplier is configurable in 8b and the feature is usable end-to-end.
+- **Fork 4 (rounding) — ROUND ONCE:** `rate × Σ bases`, rounded once to currency precision (§C2) — the literal
+  reading of dec. 5, minimising multi-bill drift.
+- **Fork 2 (backfill)** — per-company loop with collision-and-parent resolution (create-not-stamp), as
+  recommended (§A6).
+- **Fork 3 (DTO)** — tri-state `withholdTax` flag + optional **rate** override, service-computed amount, as
+  recommended (§C1).
+- **Fork 5 (snapshot)** — store `wht_rate` only when `wht_amount > 0`, keeping a zero-WHT header 8a-identical
+  (§A3).
+
+Build proceeds strictly within this ADR (6 stages, test-first). Any implementation discovery that would change
+a decision above returns to Gate 2. Autonomy ends at PR; production (Gate 3) needs explicit human approval.
