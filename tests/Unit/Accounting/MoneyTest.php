@@ -168,6 +168,44 @@ describe('multiplication', function (): void {
     });
 });
 
+describe('conversion (convertedTo) — the FX base = round(txn × rate) primitive (ADR 0022 §B1)', function (): void {
+    it('converts a transaction amount to base at a rate, re-tagging the currency', function (): void {
+        $base = Money::of('1000.00', 'USD')->convertedTo('LKR', '300', 2);
+
+        expect($base->currency)->toBe('LKR')
+            ->and($base->toDecimalString())->toBe('300000.0000');
+    });
+
+    it('handles a many-decimal rate', function (): void {
+        // 1180 × 300.1234567 = 354145.678906 → rounded to 2dp = 354145.68.
+        $base = Money::of('1180.00', 'USD')->convertedTo('LKR', '300.1234567', 2);
+
+        expect($base->toDecimalString())->toBe('354145.6800');
+    });
+
+    it('at rate 1 is an identity re-tag plus a round to precision', function (): void {
+        $base = Money::of('1234.56', 'USD')->convertedTo('LKR', '1', 4);
+
+        expect($base->currency)->toBe('LKR')
+            ->and($base->toDecimalString())->toBe('1234.5600');
+    });
+
+    it('rounds half away from zero to the target precision', function (): void {
+        expect(Money::of('1.00', 'USD')->convertedTo('LKR', '1.005', 2)->toDecimalString())->toBe('1.0100')
+            ->and(Money::of('-1.00', 'USD')->convertedTo('LKR', '1.005', 2)->toDecimalString())->toBe('-1.0100');
+    });
+
+    it('refuses a precision above the money scale', function (): void {
+        expect(catchPlatformException(fn () => Money::of('1.00', 'USD')->convertedTo('LKR', '300', 5)))
+            ->not->toBeNull();
+    });
+
+    it('refuses a malformed rate', function (): void {
+        expect(catchPlatformException(fn () => Money::of('1.00', 'USD')->convertedTo('LKR', 'abc', 2))->problemCode())
+            ->toBe(catchPlatformException(fn () => Money::of('1.00', 'LKR')->multipliedBy('abc'))->problemCode());
+    });
+});
+
 describe('allocation', function (): void {
     it('splits without losing a minor unit', function (): void {
         $parts = Money::of('100.00', 'LKR')->allocate([1, 1, 1]);

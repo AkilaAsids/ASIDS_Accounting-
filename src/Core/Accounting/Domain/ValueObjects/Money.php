@@ -157,6 +157,36 @@ final readonly class Money implements Stringable
     }
 
     /**
+     * Convert a transaction amount to another currency at an exchange rate, rounded to that currency's
+     * precision — the FX primitive `base = round(txn × rate)` (ADR 0022 §B1).
+     *
+     * This is the one place the general ledger's base amount is derived from a foreign amount and its rate.
+     * The multiplication is the same scaled-integer, half-away-from-zero arithmetic as `multipliedBy`, then
+     * the result is re-tagged to the target currency and rounded to its `precision`. At rate `'1'` it is an
+     * identity re-tag plus that rounding, so a base-currency line converts to itself.
+     */
+    public function convertedTo(string $currency, string $rate, int $precision): self
+    {
+        if ($precision < 0 || $precision > self::SCALE) {
+            throw InvalidMoneyAmount::unsupportedPrecision($precision);
+        }
+
+        if (! preg_match('/^-?\d{1,15}(\.\d{1,10})?$/', trim($rate))) {
+            throw InvalidMoneyAmount::malformedFactor($rate);
+        }
+
+        $currency = self::normaliseCurrency($currency);
+
+        // bcmath, not the scaled-integer path `multipliedBy` uses: a base-sized product (an amount in the
+        // thousands times a rate near 300, each scaled) overflows a 64-bit int. Computed past the target
+        // precision, then rounded half away from zero to it.
+        $product = bcmul($this->toDecimalString(), trim($rate), self::SCALE + 10);
+        $rounded = self::bcRoundHalfAwayFromZero($product, $precision);
+
+        return self::of($rounded, $currency);
+    }
+
+    /**
      * Split an amount across weights without losing or inventing a cent.
      *
      * THE REASON THIS IS NOT A LOOP OF DIVISIONS
@@ -302,6 +332,19 @@ final readonly class Money implements Stringable
         $fraction = $units % self::FACTOR;
 
         return sprintf('%s%d.%04d', $negative ? '-' : '', $whole, $fraction);
+    }
+
+    /**
+     * Round a bcmath decimal string half away from zero to `$precision` places — the same rule
+     * `divideRoundingHalfAwayFromZero` applies to integers, for values too large to hold in one.
+     */
+    private static function bcRoundHalfAwayFromZero(string $value, int $precision): string
+    {
+        $half = (str_starts_with(trim($value), '-') ? '-' : '').'0.'.str_repeat('0', $precision).'5';
+
+        // bcadd truncates toward zero at `$precision`; adding a sign-matched half-ulp first turns that into
+        // round-half-away-from-zero.
+        return bcadd(trim($value), $half, $precision);
     }
 
     /**
