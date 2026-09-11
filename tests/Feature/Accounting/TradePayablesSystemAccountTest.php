@@ -106,7 +106,7 @@ describe('the constant and the version', function (): void {
         // ADR 0019 §A0.2 bumped 2026.08-lk-sme-2 → 2026.09-lk-sme-3; Wave 8b (ADR 0021 §A5) then bumped it to
         // -4 for the WHT Payable account. This test tracks the current constant — a correction that must reach
         // companies built before it needs the version to change, exactly as the receivables key did.
-        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-4');
+        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-5');
     });
 });
 

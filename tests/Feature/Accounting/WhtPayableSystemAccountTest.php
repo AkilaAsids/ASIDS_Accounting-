@@ -73,8 +73,8 @@ describe('the constant and the version', function (): void {
     });
 
     it('bumps the chart template version so existing companies can be found', function (): void {
-        // ADR 0021 §A5.4: 2026.09-lk-sme-3 → 2026.09-lk-sme-4 (the account set changed).
-        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-4');
+        // ADR 0021 §A5.4: 2026.09-lk-sme-3 → 2026.09-lk-sme-5 (the account set changed).
+        expect(ChartTemplate::VERSION)->toBe('2026.09-lk-sme-5');
     });
 });
 

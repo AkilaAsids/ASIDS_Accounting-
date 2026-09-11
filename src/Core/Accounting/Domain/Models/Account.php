@@ -88,6 +88,13 @@ final class Account extends Model
      */
     public const string WHT_PAYABLE = 'wht_payable';
 
+    /**
+     * Where realised foreign-exchange gains and losses land — a single combined Income account carrying
+     * credits for gains and debits for losses, netting to the period's FX result (ADR 0022 §A5). Resolved by
+     * key, never by code. Added Phase 6 Wave 9a.
+     */
+    public const string FX_GAIN_LOSS = 'fx_gain_loss';
+
     protected $table = 'accounts';
 
     /** @var list<string> */

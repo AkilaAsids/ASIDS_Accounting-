@@ -37,7 +37,7 @@ final class ChartTemplate
      * or a removal. Companies store the version they were created from, so a correction can find
      * them.
      */
-    public const string VERSION = '2026.09-lk-sme-4';
+    public const string VERSION = '2026.09-lk-sme-5';
 
     /**
      * Shown wherever the template is offered or applied. Not optional, and not abbreviated.
@@ -123,6 +123,9 @@ final class ChartTemplate
             self::leaf('4100', 'Sales Revenue', AccountType::Income, parent: '4000'),
             self::leaf('4200', 'Service Revenue', AccountType::Income, parent: '4000'),
             self::leaf('4900', 'Other Income', AccountType::Income, parent: '4000'),
+            // Added Phase 6 Wave 9a (ADR 0022 §A5): realised FX gains (credits) and losses (debits) net here.
+            // A single combined Income line, keyed so a renumbered chart still resolves it at posting time.
+            self::leaf('4910', 'Foreign Exchange Gain/(Loss)', AccountType::Income, parent: '4000', system: Account::FX_GAIN_LOSS),
 
             // ── Expenses ────────────────────────────────────────────────────────
             self::heading('5000', 'Cost of Sales', AccountType::Expense),
@@ -171,6 +174,9 @@ final class ChartTemplate
             // Added by Phase 5 Wave 8b. A withholding payment credits it, so a company that skipped the
             // starter chart must still receive it — or its first WHT payment fails to post (ADR 0021 §A5).
             self::leaf('2180', 'WHT Payable', AccountType::Liability, system: Account::WHT_PAYABLE),
+            // Added Phase 6 Wave 9a. A foreign payment realises FX here, so a company that skipped the starter
+            // chart must still receive it — or its first foreign settlement fails to post (ADR 0022 §A5).
+            self::leaf('4910', 'Foreign Exchange Gain/(Loss)', AccountType::Income, system: Account::FX_GAIN_LOSS),
         ];
     }
 
