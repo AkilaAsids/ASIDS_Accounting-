@@ -39,6 +39,10 @@ final readonly class BillData
         public ?string $branchId = null,
         public ?string $notes = null,
         public ?string $terms = null,
+        // Foreign currency (ADR 0022 §C1). `currencyCode` null ⇒ company base currency; `exchangeRate` null ⇒
+        // base (rate 1), a positive numeric string (transaction → base) when foreign.
+        public ?string $currencyCode = null,
+        public ?string $exchangeRate = null,
     ) {}
 
     /**
@@ -69,6 +73,8 @@ final readonly class BillData
             branchId: self::optionalString($attributes, 'branch_id'),
             notes: self::optionalString($attributes, 'notes'),
             terms: self::optionalString($attributes, 'terms'),
+            currencyCode: self::optionalString($attributes, 'currency_code'),
+            exchangeRate: self::optionalString($attributes, 'exchange_rate'),
         );
     }
 
