@@ -812,3 +812,23 @@ collision, parent) mirroring `WhtPayableSystemAccountTest`; schema-CHECK mutatio
 committed, nothing built. Build begins after Gate 2 approval, on this ADR, verbatim; any implementation
 discovery that would change a decision above returns to Gate 2. Autonomy ends at PR; production (Gate 3) needs
 explicit human approval.*
+
+## Gate 2 decision — APPROVED 2026-09-11
+
+The human approved the architecture **as proposed**, confirming all six (Gate-2 PROPOSED) shapes and
+resolving the six forks:
+
+- **Fork 1 — transaction-currency balances.** A foreign bill's/payment's money columns are held in the
+  transaction currency; base is derived in the ledger at the stored rate.
+- **Fork 2 — incremental payable relief** (`round(cum × br) − round(prev × br)`): a fully-paid foreign bill's
+  payable zeroes exactly. **`AC-2.4` is restated** as "zero FX on a full or single settlement at a matching
+  rate; at most one minor unit on a drifted partial at a matching rate."
+- **Fork 3 — credit the payable at face** `round(total × rate)`, debit residue reconciled onto the debit
+  lines (enables fork 2's stateless zero-out).
+- **Fork 4 — add `Money::convertedTo()`.**
+- **Fork 5 — handle foreign WHT in 9a** (WHT and FX compose; §D4).
+- **Fork 6 — one Trade Payables relief line per settled bill** (each with its booking-rate overlay).
+
+Build proceeds strictly within this ADR (6 stages, test-first), Stage 2 carrying the ledger-wide base-path
+regression. Any implementation discovery that would change a decision returns to Gate 2. Autonomy ends at PR;
+production (Gate 3) needs explicit human approval.
