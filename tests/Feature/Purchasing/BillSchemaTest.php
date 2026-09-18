@@ -208,7 +208,10 @@ describe('the check constraints exist', function (): void {
             ->and($checks)->toContain('bills_total_check')
             ->and($checks)->toContain('bills_amount_due_check')
             ->and($checks)->toContain('bills_non_negative_check')
-            ->and($checks)->toContain('bills_single_currency_until_fx_phase')
+            // The FX phase (ADR 0022 §A3) drops bills_single_currency_until_fx_phase and replaces it with the
+            // permanent shape rule bills_exchange_rate_positive_check (a rate is absent, or positive).
+            ->and($checks)->not->toContain('bills_single_currency_until_fx_phase')
+            ->and($checks)->toContain('bills_exchange_rate_positive_check')
             // Wave 8a (ADR 0020 §A4) drops the payments-phase CHECK and replaces it with the stronger
             // amount_due backstop. `PaymentSchemaTest`'s "bills-side migration" section is the authority on
             // this transition; asserted here too so the bill constraint inventory stays honest post-Wave-8a.
@@ -429,10 +432,21 @@ describe('the money invariants', function (): void {
     // `PaymentSchemaTest`'s "bills-side migration" section now owns that behaviour (amount_paid moves, an
     // overpayment is refused by `bills_amount_due_non_negative_check`).
 
-    it('holds the exchange rate at null until the FX phase', function (): void {
+    // The FX phase (ADR 0022 §A3) opened the exchange rate: it is either absent (a base-currency bill) or a
+    // positive number. bills_exchange_rate_positive_check is now the shape rule, not a null-pin.
+    it('accepts a positive exchange rate on a foreign bill', function (): void {
+        insertBill(['supplier_invoice_number' => 'FX', 'currency_code' => 'USD', 'exchange_rate' => '305.5000000000']);
+
+        expect(DB::table('bills')->whereNotNull('exchange_rate')->count())->toBe(1);
+    });
+
+    it('refuses a non-positive exchange rate', function (): void {
         insertBill(['supplier_invoice_number' => 'BASE']);
 
-        expect(fn () => DB::transaction(fn () => insertBill(['supplier_invoice_number' => 'BAD', 'exchange_rate' => '1.0000000000'])))
+        expect(fn () => DB::transaction(fn () => insertBill(['supplier_invoice_number' => 'ZERO', 'currency_code' => 'USD', 'exchange_rate' => '0.0000000000'])))
+            ->toThrow(QueryException::class);
+
+        expect(fn () => DB::transaction(fn () => insertBill(['supplier_invoice_number' => 'NEG', 'currency_code' => 'USD', 'exchange_rate' => '-1.0000000000'])))
             ->toThrow(QueryException::class);
     });
 });

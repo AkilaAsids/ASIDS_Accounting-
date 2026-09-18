@@ -6,6 +6,7 @@ namespace Asids\Core\Accounting\Domain\ValueObjects;
 
 use Asids\Core\Accounting\Domain\Exceptions\CurrencyMismatch;
 use Asids\Core\Accounting\Domain\Exceptions\InvalidMoneyAmount;
+use LogicException;
 use Stringable;
 
 /**
@@ -171,7 +172,9 @@ final readonly class Money implements Stringable
             throw InvalidMoneyAmount::unsupportedPrecision($precision);
         }
 
-        if (! preg_match('/^-?\d{1,15}(\.\d{1,10})?$/', trim($rate))) {
+        $trimmedRate = trim($rate);
+
+        if (! preg_match('/^-?\d{1,15}(\.\d{1,10})?$/', $trimmedRate) || ! is_numeric($trimmedRate)) {
             throw InvalidMoneyAmount::malformedFactor($rate);
         }
 
@@ -180,7 +183,7 @@ final readonly class Money implements Stringable
         // bcmath, not the scaled-integer path `multipliedBy` uses: a base-sized product (an amount in the
         // thousands times a rate near 300, each scaled) overflows a 64-bit int. Computed past the target
         // precision, then rounded half away from zero to it.
-        $product = bcmul($this->toDecimalString(), trim($rate), self::SCALE + 10);
+        $product = bcmul($this->toDecimalString(), $trimmedRate, self::SCALE + 10);
         $rounded = self::bcRoundHalfAwayFromZero($product, $precision);
 
         return self::of($rounded, $currency);
@@ -319,9 +322,7 @@ final readonly class Money implements Stringable
      * The decimal string the database column stores. Always four decimal places, so a round trip
      * through `numeric(19,4)` returns exactly what went in.
      *
-     * Typed as a plain string rather than `numeric-string`: the format is guaranteed by construction,
-     * but PHPStan cannot see that through `sprintf`, and the only ways to make it agree are a cast or
-     * an assertion — both of which assert the property rather than establishing it.
+     * @return numeric-string
      */
     public function toDecimalString(): string
     {
@@ -331,7 +332,16 @@ final readonly class Money implements Stringable
         $whole = intdiv($units, self::FACTOR);
         $fraction = $units % self::FACTOR;
 
-        return sprintf('%s%d.%04d', $negative ? '-' : '', $whole, $fraction);
+        $decimal = sprintf('%s%d.%04d', $negative ? '-' : '', $whole, $fraction);
+
+        // `sprintf` returns a plain `string`. This guard both proves to PHPStan and confirms at runtime that
+        // the formatted value is the numeric string the column stores — it establishes the type rather than
+        // asserting it. The branch is unreachable given the format above.
+        if (! is_numeric($decimal)) {
+            throw new LogicException('Money::toDecimalString produced a non-numeric value: '.$decimal);
+        }
+
+        return $decimal;
     }
 
     /**
@@ -340,11 +350,20 @@ final readonly class Money implements Stringable
      */
     private static function bcRoundHalfAwayFromZero(string $value, int $precision): string
     {
-        $half = (str_starts_with(trim($value), '-') ? '-' : '').'0.'.str_repeat('0', $precision).'5';
+        $value = trim($value);
+
+        if (! is_numeric($value)) {
+            throw new LogicException('Money::bcRoundHalfAwayFromZero received a non-numeric value: '.$value);
+        }
+
+        // A half-ulp at the target precision — 5 x 10^-(precision+1) — built from bcmath primitives so it
+        // stays a numeric string, then given the sign of the value being rounded.
+        $magnitude = bcdiv('5', bcpow('10', (string) ($precision + 1)), $precision + 1);
+        $half = str_starts_with($value, '-') ? bcmul($magnitude, '-1', $precision + 1) : $magnitude;
 
         // bcadd truncates toward zero at `$precision`; adding a sign-matched half-ulp first turns that into
         // round-half-away-from-zero.
-        return bcadd(trim($value), $half, $precision);
+        return bcadd($value, $half, $precision);
     }
 
     /**
