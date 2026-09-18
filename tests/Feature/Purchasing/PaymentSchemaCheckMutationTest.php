@@ -214,15 +214,16 @@ describe('the supplier_payments CHECK negatives are non-vacuous', function (): v
         expect(DB::table('supplier_payments')->where('amount', '0.0000')->count())->toBe(1);
     });
 
-    it('the FX-phase CHECK is the only thing pinning the exchange rate at null', function (): void {
-        expect(paymentCheckConstraintPresent('supplier_payments_single_currency_until_fx_phase'))->toBeTrue();
+    it('the exchange-rate-positive CHECK is the only thing rejecting a non-positive rate', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_exchange_rate_positive_check'))->toBeTrue();
 
-        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_single_currency_until_fx_phase');
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_exchange_rate_positive_check');
 
-        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(checkMutationPaymentRow(['exchange_rate' => '1.0000000000']))))
+        // A zero rate is otherwise well-formed — only the exchange-rate-positive CHECK could have objected.
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(checkMutationPaymentRow(['currency_code' => 'USD', 'exchange_rate' => '0.0000000000']))))
             ->not->toThrow(QueryException::class);
 
-        expect(DB::table('supplier_payments')->whereNotNull('exchange_rate')->count())->toBe(1);
+        expect(DB::table('supplier_payments')->where('exchange_rate', '0.0000000000')->count())->toBe(1);
     });
 
     it('the wht-within-amount CHECK is the only thing rejecting wht_amount > amount (ADR 0021 §A3)', function (): void {
