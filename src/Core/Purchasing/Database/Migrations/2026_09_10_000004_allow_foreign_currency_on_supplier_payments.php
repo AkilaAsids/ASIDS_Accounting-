@@ -28,10 +28,23 @@ return new class extends Migration
         SQL);
 
         DB::statement("COMMENT ON CONSTRAINT supplier_payments_exchange_rate_positive_check ON supplier_payments IS 'A rate is absent (base-currency payment) or positive. See ADR 0022.'");
+
+        // Now that the caller may name the currency, the DB is the authority on its ISO-4217 shape — the same
+        // rule companies_currency_shape_check enforces on the base currency. Guards against a mixed-case or
+        // malformed code being stored and mistaken for a distinct currency (ADR 0022 §D1).
+        DB::statement(<<<'SQL'
+            ALTER TABLE supplier_payments
+                ADD CONSTRAINT supplier_payments_currency_shape_check
+                CHECK (currency_code ~ '^[A-Z]{3}$')
+        SQL);
+
+        DB::statement("COMMENT ON CONSTRAINT supplier_payments_currency_shape_check ON supplier_payments IS 'currency_code is a three-letter uppercase ISO 4217 code. See ADR 0022.'");
     }
 
     public function down(): void
     {
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_currency_shape_check');
+
         DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_exchange_rate_positive_check');
 
         DB::statement(<<<'SQL'

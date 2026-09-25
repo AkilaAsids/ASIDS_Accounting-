@@ -212,6 +212,8 @@ describe('the check constraints exist', function (): void {
             // permanent shape rule bills_exchange_rate_positive_check (a rate is absent, or positive).
             ->and($checks)->not->toContain('bills_single_currency_until_fx_phase')
             ->and($checks)->toContain('bills_exchange_rate_positive_check')
+            // The FX phase also makes the DB the authority on the currency's ISO shape, now that the caller names it.
+            ->and($checks)->toContain('bills_currency_shape_check')
             // Wave 8a (ADR 0020 §A4) drops the payments-phase CHECK and replaces it with the stronger
             // amount_due backstop. `PaymentSchemaTest`'s "bills-side migration" section is the authority on
             // this transition; asserted here too so the bill constraint inventory stays honest post-Wave-8a.
@@ -447,6 +449,13 @@ describe('the money invariants', function (): void {
             ->toThrow(QueryException::class);
 
         expect(fn () => DB::transaction(fn () => insertBill(['supplier_invoice_number' => 'NEG', 'currency_code' => 'USD', 'exchange_rate' => '-1.0000000000'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a currency code that is not the uppercase ISO shape', function (): void {
+        // bills_currency_shape_check — the DB is the authority, so a lower-case code cannot slip past a bug in
+        // the service layer and split a currency in two.
+        expect(fn () => DB::transaction(fn () => insertBill(['supplier_invoice_number' => 'LC', 'currency_code' => 'usd'])))
             ->toThrow(QueryException::class);
     });
 });

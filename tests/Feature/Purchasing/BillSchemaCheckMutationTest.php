@@ -185,6 +185,31 @@ describe('the bill CHECK negatives are non-vacuous (drop the constraint → the 
         expect(DB::table('bills')->where('number', 'BILL-DRAFT')->count())->toBe(1);
     });
 
+    it('the exchange-rate-positive CHECK is the only thing rejecting a non-positive rate', function (): void {
+        expect(billConstraintPresent('bills_exchange_rate_positive_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE bills DROP CONSTRAINT bills_exchange_rate_positive_check');
+
+        // A zero rate on a USD bill is otherwise well-formed — only the exchange-rate-positive CHECK could object.
+        expect(fn () => DB::transaction(fn () => DB::table('bills')->insert(mutationBillRow([
+            'currency_code' => 'USD', 'exchange_rate' => '0.0000000000',
+        ]))))->not->toThrow(QueryException::class);
+
+        expect(DB::table('bills')->where('exchange_rate', '0.0000000000')->count())->toBe(1);
+    });
+
+    it('the currency-shape CHECK is the only thing rejecting a lower-case currency code', function (): void {
+        expect(billConstraintPresent('bills_currency_shape_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE bills DROP CONSTRAINT bills_currency_shape_check');
+
+        // "usd" is otherwise well-formed (three chars, fits char(3)) — only the currency-shape CHECK objects.
+        expect(fn () => DB::transaction(fn () => DB::table('bills')->insert(mutationBillRow(['currency_code' => 'usd']))))
+            ->not->toThrow(QueryException::class);
+
+        expect(DB::table('bills')->where('currency_code', 'usd')->count())->toBe(1);
+    });
+
     // The "payments-phase CHECK is non-vacuous" mutation was removed at Wave 8a: that CHECK
     // (`bills_no_payments_until_payments_phase`) is dropped this wave (ADR 0020 §A4), so there is nothing left
     // to prove non-vacuous. Its replacement, `bills_amount_due_non_negative_check`, is proved non-vacuous by

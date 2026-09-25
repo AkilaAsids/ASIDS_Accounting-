@@ -129,6 +129,50 @@ describe('foreign bill posting (ADR 0022 §C)', function (): void {
             ->and(bccomp($debits, '354145.68', 2))->toBe(0);
     });
 
+    it('reconciles a non-zero sub-cent residue onto the largest debit and still balances (fork 3)', function (): void {
+        $labour = Account::query()->forCompany($this->company->getKey())->where('code', '5200')->firstOrFail();
+
+        // Two USD 1.00 lines at 305.505: each converts to round(305.505) = 305.51 base (Σ 611.02), but the
+        // payable face is round(2.00 × 305.505) = 611.01 — a −0.01 residue the map must place on a debit leg so
+        // the base entry balances. (The existing many-decimal test happens to have a zero residue; this forces
+        // the reconciliation branch to run.)
+        $bill = $this->bills->post(
+            $this->bills->createDraft($this->company, new BillData(
+                supplierId: (string) $this->supplier->getKey(),
+                billDate: CarbonImmutable::parse('2026-06-15'),
+                supplierInvoiceNumber: 'FX-RESIDUE',
+                lines: [
+                    new BillLineData(description: 'A', quantity: '1', unitPrice: '1.00', expenseAccountId: (string) $this->purchases->getKey()),
+                    new BillLineData(description: 'B', quantity: '1', unitPrice: '1.00', expenseAccountId: (string) $labour->getKey()),
+                ],
+                currencyCode: 'USD',
+                exchangeRate: '305.505',
+            )),
+            $this->owner,
+        );
+
+        $entry = JournalEntry::query()->with('lines')->findOrFail($bill->journal_entry_id);
+        $debits = $entry->lines->reduce(fn (string $c, $l): string => bcadd($c, (string) $l->debit, 4), '0');
+        $credits = $entry->lines->reduce(fn (string $c, $l): string => bcadd($c, (string) $l->credit, 4), '0');
+        $payable = (string) $entry->lines->firstWhere('account_id', $this->tradePayables->getKey())->credit;
+
+        // Payable face is 611.01, and the residue-adjusted debits sum to it exactly — the entry balances in base.
+        expect(bccomp($payable, '611.01', 2))->toBe(0)
+            ->and(bccomp($debits, '611.01', 2))->toBe(0)
+            ->and(bccomp($debits, $credits, 2))->toBe(0);
+
+        // The two debit legs are 305.50 and 305.51 — one carries the −0.01 residue, proving the branch ran (a
+        // naive per-line conversion would leave both at 305.51 and the entry 0.01 out). The unused side is stored
+        // as 0.0000, so select the legs that actually carry a debit.
+        $legs = $entry->lines
+            ->filter(fn ($l): bool => bccomp((string) $l->debit, '0', 4) > 0)
+            ->map(fn ($l): string => (string) $l->debit)
+            ->sort()->values()->all();
+        expect($legs)->toHaveCount(2)
+            ->and(bccomp($legs[0], '305.50', 2))->toBe(0)
+            ->and(bccomp($legs[1], '305.51', 2))->toBe(0);
+    });
+
     it('refuses a foreign bill with a non-positive rate', function (): void {
         $exception = catchPlatformException(fn () => $this->bills->createDraft($this->company, new BillData(
             supplierId: (string) $this->supplier->getKey(),
@@ -152,5 +196,29 @@ describe('foreign bill posting (ADR 0022 §C)', function (): void {
         )));
 
         expect($exception->problemCode())->toBe('bill-foreign-rate-required');
+    });
+
+    it('normalises a lower-case currency to its ISO shape, and reads the base code as base regardless of case', function (): void {
+        // "usd" is USD — stored uppercase, so it cannot become a second currency alongside "USD".
+        $foreign = fxBill('usd', '300');
+        expect($foreign->currency_code)->toBe('USD')
+            ->and((float) $foreign->exchange_rate)->toBe(300.0);
+
+        // A lower-case rendering of the base currency is the base currency — not a foreign one demanding a rate.
+        $base = fxBill('lkr');
+        expect($base->currency_code)->toBe('LKR')
+            ->and($base->exchange_rate)->toBeNull();
+    });
+
+    it('refuses a malformed currency code', function (): void {
+        $exception = catchPlatformException(fn () => $this->bills->createDraft($this->company, new BillData(
+            supplierId: (string) $this->supplier->getKey(),
+            billDate: CarbonImmutable::parse('2026-06-15'),
+            supplierInvoiceNumber: 'FX-BADCCY',
+            lines: [new BillLineData(description: 'x', quantity: '1', unitPrice: '100.00', expenseAccountId: (string) $this->purchases->getKey())],
+            currencyCode: 'US',
+        )));
+
+        expect($exception->problemCode())->toBe('bill-currency-code-malformed');
     });
 });

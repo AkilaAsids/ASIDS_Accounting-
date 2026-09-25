@@ -226,6 +226,18 @@ describe('the supplier_payments CHECK negatives are non-vacuous', function (): v
         expect(DB::table('supplier_payments')->where('exchange_rate', '0.0000000000')->count())->toBe(1);
     });
 
+    it('the currency-shape CHECK is the only thing rejecting a lower-case currency code', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_currency_shape_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_currency_shape_check');
+
+        // "usd" is otherwise well-formed (three chars, fits char(3)) — only the currency-shape CHECK objects.
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(checkMutationPaymentRow(['currency_code' => 'usd']))))
+            ->not->toThrow(QueryException::class);
+
+        expect(DB::table('supplier_payments')->where('currency_code', 'usd')->count())->toBe(1);
+    });
+
     it('the wht-within-amount CHECK is the only thing rejecting wht_amount > amount (ADR 0021 §A3)', function (): void {
         expect(paymentCheckConstraintPresent('supplier_payments_wht_within_amount_check'))->toBeTrue();
 

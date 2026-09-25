@@ -162,9 +162,10 @@ final readonly class Money implements Stringable
      * precision — the FX primitive `base = round(txn × rate)` (ADR 0022 §B1).
      *
      * This is the one place the general ledger's base amount is derived from a foreign amount and its rate.
-     * The multiplication is the same scaled-integer, half-away-from-zero arithmetic as `multipliedBy`, then
-     * the result is re-tagged to the target currency and rounded to its `precision`. At rate `'1'` it is an
-     * identity re-tag plus that rounding, so a base-currency line converts to itself.
+     * The multiplication is done in bcmath (not the scaled-integer path `multipliedBy` uses — a base-sized
+     * product overflows a 64-bit int), rounded half away from zero, then re-tagged to the target currency at its
+     * `precision`. At rate `'1'` it is an identity re-tag plus that rounding, so a base-currency line converts to
+     * itself.
      */
     public function convertedTo(string $currency, string $rate, int $precision): self
     {

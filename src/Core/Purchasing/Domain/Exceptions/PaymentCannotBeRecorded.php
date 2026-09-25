@@ -154,6 +154,19 @@ final class PaymentCannotBeRecorded extends BusinessRuleViolation
     }
 
     /**
+     * The payment's currency code is not a valid ISO 4217 shape — three letters (ADR 0022 §D1). Normalised and
+     * validated at the service boundary before it can reach the base-vs-foreign decision or the ledger.
+     */
+    public static function paymentCurrencyCodeMalformed(string $code): self
+    {
+        return new self(
+            sprintf('A currency code of "%s" is not a valid ISO 4217 code (three letters).', $code),
+            'payment-currency-code-malformed',
+            ['code' => $code],
+        );
+    }
+
+    /**
      * A foreign payment was given no exchange rate (ADR 0022 §D1).
      */
     public static function paymentRateRequired(): self

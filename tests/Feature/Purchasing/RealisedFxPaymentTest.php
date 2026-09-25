@@ -104,6 +104,41 @@ describe('realised FX on settlement (ADR 0022 §D)', function (): void {
             ->and($bill->fresh()->status->value)->toBe('paid');
     });
 
+    it('records the per-line overlay: payables at the bill rate, cash at the payment rate, FX plug with none', function (): void {
+        $bill = usdBill('300');   // payable base 300,000, overlay USD 1000 @ 300
+
+        $payment = $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+            currencyCode: 'USD',
+            exchangeRate: '310',
+        ), $this->owner);
+
+        $lines = fxEntryLines($payment);
+
+        // Trade Payables relieved at the BILL's booking rate (300), carrying the USD face — the fork-6 per-bill
+        // audit trail: the payable comes off at the rate it went on.
+        $tp = $lines[$this->tradePayables->getKey()];
+        expect($tp->transaction_currency_code)->toBe('USD')
+            ->and((float) $tp->transaction_amount)->toBe(1000.0)
+            ->and((float) $tp->exchange_rate)->toBe(300.0);
+
+        // Bank at the PAYMENT rate (310), carrying the same USD face.
+        $bank = $lines[$this->bank->getKey()];
+        expect($bank->transaction_currency_code)->toBe('USD')
+            ->and((float) $bank->transaction_amount)->toBe(1000.0)
+            ->and((float) $bank->exchange_rate)->toBe(310.0);
+
+        // The FX plug is a base-only line — no transaction overlay.
+        $fx = $lines[$this->fx->getKey()];
+        expect($fx->transaction_currency_code)->toBeNull()
+            ->and($fx->transaction_amount)->toBeNull()
+            ->and($fx->exchange_rate)->toBeNull();
+    });
+
     it('posts Dr Trade Payables = Cr Bank + Cr FX Gain when the rate moved in our favour (@ 290)', function (): void {
         $bill = usdBill('300');
 
@@ -168,7 +203,7 @@ describe('realised FX on settlement (ADR 0022 §D)', function (): void {
     });
 
     it('zeroes the payable base exactly across several partial settlements at a drifted rate (fork 2)', function (): void {
-        // USD 100 @ 300.005 → payable face round(100 × 300.005) = 30000.50 → 30001 (2dp, half away).
+        // USD 100 @ 300.005 → payable face round(100 × 300.005) = round(30000.50) = 30000.50 (LKR, 2dp).
         $bill = usdBill('300.005', '100.00');
         $payableBase = JournalEntry::query()->with('lines')->findOrFail($bill->journal_entry_id)
             ->lines->firstWhere('account_id', $this->tradePayables->getKey())->credit;
@@ -247,6 +282,41 @@ describe('realised FX on settlement (ADR 0022 §D)', function (): void {
         expect($exception->problemCode())->toBe('payment-rate-not-positive');
     });
 
+    it('settles a USD bill with a lower-case "usd" payment — the code is normalised before the same-currency guard', function (): void {
+        $bill = usdBill('300');   // payable base 300,000
+
+        $payment = $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+            currencyCode: 'usd',   // lower case: must normalise to USD and match the USD bill
+            exchangeRate: '300',
+        ), $this->owner);
+
+        // Stored uppercase, settlement succeeded, no phantom mismatch.
+        expect($payment->currency_code)->toBe('USD')
+            ->and($bill->fresh()->status->value)->toBe('paid');
+    });
+
+    it('refuses a malformed payment currency code', function (): void {
+        $bill = usdBill('300');
+
+        $exception = catchPlatformException(fn () => $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+            currencyCode: 'US',
+            exchangeRate: '300',
+        ), $this->owner));
+
+        expect($exception)->toBeInstanceOf(PaymentCannotBeRecorded::class)
+            ->and($exception->problemCode())->toBe('payment-currency-code-malformed');
+    });
+
     it('refuses a foreign settlement when the FX account is missing', function (): void {
         $bill = usdBill('300');
 
@@ -264,6 +334,46 @@ describe('realised FX on settlement (ADR 0022 §D)', function (): void {
 
         expect($exception)->toBeInstanceOf(PaymentCannotBePosted::class)
             ->and($exception->problemCode())->toBe('fx-account-missing');
+    });
+
+    it('refuses a foreign settlement when the FX account has been reclassified to a non-income type', function (): void {
+        $bill = usdBill('300');
+
+        // 4910 reclassified after provisioning — posting realised FX to a non-income account misstates the period.
+        DB::table('accounts')->where('id', $this->fx->getKey())->update(['type' => 'asset', 'normal_balance' => 'debit']);
+
+        $exception = catchPlatformException(fn () => $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+            currencyCode: 'USD',
+            exchangeRate: '310',   // non-matching rate ⇒ an FX line is needed
+        ), $this->owner));
+
+        expect($exception)->toBeInstanceOf(PaymentCannotBePosted::class)
+            ->and($exception->problemCode())->toBe('fx-account-wrong-type');
+    });
+
+    it('refuses a foreign settlement when the FX account no longer accepts postings', function (): void {
+        $bill = usdBill('300');
+
+        // 4910 archived after provisioning — a foreign settlement that needs the FX plug cannot use it.
+        DB::table('accounts')->where('id', $this->fx->getKey())->update(['is_active' => false, 'archived_at' => now()]);
+
+        $exception = catchPlatformException(fn () => $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+            currencyCode: 'USD',
+            exchangeRate: '310',   // non-matching rate ⇒ an FX line is needed
+        ), $this->owner));
+
+        expect($exception)->toBeInstanceOf(PaymentCannotBePosted::class)
+            ->and($exception->problemCode())->toBe('posting-account-not-postable');
     });
 
     it('a base-currency payment is byte-for-byte Wave 8a and never resolves the FX account', function (): void {

@@ -125,8 +125,10 @@ final readonly class PaymentService
         }
 
         // Foreign currency (ADR 0022 §D1): the payment's transaction currency + a manual positive rate, or the
-        // base currency at rate 1. `amount` and the allocations are in the payment currency.
-        $paymentCcy = $data->currencyCode ?? $company->base_currency_code;
+        // base currency at rate 1. `amount` and the allocations are in the payment currency. The code is
+        // normalised to its ISO shape here so "usd" and "USD" cannot become two currencies — otherwise the
+        // base-vs-foreign decision, the same-currency guard below, and the stored/ledger codes could disagree.
+        $paymentCcy = $this->assertCurrencyCode($data->currencyCode, $company->base_currency_code);
         $isForeign = $paymentCcy !== $company->base_currency_code;
         $paymentRate = $isForeign ? $this->assertRate($data->exchangeRate) : '1';
 
@@ -483,6 +485,27 @@ final readonly class PaymentService
             ->all();
 
         return $bills;
+    }
+
+    /**
+     * A payment's currency code: the caller's, normalised to its ISO-4217 shape (uppercase, three letters), or
+     * the company base when none is given. Normalising here — the same rule `Money` applies to every currency it
+     * touches — keeps a base payment from being read as foreign on a case difference, keeps the same-currency
+     * settlement guard honest, and keeps the stored header code identical to the ledger overlay's.
+     */
+    private function assertCurrencyCode(?string $code, string $base): string
+    {
+        if ($code === null || trim($code) === '') {
+            return $base;
+        }
+
+        $normalised = strtoupper(trim($code));
+
+        if (! preg_match('/^[A-Z]{3}$/', $normalised)) {
+            throw PaymentCannotBeRecorded::paymentCurrencyCodeMalformed($code);
+        }
+
+        return $normalised;
     }
 
     /**
