@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Asids\Core\Purchasing\Application\Services;
 
+use Asids\Core\Accounting\Application\DTOs\ForeignAmount;
 use Asids\Core\Accounting\Application\DTOs\JournalLineData;
 use Asids\Core\Accounting\Domain\Enums\AccountType;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Organization\Domain\Models\Company;
+use Asids\Core\Purchasing\Application\DTOs\PayableRelief;
 use Asids\Core\Purchasing\Domain\Exceptions\PaymentCannotBePosted;
 use Asids\Core\Purchasing\Domain\Models\Supplier;
 use Asids\Core\Sales\Application\Services\LedgerNarration;
@@ -81,6 +83,120 @@ final readonly class PaymentPostingMap
         }
 
         return $lines;
+    }
+
+    /**
+     * The journal lines for a FOREIGN payment, with realised FX (ADR 0022 §D2). Base currency throughout; the
+     * transaction face rides as the overlay on each non-FX line.
+     *
+     *   Dr Trade Payables   (one line per settled bill: base relieved at THAT bill's booking rate)
+     *   Dr FX Loss / Cr FX Gain   (ONE plug line, base only, no overlay — makes the base entry balance)
+     *       Cr Bank/Cash    (base = round(netCashTxn × paymentRate))
+     *      [Cr WHT Payable   (base = round(whtTxn × paymentRate)) — only when withholding]
+     *
+     * The plug is `Σ base credits − Σ base debits`: `> 0` ⇒ Dr FX Loss (more base paid than relieved), `< 0` ⇒
+     * Cr FX Gain, `= 0` ⇒ no FX line (rates matched). It guarantees the base entry balances to the cent for
+     * any rates; the FX account is resolved only when the plug is non-zero (a company whose rates always match
+     * never needs it).
+     *
+     * @param  list<PayableRelief>  $reliefs  per settled bill, base relieved + its transaction overlay
+     * @return list<JournalLineData>
+     */
+    public function forForeign(
+        Company $company,
+        Account $bankAccount,
+        array $reliefs,
+        Money $netCashTxn,
+        Money $whtTxn,
+        string $paymentRate,
+        int $precision,
+        Supplier $supplier,
+        ?string $branchId = null,
+    ): array {
+        $base = $company->base_currency_code;
+        $payable = $this->payableAccountFor($company);
+        $bank = $this->assertBankAccount($company, $bankAccount);
+        $narration = LedgerNarration::limit(sprintf('Payment to %s', $supplier->name));
+
+        $lines = [];
+        $debitBase = Money::zero($base);
+
+        // Dr Trade Payables — one line per settled bill, relieved at the bill's booking rate.
+        foreach ($reliefs as $relief) {
+            $lines[] = new JournalLineData(
+                accountId: (string) $payable->getKey(),
+                debit: $relief->baseRelieved,
+                credit: null,
+                branchId: $branchId,
+                description: $narration,
+                foreign: $relief->overlay,
+            );
+            $debitBase = $debitBase->plus($relief->baseRelieved);
+        }
+
+        $creditBase = Money::zero($base);
+
+        // Cr Bank/Cash — the net cash, converted at the payment rate. Omitted in the 100%-withheld net-zero case.
+        $netBase = $netCashTxn->convertedTo($base, $paymentRate, $precision);
+        if ($netBase->isPositive()) {
+            $lines[] = new JournalLineData(
+                accountId: (string) $bank->getKey(),
+                debit: null,
+                credit: $netBase,
+                branchId: $branchId,
+                description: $narration,
+                foreign: new ForeignAmount($netCashTxn, $paymentRate),
+            );
+            $creditBase = $creditBase->plus($netBase);
+        }
+
+        // Cr WHT Payable — the withheld tax, converted at the payment rate, only when withholding.
+        if ($whtTxn->isPositive()) {
+            $whtBase = $whtTxn->convertedTo($base, $paymentRate, $precision);
+            $lines[] = new JournalLineData(
+                accountId: (string) $this->whtPayableAccountFor($company)->getKey(),
+                debit: null,
+                credit: $whtBase,
+                branchId: $branchId,
+                description: $narration,
+                foreign: new ForeignAmount($whtTxn, $paymentRate),
+            );
+            $creditBase = $creditBase->plus($whtBase);
+        }
+
+        // The FX plug — one base-only line, resolved only when non-zero.
+        $plug = $creditBase->minus($debitBase);
+        if (! $plug->isZero()) {
+            $fx = $this->fxGainLossAccountFor($company);
+            $lines[] = $plug->isPositive()
+                ? new JournalLineData(accountId: (string) $fx->getKey(), debit: $plug, branchId: $branchId, description: $narration)
+                : new JournalLineData(accountId: (string) $fx->getKey(), credit: $plug->absolute(), branchId: $branchId, description: $narration);
+        }
+
+        return $lines;
+    }
+
+    /**
+     * The account a foreign settlement's realised gain/loss lands in — the company's `fx_gain_loss` system
+     * account (ADR 0022 §A5), resolved by key. Mirrors `payableAccountFor()`'s checks. Called only when the FX
+     * plug is non-zero, so a company whose rates always match never needs it.
+     */
+    public function fxGainLossAccountFor(Company $company): Account
+    {
+        $account = Account::query()
+            ->forCompany((string) $company->getKey())
+            ->withSystemKey(Account::FX_GAIN_LOSS)
+            ->first();
+
+        if ($account === null) {
+            throw PaymentCannotBePosted::withoutFxAccount($company->name);
+        }
+
+        if ($account->type !== AccountType::Income) {
+            throw PaymentCannotBePosted::fxAccountWrongType($account);
+        }
+
+        return $this->assertPostable($account, 'FX gain/loss');
     }
 
     /**

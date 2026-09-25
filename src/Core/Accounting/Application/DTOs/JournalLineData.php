@@ -21,6 +21,10 @@ final readonly class JournalLineData
         public ?Money $credit = null,
         public ?string $branchId = null,
         public ?string $description = null,
+        // The transaction-currency overlay (ADR 0022 §B2). NULL ⇒ a base-currency line, byte-for-byte today.
+        // `debit`/`credit` remain the authoritative base amount and side; this is metadata the FX-aware maps
+        // compute alongside them via `Money::convertedTo`. Interactive journals never set it.
+        public ?ForeignAmount $foreign = null,
     ) {}
 
     /**

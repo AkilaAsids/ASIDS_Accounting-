@@ -154,6 +154,61 @@ final class PaymentCannotBeRecorded extends BusinessRuleViolation
     }
 
     /**
+     * The payment's currency code is not a valid ISO 4217 shape — three letters (ADR 0022 §D1). Normalised and
+     * validated at the service boundary before it can reach the base-vs-foreign decision or the ledger.
+     */
+    public static function paymentCurrencyCodeMalformed(string $code): self
+    {
+        return new self(
+            sprintf('A currency code of "%s" is not a valid ISO 4217 code (three letters).', $code),
+            'payment-currency-code-malformed',
+            ['code' => $code],
+        );
+    }
+
+    /**
+     * A foreign payment was given no exchange rate (ADR 0022 §D1).
+     */
+    public static function paymentRateRequired(): self
+    {
+        return new self(
+            'A foreign-currency payment needs an exchange rate to the base currency.',
+            'payment-foreign-rate-required',
+        );
+    }
+
+    /**
+     * A foreign payment's exchange rate is not a positive number (ADR 0022 §D1).
+     */
+    public static function paymentRateNotPositive(string $rate): self
+    {
+        return new self(
+            sprintf('An exchange rate of "%s" is not valid. It must be a positive number.', $rate),
+            'payment-rate-not-positive',
+            ['rate' => $rate],
+        );
+    }
+
+    /**
+     * A payment's currency does not match a bill it is settling (ADR 0022 §D1). Same-currency settlement only
+     * for 9a — a USD payment settles USD bills; cross-currency settlement is a later slice.
+     */
+    public static function paymentCurrencyMismatch(string $billId, string $paymentCurrency, string $billCurrency): self
+    {
+        return new self(
+            sprintf(
+                'This %s payment cannot settle bill %s, which is in %s. A payment settles bills in its own '
+                .'currency.',
+                $paymentCurrency,
+                $billId,
+                $billCurrency,
+            ),
+            'payment-currency-mismatch',
+            ['bill' => $billId, 'payment_currency' => $paymentCurrency, 'bill_currency' => $billCurrency],
+        );
+    }
+
+    /**
      * The payment was told to withhold but no rate could be found — neither a per-payment override nor the
      * supplier's `wht_rate` (ADR 0021 §C2).
      */

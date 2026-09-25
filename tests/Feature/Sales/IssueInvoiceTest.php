@@ -110,6 +110,23 @@ describe('issuing a draft', function (): void {
             ->and($invoice->journal_entry_id)->not->toBeNull();
     });
 
+    it('posts a base-currency ledger entry with no foreign overlay on any line (ADR 0022 §H)', function (): void {
+        // A sales invoice is a non-FX posting path. The FX phase dropped the ledger's single-currency pin, so
+        // the base-path regression bar (§H) is that such paths still leave the overlay NULL — set only by the
+        // FX-aware purchasing maps, never here.
+        $vat = chargingVat();
+        $invoice = $this->invoices->issue(issuableDraft('1000.00', $vat->code), $this->owner);
+
+        $lines = JournalEntry::query()->with('lines')->findOrFail($invoice->journal_entry_id)->lines;
+
+        expect($lines)->toHaveCount(3);   // Dr Receivables, Cr Revenue, Cr Output VAT
+        foreach ($lines as $line) {
+            expect($line->transaction_currency_code)->toBeNull()
+                ->and($line->transaction_amount)->toBeNull()
+                ->and($line->exchange_rate)->toBeNull();
+        }
+    });
+
     it('records who issued it', function (): void {
         $invoice = $this->invoices->issue(issuableDraft(), $this->owner);
 

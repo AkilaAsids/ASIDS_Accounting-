@@ -39,6 +39,11 @@ final readonly class PaymentData
         // supplier's rate when withholding. The withheld amount is always service-computed, never supplied.
         public ?bool $withholdTax = null,
         public ?string $whtRateOverride = null,
+        // Foreign currency (ADR 0022 §D1). `currencyCode` null ⇒ company base currency; when foreign, the
+        // payment settles bills in the SAME currency (same-currency-only), `exchangeRate` is a positive
+        // numeric string (transaction → base), and `amount`/allocations are in the transaction currency.
+        public ?string $currencyCode = null,
+        public ?string $exchangeRate = null,
     ) {}
 
     /**
@@ -64,6 +69,8 @@ final readonly class PaymentData
             reference: self::optionalString($attributes, 'reference'),
             notes: self::optionalString($attributes, 'notes'),
             branchId: self::optionalString($attributes, 'branch_id'),
+            currencyCode: self::optionalString($attributes, 'currency_code'),
+            exchangeRate: self::optionalString($attributes, 'exchange_rate'),
             withholdTax: array_key_exists('withhold_tax', $attributes) && $attributes['withhold_tax'] !== null
                 ? (bool) $attributes['withhold_tax']
                 : null,

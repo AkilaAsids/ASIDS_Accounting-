@@ -6,6 +6,7 @@ namespace Asids\Core\Accounting\Domain\ValueObjects;
 
 use Asids\Core\Accounting\Domain\Exceptions\CurrencyMismatch;
 use Asids\Core\Accounting\Domain\Exceptions\InvalidMoneyAmount;
+use LogicException;
 use Stringable;
 
 /**
@@ -157,6 +158,39 @@ final readonly class Money implements Stringable
     }
 
     /**
+     * Convert a transaction amount to another currency at an exchange rate, rounded to that currency's
+     * precision — the FX primitive `base = round(txn × rate)` (ADR 0022 §B1).
+     *
+     * This is the one place the general ledger's base amount is derived from a foreign amount and its rate.
+     * The multiplication is done in bcmath (not the scaled-integer path `multipliedBy` uses — a base-sized
+     * product overflows a 64-bit int), rounded half away from zero, then re-tagged to the target currency at its
+     * `precision`. At rate `'1'` it is an identity re-tag plus that rounding, so a base-currency line converts to
+     * itself.
+     */
+    public function convertedTo(string $currency, string $rate, int $precision): self
+    {
+        if ($precision < 0 || $precision > self::SCALE) {
+            throw InvalidMoneyAmount::unsupportedPrecision($precision);
+        }
+
+        $trimmedRate = trim($rate);
+
+        if (! preg_match('/^-?\d{1,15}(\.\d{1,10})?$/', $trimmedRate) || ! is_numeric($trimmedRate)) {
+            throw InvalidMoneyAmount::malformedFactor($rate);
+        }
+
+        $currency = self::normaliseCurrency($currency);
+
+        // bcmath, not the scaled-integer path `multipliedBy` uses: a base-sized product (an amount in the
+        // thousands times a rate near 300, each scaled) overflows a 64-bit int. Computed past the target
+        // precision, then rounded half away from zero to it.
+        $product = bcmul($this->toDecimalString(), $trimmedRate, self::SCALE + 10);
+        $rounded = self::bcRoundHalfAwayFromZero($product, $precision);
+
+        return self::of($rounded, $currency);
+    }
+
+    /**
      * Split an amount across weights without losing or inventing a cent.
      *
      * THE REASON THIS IS NOT A LOOP OF DIVISIONS
@@ -289,9 +323,7 @@ final readonly class Money implements Stringable
      * The decimal string the database column stores. Always four decimal places, so a round trip
      * through `numeric(19,4)` returns exactly what went in.
      *
-     * Typed as a plain string rather than `numeric-string`: the format is guaranteed by construction,
-     * but PHPStan cannot see that through `sprintf`, and the only ways to make it agree are a cast or
-     * an assertion — both of which assert the property rather than establishing it.
+     * @return numeric-string
      */
     public function toDecimalString(): string
     {
@@ -301,7 +333,38 @@ final readonly class Money implements Stringable
         $whole = intdiv($units, self::FACTOR);
         $fraction = $units % self::FACTOR;
 
-        return sprintf('%s%d.%04d', $negative ? '-' : '', $whole, $fraction);
+        $decimal = sprintf('%s%d.%04d', $negative ? '-' : '', $whole, $fraction);
+
+        // `sprintf` returns a plain `string`. This guard both proves to PHPStan and confirms at runtime that
+        // the formatted value is the numeric string the column stores — it establishes the type rather than
+        // asserting it. The branch is unreachable given the format above.
+        if (! is_numeric($decimal)) {
+            throw new LogicException('Money::toDecimalString produced a non-numeric value: '.$decimal);
+        }
+
+        return $decimal;
+    }
+
+    /**
+     * Round a bcmath decimal string half away from zero to `$precision` places — the same rule
+     * `divideRoundingHalfAwayFromZero` applies to integers, for values too large to hold in one.
+     */
+    private static function bcRoundHalfAwayFromZero(string $value, int $precision): string
+    {
+        $value = trim($value);
+
+        if (! is_numeric($value)) {
+            throw new LogicException('Money::bcRoundHalfAwayFromZero received a non-numeric value: '.$value);
+        }
+
+        // A half-ulp at the target precision — 5 x 10^-(precision+1) — built from bcmath primitives so it
+        // stays a numeric string, then given the sign of the value being rounded.
+        $magnitude = bcdiv('5', bcpow('10', (string) ($precision + 1)), $precision + 1);
+        $half = str_starts_with($value, '-') ? bcmul($magnitude, '-1', $precision + 1) : $magnitude;
+
+        // bcadd truncates toward zero at `$precision`; adding a sign-matched half-ulp first turns that into
+        // round-half-away-from-zero.
+        return bcadd($value, $half, $precision);
     }
 
     /**

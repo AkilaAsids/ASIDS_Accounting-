@@ -83,6 +83,47 @@ final class PaymentCannotBePosted extends BusinessRuleViolation
     }
 
     /**
+     * No Foreign Exchange Gain/(Loss) account could be found (ADR 0022 §D2).
+     *
+     * Reachable only when a company was never provisioned the `fx_gain_loss` system account (the §A6 backfill
+     * did not reach it). A foreign settlement at a rate different from the booking rate realises FX there, so
+     * without it the payment cannot post. Resolved only when the FX plug is non-zero.
+     */
+    public static function withoutFxAccount(string $companyName): self
+    {
+        return new self(
+            sprintf(
+                '%s has no Foreign Exchange Gain/(Loss) account, so a foreign settlement has nowhere to post '
+                .'the realised exchange difference. Provision the company\'s system accounts.',
+                $companyName,
+            ),
+            'fx-account-missing',
+            ['company' => $companyName],
+        );
+    }
+
+    /**
+     * The FX Gain/(Loss) account is not an Income account.
+     *
+     * Reached only when `4910` was reclassified after provisioning. Posting the realised difference elsewhere
+     * would misstate the period's FX result.
+     */
+    public static function fxAccountWrongType(Account $account): self
+    {
+        return new self(
+            sprintf(
+                'Account %s (%s) is %s. Foreign Exchange Gain/(Loss) nets realised FX, so it has to be an '
+                .'income account.',
+                $account->code,
+                $account->name,
+                $account->type->value,
+            ),
+            'fx-account-wrong-type',
+            ['account' => $account->code, 'type' => $account->type->value],
+        );
+    }
+
+    /**
      * No payable account could be found at all.
      *
      * Reachable only when a company has no `trade_payables` system account — its chart was never provisioned.

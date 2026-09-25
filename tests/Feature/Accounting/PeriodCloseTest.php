@@ -375,6 +375,22 @@ describe('closing a year', function (): void {
         expect($entry?->lines->firstWhere('account_id', $retained?->getKey())?->credit)->toBe('190000.0000');
     });
 
+    it('posts the closing entry with no foreign overlay on any line (ADR 0022 §H)', function (): void {
+        closeEveryPeriod();
+
+        $entry = $this->close->closeYear($this->year, $this->owner);
+
+        // Year-end close is a computed, base-currency posting path. The FX phase dropped the ledger's
+        // single-currency pin, so the §H base-path bar is that this path still leaves the overlay NULL — only the
+        // FX-aware purchasing maps ever set it.
+        expect($entry)->not->toBeNull();
+        foreach ($entry->lines as $line) {
+            expect($line->transaction_currency_code)->toBeNull()
+                ->and($line->transaction_amount)->toBeNull()
+                ->and($line->exchange_rate)->toBeNull();
+        }
+    });
+
     it('zeroes every income and expense account', function (): void {
         closeEveryPeriod();
 

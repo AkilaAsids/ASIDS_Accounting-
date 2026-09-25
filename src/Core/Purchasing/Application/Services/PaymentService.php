@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Purchasing\Application\Services;
 
+use Asids\Core\Accounting\Application\DTOs\ForeignAmount;
 use Asids\Core\Accounting\Application\DTOs\JournalEntryData;
 use Asids\Core\Accounting\Application\Services\DocumentNumberService;
 use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
@@ -16,6 +17,7 @@ use Asids\Core\Identity\Domain\Models\User;
 use Asids\Core\Organization\Domain\Models\Branch;
 use Asids\Core\Organization\Domain\Models\Company;
 use Asids\Core\Platform\Exceptions\BusinessRuleViolation;
+use Asids\Core\Purchasing\Application\DTOs\PayableRelief;
 use Asids\Core\Purchasing\Application\DTOs\PaymentData;
 use Asids\Core\Purchasing\Domain\Enums\BillStatus;
 use Asids\Core\Purchasing\Domain\Enums\PaymentStatus;
@@ -28,6 +30,7 @@ use Asids\Core\Purchasing\Domain\Models\SupplierPayment;
 use Asids\Core\Sales\Application\Services\LedgerNarration;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 
 /**
  * Recording supplier payments and settling their bills — the whole record-and-post lifecycle in one step
@@ -121,9 +124,18 @@ final readonly class PaymentService
             $allocated = bcadd($allocated, $allocationAmount, Money::SCALE);
         }
 
-        // 7. The target bills — each belongs to this company (AC-1.5), to the named supplier (AC-1.3), is
-        //    outstanding (AC-1.4), and its allocation does not exceed its current `amount_due` (AC-1.6, the
-        //    advisory pre-check; re-read authoritatively under the lock at step 12).
+        // Foreign currency (ADR 0022 §D1): the payment's transaction currency + a manual positive rate, or the
+        // base currency at rate 1. `amount` and the allocations are in the payment currency. The code is
+        // normalised to its ISO shape here so "usd" and "USD" cannot become two currencies — otherwise the
+        // base-vs-foreign decision, the same-currency guard below, and the stored/ledger codes could disagree.
+        $paymentCcy = $this->assertCurrencyCode($data->currencyCode, $company->base_currency_code);
+        $isForeign = $paymentCcy !== $company->base_currency_code;
+        $paymentRate = $isForeign ? $this->assertRate($data->exchangeRate) : '1';
+
+        // 7. The target bills — each belongs to this company (AC-1.5), is in the payment's currency
+        //    (same-currency-only, AC-4.1), to the named supplier (AC-1.3), is outstanding (AC-1.4), and its
+        //    allocation does not exceed its current `amount_due` (AC-1.6, the advisory pre-check; re-read
+        //    authoritatively under the lock at step 12).
         $bills = $this->loadBills($company, array_keys($seen));
 
         foreach ($data->allocations as $allocation) {
@@ -131,6 +143,10 @@ final readonly class PaymentService
 
             if ($bill === null) {
                 throw PaymentCannotBeRecorded::billOutsideCompany($allocation->billId);
+            }
+
+            if ($bill->currency_code !== $paymentCcy) {
+                throw PaymentCannotBeRecorded::paymentCurrencyMismatch($allocation->billId, $paymentCcy, $bill->currency_code);
             }
 
             if ((string) $bill->supplier_id !== (string) $supplier->getKey()) {
@@ -155,7 +171,9 @@ final readonly class PaymentService
             throw PaymentCannotBeRecorded::notFullyAllocated($amount, $allocated);
         }
 
-        $ccy = $company->base_currency_code;
+        // WHT is computed in the payment's currency (the same currency as the bills it settles), so a foreign
+        // withholding is a foreign amount (ADR 0022 §D4).
+        $ccy = $paymentCcy;
 
         // 8a. Resolve the effective WHT rate (ADR 0021 §C2): the supplier's default unless the caller forces
         //     withholding on/off for this payment, and the supplier's rate unless a per-payment override.
@@ -211,9 +229,14 @@ final readonly class PaymentService
 
         $whtValue = $this->assertDecimal($wht->toDecimalString());
 
-        // 9. The posting lines — the map writes nothing, so an account refusal here (`PaymentCannotBePosted`)
-        //    costs no lock. The branch (§A2) is stamped on every line; the credit splits when wht > 0 (§B).
-        $lines = $this->postingMap->for($company, $bankAccount, Money::of($amount, $ccy), $wht, $supplier, $branchId);
+        // 9. The posting lines.
+        //    - Base currency: the map writes nothing, so an account refusal here costs no lock — built now, the
+        //      grouped Dr Trade Payables shape of Wave 8a/8b, byte-for-byte.
+        //    - Foreign: the per-bill realised-FX relief depends on each locked bill's `amount_paid`
+        //      (incremental relief, §D3), so it is built INSIDE the transaction after the lock (step 12a).
+        $lines = $isForeign
+            ? null
+            : $this->postingMap->for($company, $bankAccount, Money::of($amount, $ccy), $wht, $supplier, $branchId);
 
         // 10. The calendar, before any number is reserved (AC-2.7).
         $period = $this->calendar->periodFor($company, $data->paymentDate->startOfDay());
@@ -230,8 +253,12 @@ final readonly class PaymentService
             $bankAccount,
             $branchId,
             $amount,
+            $wht,
             $whtValue,
             $whtRateSnapshot,
+            $isForeign,
+            $paymentCcy,
+            $paymentRate,
             $lines,
             $period,
             $actor,
@@ -270,6 +297,50 @@ final readonly class PaymentService
                 }
             }
 
+            // 12a. Foreign payment: build the realised-FX posting lines now, under the lock, because the
+            //      per-bill payable relief is INCREMENTAL — `round((paid_before + alloc) × bill_rate) −
+            //      round(paid_before × bill_rate)` — so a fully-paid foreign bill's payable zeroes exactly
+            //      (§D3, fork 2). `paid_before` is each locked bill's `amount_paid` read here, before step 16
+            //      moves it. Each bill is relieved at ITS booking rate; the FX plug (built by the map) makes
+            //      the base entry balance.
+            if ($isForeign) {
+                $reliefs = [];
+
+                foreach ($locked as $bill) {
+                    $billRate = $bill->exchange_rate ?? '1';
+                    $alloc = $amountFor[(string) $bill->getKey()];
+                    $paidBefore = $this->assertDecimal($bill->amount_paid);
+                    $cumulative = bcadd($paidBefore, $alloc, Money::SCALE);
+
+                    $baseRelieved = Money::of($cumulative, $paymentCcy)->convertedTo($company->base_currency_code, $billRate, $company->currency_precision)
+                        ->minus(Money::of($paidBefore, $paymentCcy)->convertedTo($company->base_currency_code, $billRate, $company->currency_precision));
+
+                    $reliefs[] = new PayableRelief(
+                        $baseRelieved,
+                        new ForeignAmount(Money::of($alloc, $paymentCcy), $billRate),
+                    );
+                }
+
+                $netCashTxn = Money::of($amount, $paymentCcy)->minus($wht);
+
+                $lines = $this->postingMap->forForeign(
+                    $company,
+                    $bankAccount,
+                    $reliefs,
+                    $netCashTxn,
+                    $wht,
+                    $paymentRate,
+                    $company->currency_precision,
+                    $supplier,
+                    $branchId,
+                );
+            }
+
+            if ($lines === null) {
+                // Unreachable: base lines are precomputed at step 9, foreign lines built at step 12a above.
+                throw new LogicException('Posting lines were not built.');
+            }
+
             // 13. Pre-assign the payment id so `SourceDocument::for()` has a key without the row being saved
             //     (§C6), draw the gapless PAY number, then post the JV citing the payment.
             $payment = new SupplierPayment;
@@ -293,8 +364,8 @@ final readonly class PaymentService
             $payment->bank_account_id = $bankAccount->getKey();
             $payment->number = $number;
             $payment->payment_date = $data->paymentDate->startOfDay();
-            $payment->currency_code = $company->base_currency_code;
-            $payment->exchange_rate = null;
+            $payment->currency_code = $paymentCcy;
+            $payment->exchange_rate = $isForeign ? $paymentRate : null;
             $payment->amount = $amount;
             $payment->wht_amount = $whtValue;
             $payment->wht_rate = $whtRateSnapshot;
@@ -414,6 +485,48 @@ final readonly class PaymentService
             ->all();
 
         return $bills;
+    }
+
+    /**
+     * A payment's currency code: the caller's, normalised to its ISO-4217 shape (uppercase, three letters), or
+     * the company base when none is given. Normalising here — the same rule `Money` applies to every currency it
+     * touches — keeps a base payment from being read as foreign on a case difference, keeps the same-currency
+     * settlement guard honest, and keeps the stored header code identical to the ledger overlay's.
+     */
+    private function assertCurrencyCode(?string $code, string $base): string
+    {
+        if ($code === null || trim($code) === '') {
+            return $base;
+        }
+
+        $normalised = strtoupper(trim($code));
+
+        if (! preg_match('/^[A-Z]{3}$/', $normalised)) {
+            throw PaymentCannotBeRecorded::paymentCurrencyCodeMalformed($code);
+        }
+
+        return $normalised;
+    }
+
+    /**
+     * A foreign payment's exchange rate (transaction → base), validated positive — the readable message behind
+     * `supplier_payments_exchange_rate_positive_check` (ADR 0022 §D1).
+     *
+     * @return numeric-string
+     */
+    private function assertRate(?string $rate): string
+    {
+        if ($rate === null || trim($rate) === '') {
+            throw PaymentCannotBeRecorded::paymentRateRequired();
+        }
+
+        $trimmed = trim($rate);
+
+        if (! is_numeric($trimmed) || bccomp($trimmed, '0', 10) <= 0) {
+            throw PaymentCannotBeRecorded::paymentRateNotPositive($rate);
+        }
+
+        return $trimmed;
     }
 
     /**

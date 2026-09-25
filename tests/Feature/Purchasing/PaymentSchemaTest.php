@@ -232,7 +232,13 @@ describe('the check constraints exist', function (): void {
 
         expect($checks)->toContain('supplier_payments_status_check')
             ->and($checks)->toContain('supplier_payments_amount_positive_check')
-            ->and($checks)->toContain('supplier_payments_single_currency_until_fx_phase');
+            // The FX phase (ADR 0022 §A4) drops supplier_payments_single_currency_until_fx_phase and replaces it
+            // with the permanent shape rule supplier_payments_exchange_rate_positive_check (a rate is absent, or
+            // positive).
+            ->and($checks)->not->toContain('supplier_payments_single_currency_until_fx_phase')
+            ->and($checks)->toContain('supplier_payments_exchange_rate_positive_check')
+            // The FX phase also makes the DB the authority on the currency's ISO shape, now that the caller names it.
+            ->and($checks)->toContain('supplier_payments_currency_shape_check');
     });
 
     it('declares the payment_allocations CHECK', function (): void {
@@ -363,11 +369,29 @@ describe('the amount CHECK', function (): void {
     });
 });
 
-describe('the exchange rate phase CHECK', function (): void {
-    it('holds the exchange rate at null until the FX phase', function (): void {
+describe('the exchange rate positive CHECK', function (): void {
+    // The FX phase (ADR 0022 §A4) opened the exchange rate: it is either absent (a base-currency payment) or a
+    // positive number. supplier_payments_exchange_rate_positive_check is now the shape rule, not a null-pin.
+    it('accepts a positive exchange rate on a foreign payment', function (): void {
+        insertPayment(['currency_code' => 'USD', 'exchange_rate' => '305.5000000000']);
+
+        expect(DB::table('supplier_payments')->whereNotNull('exchange_rate')->count())->toBe(1);
+    });
+
+    it('refuses a non-positive exchange rate', function (): void {
         insertPayment();
 
-        expect(fn () => DB::transaction(fn () => insertPayment(['exchange_rate' => '1.0000000000'])))
+        expect(fn () => DB::transaction(fn () => insertPayment(['currency_code' => 'USD', 'exchange_rate' => '0.0000000000'])))
+            ->toThrow(QueryException::class);
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['currency_code' => 'USD', 'exchange_rate' => '-1.0000000000'])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a currency code that is not the uppercase ISO shape', function (): void {
+        // supplier_payments_currency_shape_check — the DB is the authority, so a lower-case code cannot slip past
+        // a bug in the service layer and split a currency in two.
+        expect(fn () => DB::transaction(fn () => insertPayment(['currency_code' => 'usd'])))
             ->toThrow(QueryException::class);
     });
 });

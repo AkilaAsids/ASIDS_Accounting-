@@ -703,8 +703,8 @@ describe('document numbering', function (): void {
     });
 });
 
-describe('foreign currency, before the FX phase', function (): void {
-    it('writes lines with no transaction currency', function (): void {
+describe('foreign currency, the FX-phase ledger shape', function (): void {
+    it('writes lines with no transaction currency for a base-currency entry', function (): void {
         $entry = $this->posting->postNew(
             $this->company,
             entryData($this->cash->getKey(), $this->sales->getKey()),
@@ -712,33 +712,15 @@ describe('foreign currency, before the FX phase', function (): void {
         );
 
         // NULL is meaningful: the line is in the company's base currency at rate 1. No redundant rows
-        // of LKR / 1.0000.
+        // of LKR / 1.0000. (The populated-overlay path is exercised by `JournalLineOverlayTest`.)
         expect($entry->lines->first()?->transaction_currency_code)->toBeNull()
             ->and($entry->lines->first()?->isForeignCurrency())->toBeFalse();
     });
 
-    it('refuses a populated transaction currency until the FX phase', function (): void {
-        $entry = $this->posting->postNew(
-            $this->company,
-            entryData($this->cash->getKey(), $this->sales->getKey()),
-            $this->owner,
-        );
-
-        // `journal_lines_single_currency_until_fx_phase`. This is what makes "base currency only"
-        // true rather than intended — the FX phase drops exactly this constraint and nothing else.
-        expect(fn () => DB::table('journal_lines')
-            ->where('journal_entry_id', $entry->getKey())
-            ->limit(1)
-            ->update([
-                'transaction_currency_code' => 'USD',
-                'transaction_amount' => '10.0000',
-                'exchange_rate' => '300.0000000000',
-            ]))->toThrow(QueryException::class);
-    });
-
-    it('keeps the all-or-nothing shape rule independent of the phase constraint', function (): void {
-        // The permanent rule: the three columns move together. Asserted separately from the
-        // phase-scoped one so that dropping the latter in the FX phase does not quietly remove this.
+    it('dropped the phase pin and kept the all-or-none shape rule', function (): void {
+        // The FX phase (ADR 0022 §A2) drops exactly `journal_lines_single_currency_until_fx_phase` — the pin
+        // that held the overlay at NULL — and keeps `journal_lines_currency_columns_check`, the permanent
+        // authority that the three overlay columns move together with a positive rate.
         $constraints = DB::select(<<<'SQL'
             SELECT conname FROM pg_constraint
             WHERE conrelid = 'journal_lines'::regclass
@@ -746,7 +728,7 @@ describe('foreign currency, before the FX phase', function (): void {
         SQL);
 
         expect(collect($constraints)->pluck('conname')->sort()->values()->all())
-            ->toBe(['journal_lines_currency_columns_check', 'journal_lines_single_currency_until_fx_phase']);
+            ->toBe(['journal_lines_currency_columns_check']);
     });
 });
 

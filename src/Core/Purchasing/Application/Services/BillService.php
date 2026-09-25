@@ -89,7 +89,12 @@ final readonly class BillService
             $bill->supplier_invoice_number = $supplierNumber;
             $bill->bill_date = $data->billDate;
             $bill->due_date = $dueDate;
-            $bill->currency_code = $company->base_currency_code;
+            // Foreign currency (ADR 0022 §C1): a caller-named currency + manual rate, or the base currency at
+            // rate NULL. The totals calculator computes in `currency_code`, so a foreign bill's totals are in
+            // its own currency with no change to the calculator. The code is normalised to its ISO shape here so
+            // "usd" and "USD" cannot become two currencies, and so the base-vs-foreign decision on the next line
+            // and the ledger overlay (which stores the Money-normalised code) always agree.
+            $bill->currency_code = $this->assertCurrencyCode($data->currencyCode, $company->base_currency_code);
             $bill->notes = $data->notes;
             $bill->terms = $data->terms;
 
@@ -97,7 +102,9 @@ final readonly class BillService
             // same as a saved one under `Model::shouldBeStrict()` — the trap Phase 1 hit on
             // `must_change_password` and Phase 2 hit again on `is_closed`.
             $bill->status = BillStatus::Draft;
-            $bill->exchange_rate = null;
+            $bill->exchange_rate = $bill->currency_code === $company->base_currency_code
+                ? null
+                : $this->assertRate($data->exchangeRate);
             $bill->number = null;
             $bill->posted_at = null;
             $bill->posted_by_id = null;
@@ -675,6 +682,57 @@ final readonly class BillService
                 ),
             );
         }
+    }
+
+    /**
+     * A bill's currency code: the caller's, normalised to its ISO-4217 shape (uppercase, three letters), or the
+     * company base when none is given. Normalising here — the same rule `Money` applies to every currency it
+     * touches — keeps a base bill from being mistaken for a foreign one on a case difference and keeps the stored
+     * header code identical to the code the ledger overlay records. Mirrors `companies_currency_shape_check`.
+     */
+    private function assertCurrencyCode(?string $code, string $base): string
+    {
+        if ($code === null || trim($code) === '') {
+            return $base;
+        }
+
+        $normalised = strtoupper(trim($code));
+
+        if (! preg_match('/^[A-Z]{3}$/', $normalised)) {
+            throw BusinessRuleViolation::make(
+                'bill-currency-code-malformed',
+                sprintf('A currency code of "%s" is not a valid ISO 4217 code (three letters).', $code),
+            );
+        }
+
+        return $normalised;
+    }
+
+    /**
+     * A foreign bill's exchange rate (transaction → base), validated positive — the readable message behind
+     * `bills_exchange_rate_positive_check` (ADR 0022 §C1).
+     *
+     * @return numeric-string
+     */
+    private function assertRate(?string $rate): string
+    {
+        if ($rate === null || trim($rate) === '') {
+            throw BusinessRuleViolation::make(
+                'bill-foreign-rate-required',
+                'A foreign-currency bill needs an exchange rate to the base currency.',
+            );
+        }
+
+        $trimmed = trim($rate);
+
+        if (! is_numeric($trimmed) || bccomp($trimmed, '0', 10) <= 0) {
+            throw BusinessRuleViolation::make(
+                'bill-rate-not-positive',
+                sprintf('An exchange rate of "%s" is not valid. It must be a positive number.', $rate),
+            );
+        }
+
+        return $trimmed;
     }
 
     /**

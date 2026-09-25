@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Purchasing\Application\Services;
 
+use Asids\Core\Accounting\Application\DTOs\ForeignAmount;
 use Asids\Core\Accounting\Application\DTOs\JournalLineData;
 use Asids\Core\Accounting\Domain\Enums\AccountType;
 use Asids\Core\Accounting\Domain\Models\Account;
@@ -74,11 +75,26 @@ final readonly class BillPostingMap
 
         $currency = $bill->currency_code;
 
-        return [
+        // Built in the bill's transaction currency (the calculator already computed totals in it): the debit
+        // lines and the single payable credit.
+        $debits = [
             ...$this->expenseLines($bill, $lines, $currency),
             ...$this->inputTaxLines($bill, $lines, $currency),
-            ...$this->payableLines($bill, $currency),
         ];
+        $payable = $this->payableLines($bill, $currency);
+
+        $base = $bill->company->base_currency_code;
+
+        // Base-currency bill: byte-for-byte today — no conversion, no overlay, no FX line (a bill is a
+        // booking, not a settlement; ADR 0022 §C2).
+        if ($currency === $base || $bill->exchange_rate === null) {
+            return [...$debits, ...$payable];
+        }
+
+        // Foreign bill: convert each line to base at the booking rate, with the transaction face as the
+        // overlay, and reconcile the debit residue so the debits sum EXACTLY to the payable face
+        // (`round(total × rate)`) — the entry balances in base with no FX line (fork 3).
+        return $this->toBaseCurrency($debits, $payable, $base, $bill->exchange_rate, $bill->company->currency_precision);
     }
 
     /**
@@ -106,6 +122,83 @@ final readonly class BillPostingMap
         }
 
         return $this->assertPostable($account, 'payable');
+    }
+
+    /**
+     * Convert a bill's transaction-currency lines to base, reconciling the debit residue onto the largest
+     * debit so `Σ debit base = payable face` exactly (ADR 0022 §C2, fork 3).
+     *
+     * @param  list<JournalLineData>  $debits
+     * @param  list<JournalLineData>  $payable  0 or 1 credit line
+     * @return list<JournalLineData>
+     */
+    private function toBaseCurrency(array $debits, array $payable, string $base, string $rate, int $precision): array
+    {
+        $convertedPayable = array_map(
+            fn (JournalLineData $line): JournalLineData => $this->convertLine($line, $base, $rate, $precision),
+            $payable,
+        );
+
+        $convertedDebits = array_map(
+            fn (JournalLineData $line): JournalLineData => $this->convertLine($line, $base, $rate, $precision),
+            $debits,
+        );
+
+        // The face the debits must sum to: the payable credit's base amount (`round(total × rate)`).
+        $payableBase = $convertedPayable === []
+            ? Money::zero($base)
+            : ($convertedPayable[0]->credit ?? Money::zero($base));
+
+        // Net base of the debit set (a mid-bill correction may sit on the credit side): debits add, credits
+        // subtract. The residue that reconciles it to the face is placed on the largest-magnitude debit.
+        $net = Money::zero($base);
+        $largest = null;
+        $largestUnits = -1;
+
+        foreach ($convertedDebits as $index => $line) {
+            $net = $line->debit !== null ? $net->plus($line->debit) : $net->minus($line->credit ?? Money::zero($base));
+
+            $units = ($line->debit ?? $line->credit ?? Money::zero($base))->absolute()->minorUnits;
+            if ($line->debit !== null && $units > $largestUnits) {
+                $largestUnits = $units;
+                $largest = $index;
+            }
+        }
+
+        $residue = $payableBase->minus($net);
+
+        if ($largest !== null && ! $residue->isZero()) {
+            $adjusted = $convertedDebits[$largest];
+            $convertedDebits[$largest] = new JournalLineData(
+                accountId: $adjusted->accountId,
+                debit: ($adjusted->debit ?? Money::zero($base))->plus($residue),
+                credit: null,
+                branchId: $adjusted->branchId,
+                description: $adjusted->description,
+                foreign: $adjusted->foreign,
+            );
+        }
+
+        return [...$convertedDebits, ...$convertedPayable];
+    }
+
+    /**
+     * One transaction-currency line re-expressed in base: the base amount is `round(txn × rate)` and the
+     * transaction face rides as the overlay (`ForeignAmount`). The side is preserved.
+     */
+    private function convertLine(JournalLineData $line, string $base, string $rate, int $precision): JournalLineData
+    {
+        $txn = $line->debit ?? $line->credit ?? Money::zero($base);
+        $converted = $txn->convertedTo($base, $rate, $precision);
+
+        return new JournalLineData(
+            accountId: $line->accountId,
+            debit: $line->debit !== null ? $converted : null,
+            credit: $line->credit !== null ? $converted : null,
+            branchId: $line->branchId,
+            description: $line->description,
+            foreign: new ForeignAmount($txn, $rate),
+        );
     }
 
     /**

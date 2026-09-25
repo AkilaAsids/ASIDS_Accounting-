@@ -314,6 +314,16 @@ final readonly class JournalService
             $line->debit = ($data->debit ?? Money::zero($currency))->roundedTo($precision)->toDecimalString();
             $line->credit = ($data->credit ?? Money::zero($currency))->roundedTo($precision)->toDecimalString();
             $line->description = $data->description;
+
+            // The FX overlay (ADR 0022 §B3): a foreign line records its transaction face; a base-currency
+            // line leaves the three columns NULL — the entire change to the shared posting path, and the
+            // reason the base path is byte-for-byte today.
+            if ($data->foreign !== null) {
+                $line->transaction_currency_code = $data->foreign->amount->currency;
+                $line->transaction_amount = $data->foreign->amount->toDecimalString();
+                $line->exchange_rate = $data->foreign->rate;
+            }
+
             $line->save();
         }
     }
