@@ -10,6 +10,7 @@ use Asids\Core\Accounting\Application\Services\DocumentNumberService;
 use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
 use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Enums\DocumentType;
+use Asids\Core\Accounting\Domain\Enums\JournalEntryStatus;
 use Asids\Core\Accounting\Domain\Models\Account;
 use Asids\Core\Accounting\Domain\ValueObjects\Money;
 use Asids\Core\Accounting\Domain\ValueObjects\SourceDocument;
@@ -21,6 +22,7 @@ use Asids\Core\Purchasing\Application\DTOs\PayableRelief;
 use Asids\Core\Purchasing\Application\DTOs\PaymentData;
 use Asids\Core\Purchasing\Domain\Enums\BillStatus;
 use Asids\Core\Purchasing\Domain\Enums\PaymentStatus;
+use Asids\Core\Purchasing\Domain\Exceptions\PaymentCannotBeCancelled;
 use Asids\Core\Purchasing\Domain\Exceptions\PaymentCannotBePosted;
 use Asids\Core\Purchasing\Domain\Exceptions\PaymentCannotBeRecorded;
 use Asids\Core\Purchasing\Domain\Models\Bill;
@@ -28,6 +30,7 @@ use Asids\Core\Purchasing\Domain\Models\PaymentAllocation;
 use Asids\Core\Purchasing\Domain\Models\Supplier;
 use Asids\Core\Purchasing\Domain\Models\SupplierPayment;
 use Asids\Core\Sales\Application\Services\LedgerNarration;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use LogicException;
@@ -405,6 +408,133 @@ final readonly class PaymentService
 
             // 17. Everything committed together; the deferred full-allocation trigger passes (Σ = amount).
             return $payment->refresh();
+        });
+    }
+
+    /**
+     * Cancel a posted payment — reverse its ledger entry and restore the bills it settled (ADR 0023 §B).
+     *
+     * The exact inverse of `record()`'s settlement, and the payable-side mirror of `SalesInvoiceService::cancel`.
+     * A payment is a statutory record, so this reverses rather than deletes: the payment, its number, its figures
+     * and its allocations all survive; a mirror journal entry undoes the posting (carrying the FX overlay, §D);
+     * each settled bill's `amount_paid`/`amount_due` returns and its status is recomputed from what remains paid.
+     *
+     * WHAT REFUSES, AND WHERE
+     * -----------------------
+     * The reason is checked before the transaction opens. Inside it, the payment row is locked and re-read (the
+     * readable answer to a concurrent double-cancel; the freeze trigger is the ultimate authority), the bills are
+     * locked in ascending id order (the same deadlock-free order `record()` uses, §F1), and today's period —
+     * the reversal's, not the payment's (D1) — must be open.
+     */
+    public function cancel(SupplierPayment $payment, string $reason, ?User $actor = null): SupplierPayment
+    {
+        $reason = trim($reason);
+
+        if ($reason === '') {
+            throw PaymentCannotBeCancelled::reasonRequired();
+        }
+
+        return DB::transaction(function () use ($payment, $reason, $actor): SupplierPayment {
+            // Locked before anything is read, so a concurrent cancel queues here rather than racing to the
+            // trigger. Re-read through the lock: the in-memory instance may predate another request's work.
+            $locked = SupplierPayment::query()
+                ->whereKey($payment->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $locked->loadMissing(['company', 'journalEntry']);
+
+            $identifier = (string) ($locked->number ?? $locked->getKey());
+
+            // Only Posted and Cancelled exist; a non-posted payment is an already-cancelled one.
+            if ($locked->status !== PaymentStatus::Posted) {
+                throw PaymentCannotBeCancelled::alreadyCancelled($identifier);
+            }
+
+            $entry = $locked->journalEntry;
+
+            // Two companies in one workspace share a `tenant_id`, so row level security is satisfied by either
+            // one's entries. Only this comparison stops a reversal landing in a sibling's ledger.
+            if ((string) $entry->company_id !== (string) $locked->company_id) {
+                throw PaymentCannotBeCancelled::outsideCompany($identifier);
+            }
+
+            // Compared to `Posted` explicitly rather than `isPosted()`, which is true of a reversed entry too —
+            // using it would let a second cancel reach `PostingService`, which refuses it with a message about a
+            // journal entry rather than about this payment.
+            if ($entry->status !== JournalEntryStatus::Posted) {
+                throw PaymentCannotBeCancelled::notReversible(
+                    $identifier,
+                    (string) ($entry->number ?? $entry->getKey()),
+                    $entry->status->value,
+                );
+            }
+
+            $reversalDate = CarbonImmutable::now()->startOfDay();
+            $period = $this->calendar->periodFor($locked->company, $reversalDate);
+
+            if (! $period->acceptsPostings()) {
+                throw PaymentCannotBeCancelled::periodNotOpen($period->label, $period->status);
+            }
+
+            // Lock the settled bills in ascending id order (§F1), then restore them — the exact inverse of
+            // `record()` step 16.
+            $allocations = $locked->allocations()->get();
+            $billIds = $allocations->pluck('bill_id')->all();
+
+            /** @var EloquentCollection<int, Bill> $bills */
+            $bills = Bill::query()
+                ->whereKey($billIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            // Allocation amount per bill (unique per bill; summed defensively).
+            $reliefFor = [];
+            foreach ($allocations as $allocation) {
+                $reliefFor[(string) $allocation->bill_id] = bcadd(
+                    $reliefFor[(string) $allocation->bill_id] ?? '0',
+                    $this->assertDecimal($allocation->amount),
+                    Money::SCALE,
+                );
+            }
+
+            // D8: a settled bill that has itself been cancelled cannot be cleanly reversed against. Unreachable
+            // until bill cancellation ships; present so it fails closed when it does.
+            foreach ($bills as $bill) {
+                if ($bill->status === BillStatus::Cancelled) {
+                    throw PaymentCannotBeCancelled::settledBillCancelled((string) ($bill->number ?? $bill->getKey()));
+                }
+            }
+
+            // Reverse the ledger entry — undoes Trade Payables, Bank, WHT Payable and (foreign) the realised FX
+            // line, carrying the transaction-currency overlay onto the mirror (§D).
+            $this->posting->reverse($entry, $reason, $reversalDate, $actor);
+
+            // Restore each bill: amount_paid down, amount_due up, status recomputed from what remains paid (D2).
+            foreach ($bills as $bill) {
+                $paid = bcsub($bill->amount_paid, $reliefFor[(string) $bill->getKey()], Money::SCALE);
+                $due = bcsub($bill->total, $paid, Money::SCALE);
+
+                $bill->amount_paid = $paid;
+                $bill->amount_due = $due;
+                $bill->status = bccomp($paid, '0', Money::SCALE) === 0
+                    ? BillStatus::Posted
+                    : BillStatus::PartiallyPaid;
+                $bill->save();
+            }
+
+            // The one update the freeze trigger permits: status → cancelled, writing the metadata alongside it
+            // (the cancellation-matches-status CHECK requires the date and reason in the same update). Allocations
+            // are left untouched — they are the historical record (D3).
+            $locked->status = PaymentStatus::Cancelled;
+            $locked->cancelled_at = now();
+            $locked->cancellation_reason = $reason;
+            $locked->cancelled_by_id = $actor?->getKey();
+            $locked->save();
+
+            return $locked->refresh();
         });
     }
 

@@ -19,6 +19,10 @@ use Asids\Core\Purchasing\Domain\Models\SupplierPayment;
  * yet — and company membership is validated by `PaymentService` against the target company, exactly as
  * `BillPolicy::create` checks only the permission and the service validates the company. `view()` checks
  * permission AND membership: two different questions, both of which must be true.
+ *
+ * `cancel()` (Wave 8c, ADR 0023 §E3) is the second sensitive capability — reversing a posted payment and
+ * restoring its bills. Like `view()` it checks permission AND membership, because a real payment is in hand.
+ * An advisory status check is left to the service, which is the authority (mirror `JournalEntryPolicy`).
  */
 final class PaymentPolicy
 {
@@ -39,5 +43,14 @@ final class PaymentPolicy
     public function create(User $user): bool
     {
         return $user->can('purchasing.payments.post');
+    }
+
+    /**
+     * Cancelling a posted payment — reversing its ledger entry and restoring the bills it settled.
+     */
+    public function cancel(User $user, SupplierPayment $payment): bool
+    {
+        return $user->can('purchasing.payments.cancel')
+            && $user->canAccessCompany($payment->company_id);
     }
 }

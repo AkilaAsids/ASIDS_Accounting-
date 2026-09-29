@@ -1,6 +1,6 @@
 # ADR 0023 — Supplier payment cancellation (Wave 8c)
 
-- **Status:** Gate 2 — PROPOSED (awaiting human approval)
+- **Status:** Gate 2 — APPROVED 2026-09-29
 - **Date:** 2026-09-29
 - **Requirements:** `docs/PHASE-5-PAYMENT-CANCELLATION-REQUIREMENTS.md` (Gate 1 — APPROVED 2026-09-29)
 - **Branch:** `feature/phase5-payment-cancellation`, stacked on `feature/phase6-fx-purchasing` (Gate-1 dec. D7)
@@ -156,3 +156,12 @@ Feature tests under `tests/Feature/Purchasing/CancelPaymentTest.php` + schema/mu
 4. **§F — the `PaymentCannotBeCancelled` problem codes** as listed.
 
 *Prepared for Gate 2. Build begins only after the human approves this ADR.*
+
+## Gate 2 decision — APPROVED 2026-09-29
+
+- **§D — APPROVED:** extend the shared `PostingService::reverse()` to carry the FX overlay onto mirrored lines (inert when NULL; base-path reversals unchanged). Full FX regression (Purchasing + Accounting + Sales) is part of the acceptance bar.
+- **§A2 — APPROVED:** `cancelled_by_id` FK `ON DELETE SET NULL`.
+- **§E2 — APPROVED:** `purchasing.payments.cancel` granted to accountant, owner, admin.
+- **§F — APPROVED:** `PaymentCannotBeCancelled` problem codes as listed.
+
+Build proceeds test-first through the §G stages. Autonomy runs to the PR (independent QA + Security gates first); Gate 3 / production remains a separate human approval.

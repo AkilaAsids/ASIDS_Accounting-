@@ -303,6 +303,9 @@ final class PermissionCatalogue
             // out and commits it to the ledger in one step (there is no draft to hold, dec. 5), and it cannot
             // be taken back except by a cancellation.
             new PermissionDefinition('purchasing', 'payments', 'post', 'Record and post payments', 'Record a supplier payment and commit it to the ledger.', sensitive: true, sortOrder: 70),
+            // Sensitive and separate from posting (ADR 0023 §E): cancelling reverses a posted payment and
+            // restores the settled bills — altering posted history, exactly like `accounting.journals.reverse`.
+            new PermissionDefinition('purchasing', 'payments', 'cancel', 'Cancel payments', 'Cancel a posted supplier payment, reversing its ledger entry and restoring the bills it settled.', sensitive: true, sortOrder: 80),
         ];
     }
 
