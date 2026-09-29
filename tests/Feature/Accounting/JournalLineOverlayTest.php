@@ -121,6 +121,40 @@ describe('the foreign-currency overlay', function (): void {
         }
     });
 
+    it('carries the overlay onto the mirror lines when a foreign entry is reversed (ADR 0023 §D)', function (): void {
+        $entry = $this->posting->postNew($this->company, new JournalEntryData(
+            entryDate: CarbonImmutable::parse('2026-06-15'),
+            description: 'Foreign JV',
+            lines: [
+                new JournalLineData(
+                    accountId: (string) $this->expense->getKey(),
+                    debit: Money::of('300000.00', 'LKR'),
+                    foreign: new ForeignAmount(Money::of('1000.00', 'USD'), '300.0000000000'),
+                ),
+                new JournalLineData(accountId: (string) $this->payable->getKey(), credit: Money::of('300000.00', 'LKR')),
+            ],
+            documentType: DocumentType::JournalVoucher,
+        ), $this->owner);
+
+        $reversal = $this->posting->reverse($entry, 'a correction', CarbonImmutable::parse('2026-06-16'), $this->owner);
+
+        $lines = DB::table('journal_lines')->where('journal_entry_id', $reversal->getKey())->get()->keyBy('account_id');
+
+        // The reversed foreign line keeps its transaction-currency overlay, with the base side swapped
+        // (originally a debit, now a credit) — so a currency report sees the reversal, not just the original.
+        $fx = $lines[$this->expense->getKey()];
+        expect($fx->transaction_currency_code)->toBe('USD')
+            ->and((float) $fx->transaction_amount)->toBe(1000.0)
+            ->and((float) $fx->exchange_rate)->toBe(300.0)
+            ->and((float) $fx->credit)->toBe(300000.0);
+
+        // The base line stays NULL on the reversal, exactly as it was on the original.
+        $base = $lines[$this->payable->getKey()];
+        expect($base->transaction_currency_code)->toBeNull()
+            ->and($base->transaction_amount)->toBeNull()
+            ->and($base->exchange_rate)->toBeNull();
+    });
+
     it('still refuses an unbalanced base entry (the balance machinery is unaffected by the overlay)', function (): void {
         $exception = catchPlatformException(fn () => $this->posting->postNew($this->company, new JournalEntryData(
             entryDate: CarbonImmutable::parse('2026-06-15'),

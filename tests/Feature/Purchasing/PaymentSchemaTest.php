@@ -173,18 +173,20 @@ describe('the table shape', function (): void {
         ]))->toBeTrue();
     });
 
-    it('has no bill-shaped fields, no soft delete, and no cancellation columns this wave', function (): void {
+    it('has no bill-shaped fields and no soft delete', function (): void {
         // No supplier invoice number, no lines-derived totals, no due date — a payment has no lines and no tax
         // (Gate-1 dec. 6). No soft delete (never soft-deleted; hard-deletion is refused by the trigger, §A5).
-        // Cancellation columns arrive with the cancellation slice, exactly as bills deferred theirs.
         expect(Schema::hasColumn('supplier_payments', 'supplier_invoice_number'))->toBeFalse()
             ->and(Schema::hasColumn('supplier_payments', 'due_date'))->toBeFalse()
             ->and(Schema::hasColumn('supplier_payments', 'subtotal'))->toBeFalse()
             ->and(Schema::hasColumn('supplier_payments', 'tax_total'))->toBeFalse()
-            ->and(Schema::hasColumn('supplier_payments', 'deleted_at'))->toBeFalse()
-            ->and(Schema::hasColumn('supplier_payments', 'cancelled_at'))->toBeFalse()
-            ->and(Schema::hasColumn('supplier_payments', 'cancellation_reason'))->toBeFalse()
-            ->and(Schema::hasColumn('supplier_payments', 'cancelled_by_id'))->toBeFalse();
+            ->and(Schema::hasColumn('supplier_payments', 'deleted_at'))->toBeFalse();
+    });
+
+    it('carries the cancellation columns (ADR 0023 §A2)', function (): void {
+        expect(Schema::hasColumns('supplier_payments', [
+            'cancelled_at', 'cancellation_reason', 'cancelled_by_id',
+        ]))->toBeTrue();
     });
 
     it('carries the allocation columns', function (): void {
@@ -238,7 +240,9 @@ describe('the check constraints exist', function (): void {
             ->and($checks)->not->toContain('supplier_payments_single_currency_until_fx_phase')
             ->and($checks)->toContain('supplier_payments_exchange_rate_positive_check')
             // The FX phase also makes the DB the authority on the currency's ISO shape, now that the caller names it.
-            ->and($checks)->toContain('supplier_payments_currency_shape_check');
+            ->and($checks)->toContain('supplier_payments_currency_shape_check')
+            // Wave 8c (ADR 0023 §A) ties the cancellation metadata to the status.
+            ->and($checks)->toContain('supplier_payments_cancellation_matches_status_check');
     });
 
     it('declares the payment_allocations CHECK', function (): void {
@@ -272,11 +276,27 @@ describe('the status CHECK', function (): void {
             ->toThrow(QueryException::class);
     });
 
-    it('accepts the reserved cancelled status even though nothing sets it this wave', function (): void {
-        // Reserved from the start (dec. 8), exactly as bills reserved partially_paid/paid two waves early.
-        insertPayment(['status' => 'cancelled']);
+    it('accepts a cancelled payment carrying its cancellation metadata (ADR 0023 §A)', function (): void {
+        // Wave 8c gives the reserved cancelled status behaviour: a cancelled row must carry its date and reason.
+        insertPayment(['status' => 'cancelled', 'cancelled_at' => now(), 'cancellation_reason' => 'recorded in error']);
 
         expect(DB::table('supplier_payments')->where('status', 'cancelled')->count())->toBe(1);
+    });
+});
+
+describe('the cancellation-matches-status CHECK (ADR 0023 §A)', function (): void {
+    it('refuses a cancelled payment with no reason', function (): void {
+        insertPayment();
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['status' => 'cancelled', 'cancelled_at' => now()])))
+            ->toThrow(QueryException::class);
+    });
+
+    it('refuses a posted payment that carries cancellation metadata', function (): void {
+        insertPayment();
+
+        expect(fn () => DB::transaction(fn () => insertPayment(['cancellation_reason' => 'should not be here'])))
+            ->toThrow(QueryException::class);
     });
 });
 
@@ -639,17 +659,20 @@ describe('a posted payment is frozen', function (): void {
             ->toThrow(QueryException::class);
     });
 
-    it('permits the reserved cancelled transition mechanically, even though nothing sets it this wave', function (): void {
-        // `status` is deliberately absent from the trigger's frozen-column list (mirror bills), so this one
-        // column may move — the mechanism the cancellation slice will use, exercised here as a schema-level
-        // fact only (dec. 8). Nothing in the 8a application code ever sets this.
-        DB::table('supplier_payments')->where('id', $this->paymentId)->update(['status' => 'cancelled', 'updated_at' => now()]);
+    it('permits the posted → cancelled transition, writing the cancellation metadata alongside it (ADR 0023)', function (): void {
+        // `status` is deliberately absent from the trigger's frozen list (mirror bills), so it may move — and the
+        // cancellation-matches-status CHECK requires the date and reason to be set in the same update.
+        DB::table('supplier_payments')->where('id', $this->paymentId)->update([
+            'status' => 'cancelled', 'cancelled_at' => now(), 'cancellation_reason' => 'recorded in error', 'updated_at' => now(),
+        ]);
 
         expect(DB::table('supplier_payments')->where('id', $this->paymentId)->value('status'))->toBe('cancelled');
     });
 
     it('refuses any further change once cancelled', function (): void {
-        DB::table('supplier_payments')->where('id', $this->paymentId)->update(['status' => 'cancelled', 'updated_at' => now()]);
+        DB::table('supplier_payments')->where('id', $this->paymentId)->update([
+            'status' => 'cancelled', 'cancelled_at' => now(), 'cancellation_reason' => 'recorded in error', 'updated_at' => now(),
+        ]);
 
         expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->where('id', $this->paymentId)->update(['notes' => 'too late'])))
             ->toThrow(QueryException::class);

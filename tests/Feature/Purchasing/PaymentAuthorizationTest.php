@@ -38,11 +38,9 @@ use Illuminate\Support\Facades\Gate;
  * membership is validated by `PaymentService` against the target company, exactly as `BillPolicy::create`
  * checks only the permission.
  *
- * No `purchasing.payments.cancel` this wave — cancellation is deferred, and the catalogue rule is "only add a
- * capability when the code that checks it exists".
- *
- * RED expectation before Stage 5 lands: the `purchasing.payments.*` permissions, the role grants and
- * `PaymentPolicy` do not exist.
+ * Wave 8c adds `purchasing.payments.cancel` — the sensitive capability that reverses a posted payment — now
+ * that `PaymentService::cancel()` exists to check it (ADR 0023 §E). It is granted to exactly the roles that hold
+ * `post` (administrator, accountant; owner implicitly).
  */
 beforeEach(function (): void {
     $this->acme = $this->createWorkspace('acme');
@@ -96,7 +94,7 @@ function paymentMemberWithRole(string $role, string $email): User
 }
 
 describe('the permission catalogue', function (): void {
-    it('declares the two payment capabilities, no draft and no cancel', function (): void {
+    it('declares the payment capabilities: view, post and cancel — no draft', function (): void {
         $names = array_map(
             static fn (object $definition): string => $definition->name(),
             PermissionCatalogue::all(),
@@ -104,14 +102,15 @@ describe('the permission catalogue', function (): void {
 
         expect($names)->toContain('purchasing.payments.view')
             ->and($names)->toContain('purchasing.payments.post')
-            // Record-and-post is one step (dec. 5) — no draft. Cancellation deferred (dec. 8). WHT (Wave 8b)
-            // reuses `payments.post` and adds NO capability of its own (ADR 0021 §C4) — the scope-creep guard.
+            // Wave 8c adds cancel now that the code checking it exists (ADR 0023 §E).
+            ->and($names)->toContain('purchasing.payments.cancel')
+            // Record-and-post is one step (dec. 5) — no draft. WHT (Wave 8b) reuses `payments.post` and adds NO
+            // capability of its own (ADR 0021 §C4) — the scope-creep guard.
             ->and($names)->not->toContain('purchasing.payments.draft')
-            ->and($names)->not->toContain('purchasing.payments.cancel')
             ->and($names)->not->toContain('purchasing.payments.wht');
     });
 
-    it('marks posting sensitive, and viewing not', function (): void {
+    it('marks posting and cancelling sensitive, and viewing not', function (): void {
         $definitions = [];
 
         foreach (PermissionCatalogue::all() as $definition) {
@@ -119,7 +118,8 @@ describe('the permission catalogue', function (): void {
         }
 
         expect($definitions['purchasing.payments.view']->sensitive)->toBeFalse()
-            ->and($definitions['purchasing.payments.post']->sensitive)->toBeTrue();
+            ->and($definitions['purchasing.payments.post']->sensitive)->toBeTrue()
+            ->and($definitions['purchasing.payments.cancel']->sensitive)->toBeTrue();
     });
 
     it('orders the payment capabilities after the bill ones in the purchasing group', function (): void {
@@ -129,20 +129,22 @@ describe('the permission catalogue', function (): void {
             $definitions[$definition->name()] = $definition;
         }
 
-        // suppliers 10/20, bills 30/40/50; payments continue 60/70 (ADR §E1).
+        // suppliers 10/20, bills 30/40/50; payments continue 60/70/80 (ADR §E1, 0023 §E).
         expect($definitions['purchasing.payments.view']->sortOrder)->toBe(60)
-            ->and($definitions['purchasing.payments.post']->sortOrder)->toBe(70);
+            ->and($definitions['purchasing.payments.post']->sortOrder)->toBe(70)
+            ->and($definitions['purchasing.payments.cancel']->sortOrder)->toBe(80);
     });
 });
 
 describe('role grants', function (): void {
-    it('gives the accountant both capabilities', function (): void {
+    it('gives the accountant view, post and cancel', function (): void {
         $template = collect(RoleTemplate::all())->firstOrFail(
             static fn (RoleTemplate $t): bool => $t->name === 'accountant',
         );
 
         expect($template->permissions)->toContain('purchasing.payments.view')
-            ->and($template->permissions)->toContain('purchasing.payments.post');
+            ->and($template->permissions)->toContain('purchasing.payments.post')
+            ->and($template->permissions)->toContain('purchasing.payments.cancel');
     });
 
     it('lets the bookkeeper view but not post', function (): void {
@@ -185,15 +187,28 @@ describe('role grants', function (): void {
         // Narrower than viewing by exactly the bookkeeper and viewer — the money-moving action.
         expect($posting)->toBe(['administrator', 'accountant']);
     });
+
+    it('grants cancelling to exactly the administrator and accountant', function (): void {
+        $cancelling = collect(RoleTemplate::all())
+            ->reject(static fn (RoleTemplate $t): bool => $t->isOwner)
+            ->filter(static fn (RoleTemplate $t): bool => in_array('purchasing.payments.cancel', $t->permissions, true))
+            ->map(static fn (RoleTemplate $t): string => $t->name)
+            ->values()
+            ->all();
+
+        // The same reversing-posted-history authority as posting — held by exactly the roles that hold post.
+        expect($cancelling)->toBe(['administrator', 'accountant']);
+    });
 });
 
 describe('the accountant', function (): void {
-    it('may read and post (record)', function (): void {
+    it('may read, post (record) and cancel', function (): void {
         $accountant = paymentMemberWithRole('accountant', 'pay-acct@acme.test');
 
         expect($accountant->can('viewAny', SupplierPayment::class))->toBeTrue()
             ->and($accountant->can('view', $this->payment))->toBeTrue()
-            ->and($accountant->can('create', SupplierPayment::class))->toBeTrue();
+            ->and($accountant->can('create', SupplierPayment::class))->toBeTrue()
+            ->and($accountant->can('cancel', $this->payment))->toBeTrue();
     });
 });
 
@@ -203,7 +218,8 @@ describe('the bookkeeper', function (): void {
 
         expect($bookkeeper->can('viewAny', SupplierPayment::class))->toBeTrue()
             ->and($bookkeeper->can('view', $this->payment))->toBeTrue()
-            ->and($bookkeeper->can('create', SupplierPayment::class))->toBeFalse();
+            ->and($bookkeeper->can('create', SupplierPayment::class))->toBeFalse()
+            ->and($bookkeeper->can('cancel', $this->payment))->toBeFalse();
     });
 });
 
@@ -213,7 +229,8 @@ describe('the viewer', function (): void {
 
         expect($viewer->can('view', $this->payment))->toBeTrue()
             ->and($viewer->can('viewAny', SupplierPayment::class))->toBeTrue()
-            ->and($viewer->can('create', SupplierPayment::class))->toBeFalse();
+            ->and($viewer->can('create', SupplierPayment::class))->toBeFalse()
+            ->and($viewer->can('cancel', $this->payment))->toBeFalse();
     });
 });
 
@@ -222,8 +239,9 @@ describe('company and tenant boundaries', function (): void {
         $outsider = $this->createUserWithRole($this->acme['tenant'], 'accountant', ['email' => 'pay-out@acme.test']);
         $fresh = RowLevelSecurity::bypass(static fn () => $outsider->fresh());
 
-        // Permission and membership are different questions and the policy asks both on `view`.
-        expect($fresh->can('view', $this->payment))->toBeFalse();
+        // Permission and membership are different questions and the policy asks both on `view` and `cancel`.
+        expect($fresh->can('view', $this->payment))->toBeFalse()
+            ->and($fresh->can('cancel', $this->payment))->toBeFalse();
     });
 
     it('refuses a member of a sibling company in the same workspace', function (): void {
@@ -234,14 +252,16 @@ describe('company and tenant boundaries', function (): void {
         $fresh = RowLevelSecurity::bypass(static fn () => $user->fresh());
 
         // Row level security cannot make this distinction — both companies share a tenant — so only the policy does.
-        expect($fresh->can('view', $this->payment))->toBeFalse();
+        expect($fresh->can('view', $this->payment))->toBeFalse()
+            ->and($fresh->can('cancel', $this->payment))->toBeFalse();
     });
 
     it('still allows the owner everything through the Gate::before short circuit', function (): void {
         $owner = RowLevelSecurity::bypass(fn () => $this->owner->fresh());
 
         expect($owner->can('view', $this->payment))->toBeTrue()
-            ->and($owner->can('create', SupplierPayment::class))->toBeTrue();
+            ->and($owner->can('create', SupplierPayment::class))->toBeTrue()
+            ->and($owner->can('cancel', $this->payment))->toBeTrue();
     });
 });
 

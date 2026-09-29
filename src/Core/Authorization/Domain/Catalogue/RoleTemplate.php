@@ -125,9 +125,11 @@ final readonly class RoleTemplate
 
                     // Supplier payments, the settlement side of bills. Record-and-post is one step (no draft),
                     // so the accountant — the side of the split that commits money to the ledger — holds both
-                    // `view` and the sensitive `post`.
+                    // `view` and the sensitive `post`, and the equally sensitive `cancel` that reverses one
+                    // (ADR 0023 §E2; owner holds every capability implicitly).
                     'purchasing.payments.view',
                     'purchasing.payments.post',
+                    'purchasing.payments.cancel',
 
                     // The receivables reports, for the same reason as `accounting.reports.view` above:
                     // whoever decides a customer's credit terms is who needs to see what that decision has

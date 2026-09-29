@@ -306,18 +306,22 @@ describe('the PaymentAllocation model', function (): void {
     });
 });
 
-describe('a payment forced to cancelled (schema-level fact, no service uses this yet)', function (): void {
+describe('a cancelled payment', function (): void {
     it('casts a cancelled payment correctly', function (): void {
         $payment = modelPayment(['number' => 'PAY-CANCEL-1']);
 
-        // The one column the freeze trigger permits to move on its own (§A5) — reached with raw SQL since no
-        // 8a service ever sets it.
-        DB::table('supplier_payments')->where('id', $payment->getKey())->update(['status' => 'cancelled', 'updated_at' => now()]);
+        // The posted → cancelled transition the freeze trigger permits (§A5), writing the cancellation metadata
+        // the CHECK requires alongside the status (Wave 8c, ADR 0023).
+        DB::table('supplier_payments')->where('id', $payment->getKey())->update([
+            'status' => 'cancelled', 'cancelled_at' => now(), 'cancellation_reason' => 'recorded in error', 'updated_at' => now(),
+        ]);
 
         $fresh = $payment->fresh();
 
         expect($fresh->status)->toBe(PaymentStatus::Cancelled)
             ->and($fresh->status->isCancelled())->toBeTrue()
-            ->and($fresh->status->isPosted())->toBeFalse();
+            ->and($fresh->status->isPosted())->toBeFalse()
+            ->and($fresh->cancellation_reason)->toBe('recorded in error')
+            ->and($fresh->cancelled_at)->not->toBeNull();
     });
 });

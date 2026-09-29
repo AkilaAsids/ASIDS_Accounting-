@@ -238,6 +238,19 @@ describe('the supplier_payments CHECK negatives are non-vacuous', function (): v
         expect(DB::table('supplier_payments')->where('currency_code', 'usd')->count())->toBe(1);
     });
 
+    it('the cancellation-matches-status CHECK is the only thing rejecting a cancelled row with no reason', function (): void {
+        expect(paymentCheckConstraintPresent('supplier_payments_cancellation_matches_status_check'))->toBeTrue();
+
+        DB::statement('ALTER TABLE supplier_payments DROP CONSTRAINT supplier_payments_cancellation_matches_status_check');
+
+        // A cancelled row with no cancelled_at/reason is otherwise well-formed — only the cancellation-matches
+        // CHECK could object (the status CHECK still admits 'cancelled').
+        expect(fn () => DB::transaction(fn () => DB::table('supplier_payments')->insert(checkMutationPaymentRow(['status' => 'cancelled']))))
+            ->not->toThrow(QueryException::class);
+
+        expect(DB::table('supplier_payments')->where('status', 'cancelled')->count())->toBe(1);
+    });
+
     it('the wht-within-amount CHECK is the only thing rejecting wht_amount > amount (ADR 0021 §A3)', function (): void {
         expect(paymentCheckConstraintPresent('supplier_payments_wht_within_amount_check'))->toBeTrue();
 

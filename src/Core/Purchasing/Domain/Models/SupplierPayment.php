@@ -57,6 +57,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $journal_entry_id
  * @property CarbonImmutable $posted_at
  * @property string|null $posted_by_id
+ * @property CarbonImmutable|null $cancelled_at
+ * @property string|null $cancellation_reason
+ * @property string|null $cancelled_by_id
  * @property string|null $created_by_id
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -167,6 +170,17 @@ final class SupplierPayment extends Model
         return $this->belongsTo(User::class, 'created_by_id');
     }
 
+    /**
+     * Who cancelled the payment, when one was cancelled by a person (ADR 0023 §A2). Null for a live payment
+     * or a system-driven cancellation.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function cancelledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by_id');
+    }
+
     public function amountMoney(): Money
     {
         return Money::of($this->amount, $this->currency_code);
@@ -221,6 +235,7 @@ final class SupplierPayment extends Model
             'status' => PaymentStatus::class,
             'payment_date' => 'immutable_date',
             'posted_at' => 'immutable_datetime',
+            'cancelled_at' => 'immutable_datetime',
             'exchange_rate' => 'decimal:10',
             'amount' => 'decimal:4',
             'wht_amount' => 'decimal:4',

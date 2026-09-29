@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Asids\Core\Accounting\Application\Services;
 
+use Asids\Core\Accounting\Application\DTOs\ForeignAmount;
 use Asids\Core\Accounting\Application\DTOs\JournalEntryData;
 use Asids\Core\Accounting\Application\DTOs\JournalLineData;
 use Asids\Core\Accounting\Domain\Enums\DocumentType;
@@ -134,7 +135,9 @@ final readonly class PostingService
 
         // Every line, with its sides swapped. The amounts are copied rather than recomputed, so the
         // reversal is exact by construction — a recomputation could round differently and leave a
-        // residue behind.
+        // residue behind. A foreign line carries its transaction-currency overlay through to the mirror
+        // (ADR 0023 §D): the base sides swap, but the transaction face is the same, so a currency report
+        // sees the reversal as well as the original. A base line has no overlay and stays base-only.
         $mirrored = array_map(
             static fn (JournalLine $line): JournalLineData => new JournalLineData(
                 accountId: $line->account_id,
@@ -142,6 +145,12 @@ final readonly class PostingService
                 credit: $line->isDebit() ? $line->debitMoney($currency) : null,
                 branchId: $line->branch_id,
                 description: $line->description,
+                foreign: $line->isForeignCurrency()
+                    ? new ForeignAmount(
+                        Money::of((string) $line->transaction_amount, (string) $line->transaction_currency_code),
+                        (string) $line->exchange_rate,
+                    )
+                    : null,
             ),
             $lines,
         );
