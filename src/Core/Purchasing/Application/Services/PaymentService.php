@@ -434,6 +434,12 @@ final readonly class PaymentService
             throw PaymentCannotBeCancelled::reasonRequired();
         }
 
+        // The reason flows into `journal_entries.reversal_reason` (255) before the payment's own column (500), so
+        // 255 is the effective cap — guard it here for a readable refusal rather than a raw column-length error.
+        if (mb_strlen($reason) > 255) {
+            throw PaymentCannotBeCancelled::reasonTooLong(255);
+        }
+
         return DB::transaction(function () use ($payment, $reason, $actor): SupplierPayment {
             // Locked before anything is read, so a concurrent cancel queues here rather than racing to the
             // trigger. Re-read through the lock: the in-memory instance may predate another request's work.
@@ -498,6 +504,16 @@ final readonly class PaymentService
                     $this->assertDecimal($allocation->amount),
                     Money::SCALE,
                 );
+            }
+
+            // Every allocated bill must have been locked. Unreachable — a posted bill cannot be hard-deleted
+            // (its immutability trigger refuses it) and the allocations are same-tenant/same-company — but
+            // asserted so a silently-skipped bill (ledger reversed, bill left un-restored) can never pass
+            // unnoticed, mirroring `record()`'s re-validation of every locked bill.
+            foreach (array_keys($reliefFor) as $billId) {
+                if (! $bills->has($billId)) {
+                    throw new LogicException('A bill this payment settled could not be locked for cancellation: '.$billId);
+                }
             }
 
             // D8: a settled bill that has itself been cancelled cannot be cleanly reversed against. Unreachable

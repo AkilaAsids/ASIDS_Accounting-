@@ -165,3 +165,13 @@ Feature tests under `tests/Feature/Purchasing/CancelPaymentTest.php` + schema/mu
 - **§F — APPROVED:** `PaymentCannotBeCancelled` problem codes as listed.
 
 Build proceeds test-first through the §G stages. Autonomy runs to the PR (independent QA + Security gates first); Gate 3 / production remains a separate human approval.
+
+## Gate 2 — as-built amendments (ratified 2026-09-29)
+
+Two places where the build refined this ADR. Neither changes a Gate-1/Gate-2 decision or a guaranteed behaviour, so they are ratified here in place rather than re-opened; both were confirmed clean by the independent Security and QA reviews.
+
+- **§A3 superseded — the freeze trigger is NOT extended.** §A3 proposed adding the three metadata columns to `asids_supplier_payments_immutable()`'s frozen-by-name list, guarded to skip the cancelling transition. In build this proved to be dead code: the payment freeze already refuses *every* update whose `NEW.status <> 'cancelled'` and *every* update once `OLD.status = 'cancelled'` (`2026_09_09_000004…:33-41`), so the only update that can touch the new columns is the one posted→cancelled transition. The columns are therefore deliberately left OUT of the frozen list (a column in that list may never change on any permitted update — but these must change on the cancelling one), and the conditional-immutability guarantee (AC-2.2) is delivered by that existing status gate plus the new `supplier_payments_cancellation_matches_status_check`. This is a deliberate, documented divergence from the sales precedent, whose freeze permits issued→issued updates and so genuinely needs the extra guard. Verified by the schema + mutation tests and by Security.
+
+- **§B — the `SupplierPaymentCancelled` domain event is deferred.** §B mentioned emitting one "for future projections; no listeners this wave." No purchasing service emits a domain event today (`record()` included), so emitting one only here would be inconsistent and unused; the ledger reversal already dispatches `JournalEntryReversed`, which is the observable signal. Deferred until a listener exists.
+
+- **Two robustness additions (within intent).** `cancel()` also refuses a reason longer than 255 chars (`cancellation-reason-too-long`) — it flows into `journal_entries.reversal_reason` (255) first, so this turns a raw column-length error into a readable refusal; and it asserts every allocated bill was locked before restoring (a `LogicException` on the unreachable skip), mirroring `record()`'s re-validation of every locked bill.

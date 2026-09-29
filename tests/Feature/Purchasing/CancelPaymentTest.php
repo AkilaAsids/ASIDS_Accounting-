@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 use Asids\Core\Accounting\Application\Services\ChartTemplateService;
 use Asids\Core\Accounting\Application\Services\FiscalCalendarService;
+use Asids\Core\Accounting\Application\Services\PostingService;
 use Asids\Core\Accounting\Domain\Enums\JournalEntryStatus;
+use Asids\Core\Accounting\Domain\Enums\PeriodStatus;
 use Asids\Core\Accounting\Domain\Models\Account;
+use Asids\Core\Accounting\Domain\Models\FiscalPeriod;
 use Asids\Core\Accounting\Domain\Models\JournalEntry;
+use Asids\Core\Organization\Application\DTOs\CreateCompanyData;
+use Asids\Core\Organization\Application\Services\CompanyService;
 use Asids\Core\Purchasing\Application\DTOs\BillData;
 use Asids\Core\Purchasing\Application\DTOs\BillLineData;
 use Asids\Core\Purchasing\Application\DTOs\PaymentAllocationData;
@@ -21,6 +26,7 @@ use Asids\Core\Purchasing\Domain\Exceptions\PaymentCannotBeCancelled;
 use Asids\Core\Purchasing\Domain\Models\Bill;
 use Asids\Core\Purchasing\Domain\Models\Supplier;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -293,5 +299,125 @@ describe('the cancellation guards (ADR 0023 §B, §F)', function (): void {
         // Nothing changed — still posted, bill still paid.
         expect($payment->fresh()->status)->toBe(PaymentStatus::Posted)
             ->and($bill->fresh()->status)->toBe(BillStatus::Paid);
+    });
+
+    it('refuses a reason longer than the ledger can store, and writes nothing', function (): void {
+        $bill = cpBill('1000.00');
+        $payment = $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+        ), $this->owner);
+
+        $exception = catchPlatformException(fn () => $this->payments->cancel($payment, str_repeat('x', 256), $this->owner));
+        expect($exception)->toBeInstanceOf(PaymentCannotBeCancelled::class)
+            ->and($exception->problemCode())->toBe('cancellation-reason-too-long');
+
+        expect($payment->fresh()->status)->toBe(PaymentStatus::Posted)
+            ->and(JournalEntry::query()->whereNotNull('reverses_entry_id')->count())->toBe(0);
+    });
+
+    it('refuses when the period the reversal would land in is closed, and writes nothing (D1)', function (): void {
+        $bill = cpBill('1000.00');
+        $payment = $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+        ), $this->owner);
+
+        // The reversal posts into TODAY's period, not the payment's — so it is today's period the guard checks
+        // (Gate-1 dec. D1). Close it directly (closed_at moves with the status per fiscal_periods_closed_check).
+        FiscalPeriod::query()->forCompany($this->company->getKey())
+            ->containing(CarbonImmutable::now())
+            ->update(['status' => PeriodStatus::Closed->value, 'closed_at' => now()]);
+
+        $exception = catchPlatformException(fn () => $this->payments->cancel($payment, 'too late', $this->owner));
+
+        expect($exception)->toBeInstanceOf(PaymentCannotBeCancelled::class)
+            ->and($exception->problemCode())->toBe('payment-cancel-period-not-open')
+            // The refusal cost nothing (R4): no reversal written, payment still posted, bill still paid.
+            ->and(JournalEntry::query()->whereNotNull('reverses_entry_id')->count())->toBe(0)
+            ->and($payment->fresh()->status)->toBe(PaymentStatus::Posted)
+            ->and($bill->fresh()->status)->toBe(BillStatus::Paid);
+    });
+
+    it('refuses when the payment’s ledger entry belongs to a different company', function (): void {
+        $bill = cpBill('1000.00');
+        $payment = $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+        ), $this->owner);
+
+        // A sibling company in the same workspace. RLS is satisfied by either (shared tenant), so only the
+        // service's explicit company comparison refuses a reversal that would land in the sibling's ledger.
+        $sibling = app(CompanyService::class)->create(new CreateCompanyData(name: 'Sibling Books'), $this->owner);
+
+        // The entry's company is frozen by its immutability trigger; disable it only to plant this cross-company
+        // state the service must then refuse (the entry is a posted record, so there is no legitimate path here).
+        DB::statement('ALTER TABLE journal_entries DISABLE TRIGGER journal_entries_immutable');
+        try {
+            DB::table('journal_entries')->where('id', $payment->journal_entry_id)
+                ->update(['company_id' => $sibling->getKey()]);
+        } finally {
+            DB::statement('ALTER TABLE journal_entries ENABLE TRIGGER journal_entries_immutable');
+        }
+
+        $exception = catchPlatformException(fn () => $this->payments->cancel($payment->fresh(), 'wrong company', $this->owner));
+        expect($exception)->toBeInstanceOf(PaymentCannotBeCancelled::class)
+            ->and($exception->problemCode())->toBe('payment-outside-company');
+    });
+
+    it('refuses when the ledger entry has already been reversed', function (): void {
+        $bill = cpBill('1000.00');
+        $payment = $this->payments->record($this->company, new PaymentData(
+            supplierId: (string) $this->supplier->getKey(),
+            bankAccountId: (string) $this->bank->getKey(),
+            paymentDate: CarbonImmutable::parse('2026-06-15'),
+            amount: '1000.00',
+            allocations: [new PaymentAllocationData(billId: (string) $bill->getKey(), amount: '1000.00')],
+        ), $this->owner);
+
+        // Reversed directly in Accounting, leaving the payment still marked posted — the state a partially
+        // applied cancellation would leave behind.
+        app(PostingService::class)->reverse(
+            JournalEntry::query()->findOrFail($payment->journal_entry_id),
+            'reversed outside purchasing',
+            CarbonImmutable::parse('2026-06-20'),
+            $this->owner,
+        );
+
+        $exception = catchPlatformException(fn () => $this->payments->cancel($payment->fresh(), 'cancel too', $this->owner));
+        expect($exception)->toBeInstanceOf(PaymentCannotBeCancelled::class)
+            ->and($exception->problemCode())->toBe('payment-cancel-not-reversible');
+    });
+});
+
+describe('the database authority behind bill restoration (AC-2.1)', function (): void {
+    // True OS-level concurrency is not reproducible in this single-process RefreshDatabase harness (the same
+    // documented limitation as PaymentAllocationRaceTest). What carries the AC-2.1 "never negative" guarantee is
+    // the database CHECK the service's restoration is layered over: a restore can only reduce amount_paid, and
+    // the DB refuses any value below zero — so even a lost update or a double-cancel bug could not corrupt a bill.
+    it('refuses a raw amount_paid below zero by the exact constraint name', function (): void {
+        $bill = cpBill('1000.00');
+
+        try {
+            DB::transaction(fn () => DB::table('bills')->where('id', $bill->getKey())->update([
+                'amount_paid' => '-1.0000',
+                'amount_due' => '1001.0000',
+                'updated_at' => now(),
+            ]));
+            expect()->fail('a negative amount_paid should have been refused by bills_non_negative_check');
+        } catch (QueryException $exception) {
+            expect($exception->getMessage())->toContain('bills_non_negative_check');
+        }
+
+        expect($bill->fresh()->amount_paid)->toBe('0.0000');
     });
 });

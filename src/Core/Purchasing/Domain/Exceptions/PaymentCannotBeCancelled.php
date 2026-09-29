@@ -42,6 +42,19 @@ final class PaymentCannotBeCancelled extends BusinessRuleViolation
     }
 
     /**
+     * The reason is longer than the ledger can store. It flows into `journal_entries.reversal_reason` (255)
+     * first, so that is the effective cap; guarding here turns a raw column-length error into a readable refusal.
+     */
+    public static function reasonTooLong(int $limit): self
+    {
+        return new self(
+            sprintf('A cancellation reason cannot be longer than %d characters.', $limit),
+            'cancellation-reason-too-long',
+            ['limit' => $limit],
+        );
+    }
+
+    /**
      * The payment belongs to a different company (or does not exist for this one).
      */
     public static function outsideCompany(string $identifier): self
